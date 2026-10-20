@@ -7,7 +7,7 @@ and you can undo all of it. One double-click, a few questions, done.
 
 *Omae wa mou debloated.* Your apps are already asleep. Even after a reboot.
 
-<p align="center"><img src="screenshots/hero.jpg" width="100%" /></p>
+<p align="center"><img src="screenshots/main_1.png" width="100%" /></p>
 <p align="center"><sub>One TV, one home screen, a new wallpaper from Wallhaven every so often. No ads, no "top picks for you".</sub></p>
 
 ## What is this?
