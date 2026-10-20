@@ -7,36 +7,42 @@ and you can undo all of it. One double-click, a few questions, done.
 
 *Omae wa mou debloated.* Your apps are already asleep. Even after a reboot.
 
-<p align="center">
-  <img src="screenshots/home-01.jpg" width="49%" />
-  <img src="screenshots/home-05.jpg" width="49%" />
-  <img src="screenshots/home-06.jpg" width="49%" />
-  <img src="screenshots/home-09.jpg" width="49%" />
-</p>
-<p align="center"><sub>Same TV, same home screen. A new wallpaper from Wallhaven every so often, zero ads, zero "top picks for you".</sub></p>
+<p align="center"><img src="screenshots/hero.jpg" width="100%" /></p>
+<p align="center"><sub>One TV, one home screen, a new wallpaper from Wallhaven every so often. No ads, no "top picks for you".</sub></p>
+
+## What is this?
+
+Google TV and Android TV sets ship with dozens of apps you never asked for: ad rows, viewing trackers, shop demo
+modes, silent app installers. On top of that, every app you install keeps waking up in the background. On a TV
+with 2 GB of memory, that's the lag you feel.
+
+This kit fixes both, and, unlike most debloat guides, keeps it fixed after the TV restarts.
 
 ## What it does
 
-- Switches off the junk your TV came with: tracking, ads, shop demo mode, silent app installers
-- Freezes every app you're not watching, including ones you install later
-- Makes menus feel snappier
-- Puts itself back after every restart, with no PC needed (optional)
-- Gives you a "fresh boot" button on your remote (optional)
-- An ad-free home screen with rotating wallpapers (optional)
-- Everything can be undone with one click
+- **Switches off the junk** your TV came with: ads, tracking, shop demo mode, silent app installers. Switched off,
+  not deleted, so everything can come back.
+- **Keeps apps asleep** when you're not using them, including apps you install later. They open normally when
+  you pick them; they just stop running in the background.
+- **Makes menus feel snappier** (shorter animations).
+- **Survives restarts** (optional): a small helper app on the TV re-applies everything at every startup, no PC needed.
+- **Adds a "fresh boot" button** to your remote (optional): press a spare button twice and every background app
+  goes to sleep, like a restart without the wait.
+- **Gives you an ad-free home screen** with rotating wallpapers (optional).
+- **Undo everything** with one click.
 
 ## Why this one?
 
 Most TV debloat guides switch off some apps, add a new home screen, and stop there.
-Then the TV restarts and quietly undoes half of it: background limits reset, menus slow down again, and wireless debugging switches itself off.
+Then the TV restarts and quietly undoes half of it: apps wake back up, menus slow down again, and the debugging connection the tweaks rely on switches itself off.
 
 | | Typical debloat | This kit |
 |---|---|---|
 | Switches off junk apps | ✅ | ✅ with a risk level for every package, per brand |
 | Keeps apps asleep in the background | ❌ | ✅ every app, even new installs |
 | Still working after a restart | half of it | ✅ the TV re-applies everything itself |
-| Wireless debugging turns itself back on | ❌ | ✅ with ADB Auto Enable |
-| One remote button to make the TV feel freshly restarted | ❌ | ✅ with Key Mapper |
+| The debugging connection comes back by itself after a restart | ❌ | ✅ with ADB Auto Enable |
+| A remote button that clears background apps without restarting | ❌ | ✅ with Key Mapper |
 | Checks the TV after every change and rolls back if something breaks | ❌ | ✅ |
 | No leftover "running" notifications from the helpers | n/a | ✅ hidden automatically |
 
@@ -102,17 +108,21 @@ Only the questions that matter for **your** TV are asked. Not sure? Press Enter 
 
 ## See it work
 
-**It survives a restart.** At the end the wizard restarts the TV and waits for the TV to re-apply everything by
-itself. Then the boot helper's own log on the TV shows it, every single boot:
+**It survives a restart.** The "boot helper" is a tiny script that runs on the TV itself (inside the free
+Termux app) every time the TV starts: it re-applies your settings, puts background apps back to sleep, and closes
+itself. At the end of setup the wizard restarts the TV to prove it works with no PC. Below: that restart test, and
+the helper's own log on the TV (one entry per restart).
 
 <p align="center">
   <img src="screenshots/wizard-restart.jpg" width="49%" />
   <img src="screenshots/boot-helper-log.jpg" width="49%" />
 </p>
 
-**The fresh-boot button.** A [Key Mapper](https://github.com/keymapperorg/KeyMapper) key map: double press any
-spare button, every background app goes to sleep, and the volume bar flashes when it's done. Spare buttons can
-also open apps directly.
+**The fresh-boot button.** [Key Mapper](https://github.com/keymapperorg/KeyMapper) is a free, open-source app that
+lets you change what your remote's buttons do. The wizard installs it and walks you through one key map: press a button you
+never use (a colour button, for example) **twice quickly**, and it runs the same cleanup the TV does at startup.
+Every background app goes to sleep and memory is freed, without restarting. The volume bar flashes when it's done, so you know it
+worked. Spare buttons can also open your favourite apps directly.
 
 <p align="center">
   <img src="screenshots/keymapper-refresh-button.jpg" width="49%" />
@@ -120,8 +130,10 @@ also open apps directly.
 </p>
 
 **The home screen.** [Projectivy Launcher](https://play.google.com/store/apps/details?id=com.spocky.projengmenu)
-with the [Booru Wallpaper Provider](https://github.com/Kurocon/projectivy-booru-wallpaper-provider) plugin
-pointed at [Wallhaven](https://wallhaven.cc).
+is a free home-screen app that replaces the ad-filled one. With the
+[Booru Wallpaper Provider](https://github.com/Kurocon/projectivy-booru-wallpaper-provider) plugin pointed at
+[Wallhaven](https://wallhaven.cc), it shows a new wallpaper every so often. Your Netflix, YouTube and other apps
+stay exactly where you put them.
 
 <p align="center">
   <img src="screenshots/launcher-quick-menu.jpg" width="49%" />
@@ -131,13 +143,13 @@ pointed at [Wallhaven](https://wallhaven.cc).
 </p>
 
 <details>
-<summary><b>More wallpapers</b></summary>
+<summary><b>More wallpapers, full size</b></summary>
 <p align="center">
+  <img src="screenshots/home-01.jpg" width="49%" />
   <img src="screenshots/home-02.jpg" width="49%" />
-  <img src="screenshots/home-03.jpg" width="49%" />
-  <img src="screenshots/home-04.jpg" width="49%" />
+  <img src="screenshots/home-06.jpg" width="49%" />
   <img src="screenshots/home-07.jpg" width="49%" />
-  <img src="screenshots/home-08.jpg" width="49%" />
+  <img src="screenshots/home-09.jpg" width="49%" />
   <img src="screenshots/home-10.jpg" width="49%" />
 </p>
 </details>
@@ -145,10 +157,10 @@ pointed at [Wallhaven](https://wallhaven.cc).
 ## How it keeps you safe
 
 - **Nothing is deleted.** Apps are switched off (`pm disable-user`), never uninstalled. No root.
-- **Every package has a risk level** in the [catalog](catalog/): *low* (junk, switched off), *medium* (only if
+- **Every built-in app has a risk level** in the [catalog](catalog/): *low* (junk, switched off), *medium* (only if
   you don't use that feature), *keep* (never touched: inputs, remote, updates, casting, setup, accessibility).
-  If any tested TV needed a package, it's *keep*.
-- **Unknown packages are left alone.**
+  If any tested TV needed an app, it's *keep*.
+- **Apps it doesn't recognise are left alone.**
 - **3 at a time, checked.** After each batch the wizard presses Home and checks that Android didn't restart,
   Home still works and no setup/recovery screen appeared. If anything's off, that batch is rolled back
   automatically and skipped from then on. You can also press **U** to undo a batch yourself.
