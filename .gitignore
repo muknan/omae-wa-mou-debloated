@@ -2,3 +2,6 @@
 tv-audit-*/
 scripts/pc/changes.jsonl
 *.apk
+my-tv/
+downloads/
+tools/

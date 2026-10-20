@@ -1,0 +1,45 @@
+package,kind,what
+com.netflix.ninja,stream,Netflix
+com.amazon.amazonvideo.livingroom,stream,Prime Video
+com.google.android.youtube.tv,stream,YouTube
+com.google.android.youtube.tvkids,stream,YouTube Kids
+com.google.android.youtube.tvunplugged,stream,YouTube TV
+com.google.android.videos,stream,Google TV / Play Movies
+com.disney.disneyplus,stream,Disney+
+in.startv.hotstar,stream,JioHotstar
+com.hulu.livingroomplus,stream,Hulu
+com.hulu.plus,stream,Hulu
+com.wbd.stream,stream,Max
+com.hbo.hbonow,stream,Max
+com.peacocktv.peacockandroid,stream,Peacock
+com.cbs.ott,stream,Paramount+
+com.cbs.ca,stream,Paramount+
+tv.pluto.android,stream,Pluto TV
+com.tubitv,stream,Tubi
+com.apple.atve.androidtv.appletv,stream,Apple TV
+com.apple.atve.sony.appletv,stream,Apple TV
+tv.wuaki.apptv,stream,Rakuten TV
+com.sonyliv,stream,Sony LIV
+com.graymatrix.did,stream,ZEE5
+com.jio.media.stb.ondemand,stream,JioCinema
+com.crunchyroll.crunchyroid,stream,Crunchyroll
+com.nousguide.android.rbtv,stream,Red Bull TV
+com.dazn,stream,DAZN
+tv.twitch.android.app,stream,Twitch
+com.plexapp.android,stream,Plex
+com.spotify.tv.android,music,Spotify (may keep playing in the background)
+com.google.android.youtube.tvmusic,music,YouTube Music
+com.amazon.mp3,music,Amazon Music
+com.aspiro.tidal,music,TIDAL
+deezer.android.tv,music,Deezer
+com.pandora.android.atv,music,Pandora
+tunein.player,music,TuneIn
+com.clearchannel.iheartradio.controller,music,iHeartRadio
+com.soundcloud.android,music,SoundCloud
+tv.plex.labs.plexamp,music,Plexamp
+com.ionitech.airscreen,receiver,AirScreen cast receiver (must listen in the background)
+com.termux,protect,Termux (boot helper)
+com.termux.boot,protect,Termux:Boot (boot helper)
+com.tpn.adbautoenable,protect,ADB Auto Enable (boot helper)
+io.github.sds100.keymapper,protect,Key Mapper
+com.spocky.projengmenu,protect,Projectivy Launcher

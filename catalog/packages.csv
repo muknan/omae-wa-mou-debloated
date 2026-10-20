@@ -1,0 +1,316 @@
+package,risk,feature,brand,verified,what
+android.autoinstalls.config.*,low,,any,community,Play Auto-Install config: silently installs partner apps after setup
+com.google.android.feedback,low,,google,tested,Google feedback and bug-report sender
+com.android.tv.feedbackconsent,low,,google,tested,feedback consent prompt
+com.google.android.tv.bugreportsender,low,,google,community,bug-report uploader
+com.google.android.tv.remotecontrol.logging,low,,google,community,remote button usage logging
+com.google.android.apps.tv.netoscope,low,,google,community,network diagnostics reporting
+com.google.android.play.games,low,,google,tested,Play Games
+com.google.android.partnersetup,low,,google,community,partner app attribution
+com.google.android.onetimeinitializer,low,,google,community,runs once after first setup and then idles
+com.google.android.syncadapters.calendar,low,,google,community,calendar sync (TVs have no calendar app)
+com.android.printspooler,low,,android,tested,printing (TVs don't print)
+com.android.adservices.api,low,,android,community,Privacy Sandbox ad services
+com.google.android.adservices.api,low,,android,community,Privacy Sandbox ad services
+com.google.android.ext.adservices.api,low,,android,community,Privacy Sandbox ad services
+com.android.ondevicepersonalization.services,low,,android,community,on-device ad personalisation
+com.google.android.ondevicepersonalization.services,low,,android,community,on-device ad personalisation
+com.android.federatedcompute.services,low,,android,community,federated learning for ad and usage models
+com.google.android.federatedcompute,low,,android,community,federated learning for ad and usage models
+tv.samba.ssm,low,,any,community,Samba TV: identifies what is on screen to sell ads
+tv.samba.ssm.ui,low,,any,community,Samba TV opt-in screens
+tv.alphonso.alphonso_eula,low,,any,community,Alphonso ad tracking
+tv.inscape.tvclient.inscapeacr,low,,any,community,Inscape: identifies what is on screen
+tv.anoki.acr.anokiacroptin,low,,any,community,Anoki: identifies what is on screen
+tv.anoki.acr.controller,low,,any,community,Anoki: identifies what is on screen
+fusion.android.tv.demo,low,,any,community,shop demo mode
+com.mstar.android.tv.disclaimercustomization,low,,any,community,shop demo disclaimer
+com.google.android.tvrecommendations,medium,content,google,community,recommendation rows on the stock home screen
+com.google.android.backdrop,medium,screensaver,google,community,Ambient mode screensaver (Android TV)
+com.google.android.apps.tv.dreamx,medium,screensaver,google,tested,Ambient mode screensaver and Google Home panel (about 100 MB while running)
+com.google.android.apps.mediashell,medium,cast,google,tested,Chromecast built-in
+com.google.android.apps.tv.launcherx,keep,,google,tested,stock Google TV home: other launchers and the Settings button depend on it
+com.google.android.tungsten.setupwraith,keep,,google,tested,setup and Home recovery; on many TVs it also owns the Wi-Fi saved during setup
+com.google.android.tvlauncher,keep,,google,community,stock Android TV home
+com.google.android.leanbacklauncher,keep,,google,community,stock Android TV home (older)
+com.google.android.leanbacklauncher.recommendations,keep,,google,community,load-bearing on some firmwares
+com.google.android.katniss,keep,,google,tested,voice search and Assistant
+com.google.android.tv.remote.service,keep,,google,tested,phone remote and on some TVs the remote's mic button
+com.google.android.speech.pumpkin,keep,,google,community,offline speech recognition
+com.google.android.marvin.talkback,keep,,google,community,screen reader (accessibility)
+com.google.android.tts,keep,,google,community,text to speech (accessibility)
+com.google.android.tvtutorials,keep,,google,community,load-bearing on some firmwares
+com.google.android.gms,keep,,google,tested,Play Services
+com.google.android.gsf,keep,,google,tested,Google framework
+com.android.vending,keep,,google,tested,Play Store
+com.mediatek.dialservice,keep,,mediatek,tested,DIAL: casting from YouTube and Netflix phone apps
+com.dolby.android.audio.service,keep,,any,tested,Dolby audio
+com.miui.tv.analytics,low,,xiaomi,tested,Xiaomi analytics collector (always running)
+com.miui.analytics,low,,xiaomi,community,Xiaomi analytics
+com.xiaomi.statistic,low,,xiaomi,tested,Xiaomi statistics uploader
+com.xiaomi.mimusic2,low,,xiaomi,tested,Mi Music player
+com.xiaomi.mitv.manualhelp,low,,xiaomi,tested,on-screen user manual
+com.xiaomi.mitv.handbook,low,,xiaomi,community,on-screen user manual
+com.xiaomi.mitv.tvmanager,low,,xiaomi,tested,"""TV Manager"" cleaner that itself uses up to 50 MB"
+com.xm.webcontent,low,,xiaomi,community,Xiaomi web promos
+com.mitv.cloudcontrol,low,,xiaomi,community,cloud control: can push apps remotely
+com.xiaomi.mitv.tvpush.tvpushservice,low,,xiaomi,community,Xiaomi push messages
+com.mitv.shoplugin,low,,xiaomi,community,TV shopping plugin
+com.mitv.tvhome.atv,medium,content,xiaomi,tested,PatchWall app and its keep-alive service (about 50 MB)
+com.mitv.tvhome.oemtab,medium,content,xiaomi,tested,PatchWall tab and ad row inside the Google TV home
+com.mitv.tvhome.michannel,medium,content,xiaomi,tested,Mi Channel free streams
+com.mitv.tvhome.mitvplus,medium,content,xiaomi,tested,Mi TV+ sponsored live channels
+com.xiaomi.floatingframe,medium,content,xiaomi,community,floating promo overlay
+co.sensara.tv.mitv,medium,content,xiaomi,community,sponsored TV guide
+com.duokan.videodaily,medium,content,xiaomi,community,video promos
+com.mediatek.dtv.tvinput.dvbtuner,medium,antenna,xiaomi,tested,antenna/cable tuner and HbbTV (about 23 MB)
+com.mitv.livetv.ci_mediatek,medium,antenna,xiaomi,tested,CI+ slot for pay-TV cards
+com.mediatek.browservice,medium,antenna,mediatek,tested,HbbTV red-button browser engine
+com.mediatek.partner.airplay_sys,medium,airplay,mediatek,tested,AirPlay system service
+com.mediatek.airplaydaemon,medium,airplay,mediatek,tested,AirPlay daemon (on our test TV it was stuck using a full CPU core)
+com.mediatek.AirplayAPK,medium,airplay,mediatek,tested,AirPlay receiver
+com.mitv.dream,medium,screensaver,xiaomi,community,Mi screensaver
+com.mitv.screensaver,medium,screensaver,xiaomi,community,Mi screensaver
+com.xiaomi.amazon.alexa,medium,alexa,xiaomi,community,Alexa bridge
+com.mitv.milinkservice,medium,mirroring,xiaomi,community,Mi cast (MiLink)
+com.mitv.gallery,medium,usb,xiaomi,community,Mi Gallery for USB photos
+com.xiaomi.android.tvsetup.partnercustomizer,keep,,xiaomi,tested,hosts the Bluetooth remote pairing screen
+com.xiaomi.mitv.scenemode,keep,,xiaomi,tested,game mode and ALLM
+com.mitv.livetv,keep,,xiaomi,tested,Inputs / HDMI source picker
+com.mediatek.tis,keep,,mediatek,tested,HDMI and AV inputs
+com.mediatek.tv.agent,keep,,mediatek,tested,TV core agent
+com.mitv.overseaservice,keep,,xiaomi,tested,Bluetooth remote service
+com.mi.bluetooth,keep,,xiaomi,tested,remote
+mitv.service,keep,,xiaomi,tested,TV core
+com.xiaomi.tvqs.overseas.y24,keep,,xiaomi,tested,quick settings
+com.xiaomi.tvqs.overseas,keep,,xiaomi,community,quick settings on some models
+com.xiaomi.tvqs,keep,,xiaomi,community,quick settings on some models
+com.xiaomi.wfdsinkhelperservice,keep,,xiaomi,tested,Miracast
+com.xiaomi.mitv.smartshare,keep,,xiaomi,tested,Miracast screen
+com.xiaomi.mitv.updateservice,keep,,xiaomi,tested,firmware updates
+com.xiaomi.mitv.upgrade,keep,,xiaomi,community,firmware updates
+com.mitv.upgrader,keep,,xiaomi,tested,firmware updates
+com.xiaomi.mitv.mediaexplorer,keep,,xiaomi,tested,USB media
+com.mitv.videoplayer,keep,,xiaomi,tested,USB video playback
+com.duokan.airkan.tvbox,keep,,xiaomi,community,load-bearing on some Mi boxes
+com.tcl.logkit,low,,tcl,community,log capture and upload
+com.tcl.usercenter,low,,tcl,community,TCL account sign-in nags
+com.tcl.esticker,low,,tcl,community,shop demo stickers
+com.tcl.exhibit,low,,tcl,community,shop demo
+com.tcl.hotelmenu,low,,tcl,community,hotel mode
+com.tcl.ocean.instructions,low,,tcl,community,e-manual
+com.tcl.repairguide,low,,tcl,community,repair guide
+com.tcl.bootadservice,low,,tcl,community,full-screen ad at startup
+com.tcl.overseasappshow,low,,tcl,community,"""recommended apps"" showcase"
+com.tcl.profilemanager,low,,tcl,community,audience reporting
+com.tcl.tvhealthcheck,low,,tcl,community,diagnostics uploader
+com.tcl.channelplus,medium,content,tcl,community,TCL Live free channels
+com.tcl.tv.plus,medium,content,tcl,community,TCL TV+
+com.tcl.tv.tclchannel,medium,content,tcl,community,TCL Channel
+com.tcl.tv.tclhome_passive,medium,content,tcl,community,pushes TCL content to the home screen at startup
+com.tcl.waterfall.overseas,medium,content,tcl,community,TCL content feed
+com.tcl.interactive,medium,content,tcl,community,TCL interactive background service
+com.tcl.smartlink.core,medium,content,tcl,community,TCL link service with a silent app installer
+com.tcl.atomic.servicecenter,medium,content,tcl,community,home-screen recommendation cards
+com.tcl.ffeducation,medium,content,tcl,community,kids and education content
+com.tcl.playskill,medium,content,tcl,community,tips app
+com.tcl.smartalexa,medium,alexa,tcl,community,Alexa
+com.tcl.airplay2,medium,airplay,tcl,community,AirPlay
+com.tcl.magiconnectfree,medium,mirroring,tcl,community,T-Cast / MagiConnect phone mirroring
+com.tcl.gallery,medium,usb,tcl,community,USB photo gallery and TCL screensaver
+com.tcl.appreciate.art,medium,screensaver,tcl,community,art screensaver content
+com.tcl.ttvs,keep,,tcl,community,analytics but also the firmware updater on some models
+com.tcl.bi,keep,,tcl,community,load-bearing on some models
+com.tcl.messagebox,keep,,tcl,community,load-bearing on some models
+com.tcl.guard,keep,,tcl,community,also the only app installer on some models
+com.tcl.partnercustomizer,keep,,tcl,community,load-bearing on some models
+com.tcl.useragreement,keep,,tcl,community,listed as needed on recent models
+com.tcl.dashboard,keep,,tcl,community,quick panel
+com.tcl.suspension,keep,,tcl,community,the Input button's source panel
+com.tcl.tv,keep,,tcl,community,Live TV and HDMI playback
+com.tcl.tvinput,keep,,tcl,community,tuner and HDMI inputs
+com.tcl.settings,keep,,tcl,community,settings panel
+com.tcl.system.server,keep,,tcl,community,TV core
+com.tcl.providers.config,keep,,tcl,community,TV core
+com.tcl.initsetup,keep,,tcl,community,setup
+com.tcl.factory.view,keep,,tcl,community,TV core
+com.tcl.autopair,keep,,tcl,community,remote pairing
+com.tcl.sourcemananger,keep,,tcl,community,input sources
+com.tcl.assistant,keep,,tcl,community,voice service
+com.tcl.micmanager,keep,,tcl,community,remote microphone
+com.tcl.miracast,keep,,tcl,community,load-bearing on some models
+com.tcl.MultiScreenInteraction_TV,keep,,tcl,community,load-bearing on some models
+com.tcl.copydatatotv,keep,,tcl,community,load-bearing on some models
+com.tcl.appmarket2,keep,,tcl,community,load-bearing on some models
+com.tcl.tvweishi,keep,,tcl,community,load-bearing on some models
+com.tcl.cyberui,keep,,tcl,community,load-bearing on some models
+com.tcl.appstatecontroller,keep,,tcl,community,load-bearing on some models
+com.tcl.ui_mediaCenter,keep,,tcl,community,USB media
+com.tcl.videoplayer,keep,,tcl,community,load-bearing on some models
+com.tcl.audioplayer,keep,,tcl,community,load-bearing on some models
+com.tcl.imageplayer,keep,,tcl,community,load-bearing on some models
+com.tcl.versionUpdateApp,keep,,tcl,community,firmware updates
+com.tcl.rc.ota,keep,,tcl,community,remote firmware updates
+com.tcl.xian.StartandroidService,keep,,tcl,community,device authentication
+com.sony.dtv.da.service,low,,sony,community,Sony device agent / remote support
+com.qterics.da.product,low,,sony,community,device agent
+com.sonyericsson.idd.agent,low,,sony,community,usage data agent
+com.sony.dtv.sonybugreportsys,low,,sony,community,bug-report uploader
+com.sony.dtv.demomode,low,,sony,community,shop demo
+com.sony.dtv.demosupport,low,,sony,community,shop demo
+com.sony.dtv.demosystemsupport,low,,sony,community,shop demo
+com.sony.dtv.multiscreendemo,low,,sony,community,shop demo
+com.sony.dtv.b2b.hotelmode,low,,sony,community,hotel mode
+com.sony.dtv.imanual,low,,sony,community,i-Manual
+com.sony.dtv.smarthelp,low,,sony,community,help app
+com.sony.dtv.customersupport,low,,sony,community,help tile
+com.sony.dtv.helpguidecontents,low,,sony,community,help guide content
+com.sony.dtv.touchpad.tutorial,low,,sony,community,touchpad remote tutorial
+com.sony.dtv.sonyselect,medium,content,sony,community,Sony Select promo tile
+com.sony.dtv.promos,medium,content,sony,community,My BRAVIA promos
+com.sony.dtv.discovery,medium,content,sony,community,Discover content bar
+com.sony.dtv.bivlinfo,medium,content,sony,community,content list feeding Discover
+com.sony.dtv.sonytab,medium,content,sony,community,Sony tab on the home screen
+com.sony.dtv.sonyshelf,medium,content,sony,community,Sony content shelf
+com.sony.dtv.recommendationservice,medium,content,sony,community,recommendations
+com.sony.dtv.networkrecommendation,medium,content,sony,community,recommendations
+com.sony.dtv.watchtvrecommendation,medium,content,sony,community,recommendations
+com.sony.dtv.usercontext,medium,content,sony,community,viewing context for recommendations
+com.sony.dtv.notificationcenter,medium,content,sony,community,BRAVIA notifications inbox
+com.sony.dtv.seeds.iot,medium,smarthome,sony,community,Sony smart-home and phone link
+com.sony.dtv.networkapp.wifidirect,medium,mirroring,sony,community,Wi-Fi Direct
+com.sony.huey.dlna.module,medium,mirroring,sony,community,DLNA renderer
+com.sonyericsson.dlna,medium,mirroring,sony,community,DLNA
+com.sony.dtv.osat.music,medium,usb,sony,community,USB music player
+com.sony.dtv.osat.video,medium,usb,sony,community,USB video player
+com.sony.dtv.osat.album,medium,usb,sony,community,USB photo viewer
+com.sony.dtv.smartmediaapp,medium,usb,sony,community,Media Player for USB files
+com.sony.dtv.airplayapp,medium,airplay,sony,community,AirPlay
+com.sony.dtv.tvx,keep,,sony,community,TV player and every HDMI input
+com.sony.dtv.tvapi,keep,,sony,community,TV core
+com.sony.dtv.sonysystemservice,keep,,sony,community,TV core
+com.sony.dtv.tvinput.*,keep,,sony,community,TV inputs and tuners
+com.sony.dtv.braviasync*,keep,,sony,community,HDMI-CEC
+com.sony.dtv.notifybravia,keep,,sony,community,listed as needed
+com.sony.dtv.b2b.softap,keep,,sony,community,listed as needed
+org.droidtv.candeebug,low,,philips,community,"""DAC"" analytics uploader (disable together with gel)"
+org.droidtv.gel,low,,philips,community,metrics collector (shares the DAC process)
+org.droidtv.usagelogger,low,,philips,community,usage logger
+org.droidtv.demome,low,,philips,community,shop demo
+org.droidtv.nettvregistration,low,,philips,community,NetTV account registration
+org.droidtv.nettvrecommender,medium,content,philips,community,Top Picks recommendation row (switch off before its backend)
+org.droidtv.recommendation,medium,content,philips,community,Top Picks backend
+org.droidtv.nettv.market,medium,content,philips,community,app gallery
+org.droidtv.m7opapp,medium,content,philips,community,satellite operator promo
+org.droidtv.amazonalexa,medium,alexa,philips,community,Alexa bridge (check channel switching afterwards)
+org.droidtv.dlna,medium,mirroring,philips,community,DLNA server and renderer
+org.droidtv.eum,keep,,philips,community,sources drawer; disabling it breaks inputs
+org.droidtv.aurora,keep,,philips,community,disabling it leaves a service retrying forever
+org.droidtv.philipstvdrawer,keep,,philips,community,TV drawer
+org.droidtv.tv.tptvservice,keep,,philips,community,TV core
+org.droidtv.nettvbrowser,keep,,philips,community,HbbTV handler (some apps hang without it)
+com.hisense.evservice,low,,hisense,community,identifies what is on screen (also on HDMI)
+com.hisense.app.logreport,low,,hisense,community,log reporter
+com.hisense.service.message,low,,hisense,community,push messages
+com.hisense.storemode,low,,hisense,community,shop demo
+com.hisense.tv.b2b,low,,hisense,community,hotel/business mode
+com.hisense.hotelmode,low,,hisense,community,hotel mode
+com.vt.storemode,low,,hisense,community,shop demo
+com.vt.tv.b2b,low,,hisense,community,hotel/business mode
+com.hisense.tv.protector,low,,hisense,community,"""speed up"" cleaner"
+net.vidaatv.hisense.android.tv,medium,content,hisense,community,VIDAA free channels
+com.vidaa.oemtabcontentprovider,medium,content,hisense,community,VIDAA content tab
+com.hisense.alexa,medium,alexa,hisense,community,Alexa
+com.vt.alexa,medium,alexa,hisense,community,Alexa
+com.vt.hishow,medium,screensaver,hisense,community,Family Moment photos and screensaver
+com.hisense.tv.smartsense,keep,,hisense,community,disabling it can trigger recovery mode
+com.hisense.tv.smartservice,keep,,hisense,community,smartsense family
+com.vt.tv.smartsense,keep,,hisense,community,disabling it can trigger recovery mode
+com.vt.tv.smartsense.ui,keep,,hisense,community,smartsense family
+com.vt.tv.aiot,keep,,hisense,community,smartsense family
+com.vt.tv.evservice,keep,,hisense,community,load-bearing on some models
+com.hisense.tv.hitvinput,keep,,hisense,community,"HDMI, AV and tuner inputs"
+com.mstar.netflixobserver,keep,,hisense,community,listed as needed
+com.nvidia.stats,low,,nvidia,community,usage statistics
+com.nvidia.feedback,low,,nvidia,community,crash reports and feedback form
+com.nvidia.diagtools,low,,nvidia,community,log collector
+com.nvidia.shield.registration,low,,nvidia,community,product registration
+com.nvidia.shield.welcome,low,,nvidia,community,first-run promo
+com.nvidia.factorybundling,low,,nvidia,community,accessory offers
+com.nvidia.tegrazone3,medium,content,nvidia,community,NVIDIA Games app and row
+com.nvidia.shield.remote.server,keep,,nvidia,community,remote
+com.nvidia.blakepairing,keep,,nvidia,community,remote pairing
+com.nvidia.bluetooth,keep,,nvidia,community,Bluetooth
+com.nvidia.shieldtech.accessoryui,keep,,nvidia,community,accessories
+com.nvidia.shield.ask,keep,,nvidia,community,listed as needed
+com.amazon.tv.fw.metrics,low,,amazon,community,Amazon telemetry
+com.amazon.wirelessmetrics.service,low,,amazon,community,Amazon telemetry
+com.amazon.perfcollection,low,,amazon,community,Amazon telemetry
+com.amazon.dp.logger,low,,amazon,community,Amazon logs
+com.amazon.client.metrics,low,,amazon,community,Amazon telemetry
+com.amazon.client.metrics.api,low,,amazon,community,Amazon telemetry
+com.amazon.device.metrics,low,,amazon,community,Amazon telemetry
+com.amazon.device.crashmanager,low,,amazon,community,crash reports
+com.amazon.device.logmanager,low,,amazon,community,log uploads
+com.amazon.tv.acr,low,,amazon,community,identifies what is on screen
+com.amazon.hybridadidservice,low,,amazon,community,advertising ID
+com.amazon.sneakpeek,low,,amazon,community,"sponsored ""Sneak Peek"" previews"
+com.amazon.shoptv.client,low,,amazon,community,Amazon Shopping on TV
+com.amazon.shoptv.firetv.client,low,,amazon,community,Amazon Shopping on TV
+com.amazon.tmm.tutorial,low,,amazon,community,remote tutorial
+com.amazon.storm.lightning.tutorial,low,,amazon,community,remote app tutorial
+com.amazon.tv.easyupgrade,low,,amazon,community,"""upgrade your Fire TV"" promos"
+com.amazon.tv.democontent.provider,low,,amazon,community,shop demo videos
+com.amazon.kso.blackbird,medium,content,amazon,community,sponsored banner and rows
+com.amazon.hedwig,medium,content,amazon,community,Fire TV Channels free channels
+com.amazon.gamehub,medium,content,amazon,community,games hub
+com.amazon.minitv.android.app,medium,content,amazon,community,miniTV
+com.amazon.media.recommendations,medium,content,amazon,community,recommendations
+com.amazon.tv.alexaalerts,medium,alexa,amazon,community,Alexa alarms and reminders
+com.amazon.tv.alexanotifications,medium,alexa,amazon,community,Alexa notifications
+com.amazon.cast.sink,medium,mirroring,amazon,community,Miracast receiver
+com.amazon.tv.launcher,keep,,amazon,community,Fire TV home
+com.amazon.tv.livetv,keep,,amazon,community,HDMI and tuner inputs
+com.amazon.tv.quicksettings,keep,,amazon,community,quick settings
+com.amazon.tv.settings,keep,,amazon,community,settings
+com.amazon.tv.settings.v2,keep,,amazon,community,settings
+com.amazon.venezia,keep,,amazon,community,Amazon Appstore
+com.amazon.device.software.ota,keep,,amazon,community,firmware updates
+com.smartdevice.aftersale,low,,skyworth,community,after-sale tracker
+com.smartdevice.recordactivation,low,,skyworth,community,records first activation
+com.smartdevice.common.demonow,low,,skyworth,community,shop demo
+com.Smartdevice.emanual,low,,skyworth,community,e-manual
+com.sdt.deviceinfo,low,,skyworth,community,device info reporter
+com.smartdevice.recommendation,medium,content,skyworth,community,recommendation rows
+com.smartdevice.dtv.icast,medium,airplay,skyworth,community,AirPlay and Miracast receiver
+com.coocaa.factory,keep,,skyworth,community,listed as needed
+com.homwee.help,low,,changhong,community,e-manual
+com.homwee.store,medium,content,changhong,community,Homwee app store
+com.homwee.aipont,medium,content,changhong,community,AI PONT brand portal
+com.cltv.fast,medium,content,changhong,community,free channels
+com.homwee.alexacontrol,medium,alexa,changhong,community,Alexa
+com.homwee.multiscreenshare,medium,mirroring,changhong,community,Miracast and AirPlay
+com.homwee.mmp.screenshare,medium,mirroring,changhong,community,screen mirroring
+com.homwee.factory,keep,,changhong,community,listed as needed
+com.homwee.upgrade,keep,,changhong,community,updates
+com.cltv.hybrid,keep,,changhong,community,listed as needed
+com.cltv.mal,keep,,changhong,community,listed as needed
+com.haier.tvhousekeeper,low,,haier,community,cleaner
+com.haier.emanual,low,,haier,community,e-manual
+com.haier.oemtabprovider,medium,content,haier,community,Haier tab on the home screen
+com.haier.apps,medium,content,haier,community,Haier app promos
+it.hon.service,medium,smarthome,haier,community,Haier hOn smart home
+com.haierubic.usmartdevice,medium,smarthome,haier,community,Haier smart devices
+com.panasonic.demomode,low,,panasonic,community,shop demo
+com.panasonic.hotelmode,low,,panasonic,community,hotel mode
+com.jmgo.spider,low,,jmgo,community,tracker
+com.xgimi.bugreportsender,low,,xgimi,community,bug-report uploader
+com.apps.esticker3,low,,sanyo,community,shop demo stickers
+com.apps.eshow,low,,sanyo,community,shop demo
+com.htc.eventuploadservice,low,,htc,community,usage uploader
+com.mediatek.android.leanbacklauncher.partnercustomizer,keep,,mediatek,community,home-screen partner config (safe on some TVs; not worth the risk)
+com.realtek.leanbacklauncher.partnercustomizer,keep,,realtek,community,home-screen partner config (not worth the risk)
+com.realtek.dtv,keep,,realtek,community,HDMI and inputs
+com.realtek.tv.atv,keep,,realtek,community,HDMI and inputs
+com.realtek.airplay2,medium,airplay,realtek,community,AirPlay
+com.gretzky.GlobalKey,keep,,onn,community,remote app buttons and mic

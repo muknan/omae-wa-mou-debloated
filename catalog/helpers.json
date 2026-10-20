@@ -1,0 +1,40 @@
+{
+  "_about": "Helper apps the wizard can install, pinned to versions tested on a real TV. SHA-256 values are the ones published with each official GitHub release; the wizard refuses any file that doesn't match.",
+  "helpers": [
+    {
+      "id": "termux", "name": "Termux", "package": "com.termux", "version": "0.118.3", "minSdk": 24,
+      "source": "https://github.com/termux/termux-app",
+      "abis": [
+        { "abi": "arm64-v8a", "url": "https://github.com/termux/termux-app/releases/download/v0.118.3/termux-app_v0.118.3+github-debug_arm64-v8a.apk", "sha256": "72fdb596045116bf5ba1b5bdf5b26fddb9acc0bd074ad9f2da9eb0ae85e83a4e" },
+        { "abi": "armeabi-v7a", "url": "https://github.com/termux/termux-app/releases/download/v0.118.3/termux-app_v0.118.3+github-debug_armeabi-v7a.apk", "sha256": "89416397b70f9ff67a0044e8abe6ef82487cd48fcf543e2d23e02688cc541cf0" },
+        { "abi": "x86_64", "url": "https://github.com/termux/termux-app/releases/download/v0.118.3/termux-app_v0.118.3+github-debug_x86_64.apk", "sha256": "3550e61f4d9eb49b712fd1bd9519dc37085a4d8eb597c57a340f0a64859b7144" },
+        { "abi": "x86", "url": "https://github.com/termux/termux-app/releases/download/v0.118.3/termux-app_v0.118.3+github-debug_x86.apk", "sha256": "b6a980ac2fbda1c61edc7be389ce69da9a90af8444d27164b5e20b7a22442570" },
+        { "abi": "universal", "url": "https://github.com/termux/termux-app/releases/download/v0.118.3/termux-app_v0.118.3+github-debug_universal.apk", "sha256": "7600078440c3c34ef050bc009b00fc3215cb87ec4a449e01a696f74cf4249db2" }
+      ]
+    },
+    {
+      "id": "termux-boot", "name": "Termux:Boot", "package": "com.termux.boot", "version": "0.8.1", "minSdk": 24,
+      "source": "https://github.com/termux/termux-boot",
+      "url": "https://github.com/termux/termux-boot/releases/download/v0.8.1/termux-boot-app_v0.8.1+github.debug.apk",
+      "sha256": "97e6d336f05b59f7cb25e8efa7173e0a6e665f3022b75c6d55a69b6399ecacc8"
+    },
+    {
+      "id": "adb-auto-enable", "name": "ADB Auto Enable", "package": "com.tpn.adbautoenable", "version": "0.3.5", "minSdk": 34,
+      "source": "https://github.com/mouldybread/adb-auto-enable",
+      "url": "https://github.com/mouldybread/adb-auto-enable/releases/download/v0.3.5/ADB-auto-enable-0.3.5.apk",
+      "sha256": "454008f3dd2a90ffcd44fc14ac3baf183c6f29ec9b194c35bc21308485c8b13b"
+    },
+    {
+      "id": "keymapper", "name": "Key Mapper", "package": "io.github.sds100.keymapper", "version": "4.6.1", "minSdk": 26,
+      "source": "https://github.com/keymapperorg/KeyMapper",
+      "url": "https://github.com/keymapperorg/KeyMapper/releases/download/v4.6.1/keymapper-4.6.1-foss.apk",
+      "sha256": "cb26fb63378bfac629721a49e81407cdf541bb4c2159a7bc6279d0b10994565d"
+    },
+    {
+      "id": "booru-wallpapers", "name": "Booru Wallpaper Provider", "package": "nl.kurocon.plugin.wallpaperprovider.booru", "version": "1.2", "minSdk": 23,
+      "source": "https://github.com/Kurocon/projectivy-booru-wallpaper-provider",
+      "url": "https://github.com/Kurocon/projectivy-booru-wallpaper-provider/releases/download/v1.2/booru-release.apk",
+      "sha256": "a301640ff7abae207296e006929b7eb14cbe25999ad2e12380c9fdb7988b1221"
+    }
+  ]
+}

@@ -1,0 +1,68 @@
+{
+  "_about": "Feature questions for medium-risk packages (packages.csv 'feature' column). Only asked when the TV has at least one matching package. 'recommend' is what the wizard suggests; 'unsure' is what happens if the user is not sure. 'off' = switch those packages off, 'keep' = leave them alone.",
+  "questions": [
+    {
+      "id": "content",
+      "ask": "Do you use your TV brand's own extras on the home screen: free channels, content tabs, sponsored rows, the brand's app store?",
+      "help": "These are the ads and 'recommended for you' rows. Netflix, YouTube and your other apps are not affected.",
+      "recommend": "off",
+      "unsure": "off"
+    },
+    {
+      "id": "antenna",
+      "ask": "Do you watch channels through an antenna, satellite dish or cable plugged straight into the TV (not through an HDMI box)?",
+      "help": "Say Yes if you ever use the TV's built-in channels. HDMI inputs keep working either way.",
+      "recommend": "keep",
+      "unsure": "keep"
+    },
+    {
+      "id": "airplay",
+      "ask": "Do you ever cast from an iPhone, iPad or Mac (AirPlay)?",
+      "help": "On our test TV the AirPlay service was stuck using a whole CPU core while nobody was casting.",
+      "recommend": "keep",
+      "unsure": "keep"
+    },
+    {
+      "id": "cast",
+      "ask": "Do you use Chromecast, the Cast button in YouTube, Netflix and other phone apps?",
+      "help": "Almost everyone does. Only say No if you are sure.",
+      "recommend": "keep",
+      "unsure": "keep"
+    },
+    {
+      "id": "mirroring",
+      "ask": "Do you mirror an Android phone or PC screen to the TV (Miracast, the brand's cast app, DLNA)?",
+      "help": "This is screen mirroring, not Chromecast.",
+      "recommend": "keep",
+      "unsure": "keep"
+    },
+    {
+      "id": "alexa",
+      "ask": "Do you talk to Alexa through this TV?",
+      "help": "Google Assistant and the voice button on the remote are never touched.",
+      "recommend": "off",
+      "unsure": "keep"
+    },
+    {
+      "id": "screensaver",
+      "ask": "Do you want to keep the photo/art screensaver (Ambient mode)?",
+      "help": "It can use about 100 MB of memory. Without it the TV still has a basic screensaver or just dims.",
+      "recommend": "keep-if-ram-over-3gb",
+      "unsure": "keep"
+    },
+    {
+      "id": "usb",
+      "ask": "Do you play videos, music or photos from a USB stick with the TV's built-in player?",
+      "help": "Apps like VLC can do this instead.",
+      "recommend": "keep",
+      "unsure": "keep"
+    },
+    {
+      "id": "smarthome",
+      "ask": "Do you use the TV brand's phone app or smart-home features with this TV?",
+      "help": "For example Sony BRAVIA Connect or Haier hOn. Google Home is not affected.",
+      "recommend": "keep",
+      "unsure": "keep"
+    }
+  ]
+}

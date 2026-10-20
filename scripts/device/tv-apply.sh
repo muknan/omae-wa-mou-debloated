@@ -6,7 +6,8 @@
 #   - tv-refresh.sh (e.g. from a Key Mapper button)
 #   - you, any time:  adb shell sh /data/local/tmp/tv-apply.sh
 #
-# Edit the CONFIG block, push it again (scripts/pc/Deploy-Scripts.ps1), done.
+# Settings come from the CONFIG block below, and /data/local/tmp/tv-apply.conf overrides them if it exists
+# (the setup wizard writes that file, so re-running the wizard never needs you to edit this script).
 
 # ============================== CONFIG ==============================
 # Animation speed (1.0 = stock, 0.5 = twice as fast, 0 = off). Feels snappier; it doesn't make the CPU faster.
@@ -36,13 +37,18 @@ UNWHITELIST_NETFLIX=1
 # TVs where its own auto-start can't pair). 0 = don't.
 START_KEYMAPPER_EXPERT_MODE=1
 # ====================================================================
+CONF=/data/local/tmp/tv-apply.conf
+[ -f "$CONF" ] && . "$CONF"
 
 LOG=/data/local/tmp/tv-apply.log
 log() { echo "$(date '+%F %T') $*" >> "$LOG"; }
 [ -f "$LOG" ] && tail -n 300 "$LOG" > "$LOG.tmp" && mv "$LOG.tmp" "$LOG"
 
 PROTECT="$EXTRA_PROTECT"
-PROTECT="$PROTECT $(cmd role get-role-holders android.app.role.HOME 2>/dev/null)"
+SDK=$(getprop ro.build.version.sdk)
+HOME_APP=$(cmd role get-role-holders android.app.role.HOME 2>/dev/null)
+[ -z "$HOME_APP" ] && HOME_APP=$(cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME 2>/dev/null | tail -n 1 | sed 's/\/.*//')
+PROTECT="$PROTECT $HOME_APP"
 PROTECT="$PROTECT $(settings get secure default_input_method | sed 's/\/.*//')"
 PROTECT="$PROTECT $(settings get secure enabled_accessibility_services | tr ':' '\n' | sed 's/\/.*//')"
 # Launcher wallpaper plugins (e.g. Projectivy's Booru/Wallhaven provider) - the launcher calls them in the background.
@@ -70,16 +76,22 @@ done
 [ "$XIAOMI_ANIM_KEY" = "1" ] && settings put global mitv_fast_cur_anim_scale "$ANIM_SCALE"
 [ "$UNWHITELIST_NETFLIX" = "1" ] && cmd deviceidle sys-whitelist -com.netflix.ninja >/dev/null 2>&1
 
-for p in $BG_BLOCK; do
-    cmd appops set "$p" RUN_ANY_IN_BACKGROUND ignore
-    am set-standby-bucket "$p" restricted
-done
-for p in $STOP_ONLY; do
-    pm path "$p" >/dev/null 2>&1 && am set-standby-bucket "$p" restricted
-done
+# "restricted" standby bucket exists from Android 11; older versions get the strictest one they have.
+BUCKET=restricted; [ "${SDK:-0}" -lt 30 ] && BUCKET=rare
+if [ "${SDK:-0}" -ge 28 ]; then
+    for p in $BG_BLOCK; do
+        cmd appops set "$p" RUN_ANY_IN_BACKGROUND ignore
+        am set-standby-bucket "$p" $BUCKET
+    done
+    for p in $STOP_ONLY; do
+        pm path "$p" >/dev/null 2>&1 && am set-standby-bucket "$p" $BUCKET
+    done
+else
+    log "Android older than 9: background limits not supported, only stopping apps"
+fi
 
 # Force-stop = fully asleep (no jobs, alarms or broadcasts) until opened. Never the app on screen.
-TOP=$(dumpsys activity activities 2>/dev/null | grep -m1 topResumedActivity | sed 's/.* u0 //; s/\/.*//')
+TOP=$(dumpsys activity activities 2>/dev/null | grep -m1 -E 'topResumedActivity|mResumedActivity' | sed 's/.* u0 //; s/\/.*//')
 for p in $BG_BLOCK $STOP_ONLY; do
     if [ "$p" != "$TOP" ] && pm path "$p" >/dev/null 2>&1; then
         was=$(pidof "$p")
