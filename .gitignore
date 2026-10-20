@@ -1,0 +1,4 @@
+# Local outputs - may contain device identifiers
+tv-audit-*/
+scripts/pc/changes.jsonl
+*.apk

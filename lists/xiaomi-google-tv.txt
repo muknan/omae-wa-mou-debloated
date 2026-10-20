@@ -1,0 +1,65 @@
+# Debloat list for Xiaomi Google TVs (tested on Xiaomi TV X Pro 2025 / MiTV-MZTU0, Android 14, MediaTek).
+# Format:  <package>  <TIER>  # what it is / why
+#   LOW          safe for almost everyone
+#   CONDITIONAL  only if you don't use that feature - read the note
+#   DNT          do not touch (documentation only - Debloat.ps1 never applies these)
+# Everything is "pm disable-user" (reversible), never uninstall. Check what's on YOUR TV first:
+#   .\scripts\pc\Audit.ps1 -Device <ip:port>
+# Other brands: copy this file and keep only the packages your TV actually has.
+
+# ---------- Telemetry ----------
+com.miui.tv.analytics                     LOW          # Xiaomi analytics collector (always running, ~15 MB)
+com.xiaomi.statistic                      LOW          # Xiaomi statistics uploader
+
+# ---------- Unused extras ----------
+com.xiaomi.mimusic2                       LOW          # Mi Music player
+com.xiaomi.mitv.manualhelp                LOW          # on-screen user manual
+com.google.android.play.games             LOW          # Play Games
+android.autoinstalls.config.google.gtvpai LOW          # Play Auto-Install config (pushes partner apps)
+com.android.tv.feedbackconsent            LOW          # feedback prompt
+com.google.android.feedback               LOW          # Google feedback / bug report UI
+com.android.printspooler                  LOW          # printing (TVs don't print)
+com.xiaomi.mitv.tvmanager                 LOW          # "TV Manager" cleaner/booster - itself a RAM hog (up to ~50 MB)
+
+# ---------- PatchWall (Xiaomi's content home) ----------
+com.mitv.tvhome.atv                       CONDITIONAL  # PatchWall app + keep-alive service (~50 MB). Input switching is NOT in here.
+com.mitv.tvhome.oemtab                    CONDITIONAL  # PatchWall tab inside the Google TV home
+com.mitv.tvhome.michannel                 CONDITIONAL  # Mi Channel free streams for PatchWall
+com.mitv.tvhome.mitvplus                  CONDITIONAL  # Mi TV+ streams
+
+# ---------- Antenna / cable TV (only if you never use the built-in tuner) ----------
+com.mediatek.dtv.tvinput.dvbtuner         CONDITIONAL  # DVB tuner + HbbTV (~23 MB, always running)
+com.mitv.livetv.ci_mediatek               CONDITIONAL  # CI+ module for pay-TV cards
+com.mediatek.browservice                  CONDITIONAL  # HbbTV browser engine (persistent: process stays, does nothing)
+
+# ---------- AirPlay (only if you never cast from Apple devices) ----------
+com.mediatek.partner.airplay_sys          CONDITIONAL  # AirPlay system service (persistent)
+com.mediatek.airplaydaemon                CONDITIONAL  # AirPlay daemon - on our TV it got stuck at 100% of a CPU core
+com.mediatek.AirplayAPK                   CONDITIONAL  # AirPlay receiver + its TV input
+
+# ---------- Google extras ----------
+com.google.android.apps.tv.dreamx         CONDITIONAL  # Ambient Mode screensaver + Google Home panel (~100 MB while running)
+
+# ========== DO NOT TOUCH (learned the hard way or essential) ==========
+com.google.android.apps.tv.launcherx      DNT          # stock home: Settings key opens its dashboard; disabling it crashed Android (soft restart) and broke Home for 3rd-party launchers
+com.google.android.tungsten.setupwraith   DNT          # setup + launcher recovery
+com.xiaomi.android.tvsetup.partnercustomizer DNT       # on Xiaomi it hosts the Bluetooth REMOTE PAIRING screen (guides often say remove it)
+com.xiaomi.mitv.scenemode                 DNT          # game mode / ALLM
+com.mitv.livetv                           DNT          # the Input/HDMI source picker lives here
+com.mediatek.tis                          DNT          # HDMI / AV inputs
+com.mediatek.tv.agent                     DNT          # TV core agent
+com.mitv.overseaservice                   DNT          # Bluetooth remote service
+com.mi.bluetooth                          DNT          # remote
+mitv.service                              DNT          # TV core (runs inside xiaomi.tvservice)
+com.xiaomi.tvqs.overseas.y24              DNT          # quick settings
+com.google.android.apps.mediashell        DNT          # Chromecast built-in
+com.mediatek.dialservice                  DNT          # DIAL (YouTube/Netflix casting from phones)
+com.xiaomi.wfdsinkhelperservice           DNT          # Miracast
+com.xiaomi.mitv.smartshare                DNT          # Miracast UI
+com.dolby.android.audio.service           DNT          # Dolby audio
+com.google.android.katniss                DNT          # voice / Assistant
+com.google.android.tv.remote.service      DNT          # phone remote / Google TV remote
+com.xiaomi.mitv.updateservice             DNT          # firmware updates
+com.mitv.upgrader                         DNT          # firmware updates
+com.xiaomi.mitv.mediaexplorer             DNT          # USB media
+com.mitv.videoplayer                      DNT          # USB video playback

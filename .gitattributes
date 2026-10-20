@@ -1,0 +1,7 @@
+# Scripts that run on Android/Termux must keep Unix line endings.
+*.sh   text eol=lf
+*.txt  text eol=lf
+*.ps1  text eol=crlf
+*.md   text
+*.jpg  binary
+*.png  binary
