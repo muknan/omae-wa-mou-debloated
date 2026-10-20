@@ -1,8 +1,10 @@
 # omae-wa-mou-debloated
 
-**Make a slow Google TV fast again.** No rooting, nothing permanent, and you can undo all of it.
+**Other debloats clean your TV once. This one keeps it clean.**
 
-*Omae wa mou debloated.* (Your TV is already debloated. It just doesn't know it yet.)
+Make a slow Google TV fast again, and keep it that way after every restart. No rooting, nothing permanent, and you can undo all of it.
+
+*Omae wa mou debloated.* Your apps are already asleep. Even after a reboot.
 
 <p align="center">
   <img src="screenshots/home_wp6.jpg" width="49%" />
@@ -14,11 +16,27 @@
 ## What this does
 
 - Switches off the junk apps your TV came with (ads, tracking, stuff you never use)
-- Stops apps from running in the background when you're not using them
+- Freezes every app you're not watching, including ones you install later
 - Makes menus feel snappier
+- Puts itself back after every restart, with no PC needed (optional)
+- Gives you a "fresh boot" button on your remote (optional)
 - Everything can be undone with one command
 
 Made on a Xiaomi Google TV, but it works on most Google TVs.
+
+## Why this one?
+
+Most TV debloat guides switch off some apps, add a new home screen, and stop there.
+Then the TV restarts and quietly undoes half of it: background limits reset, menus slow down again, and wireless debugging switches itself off.
+
+| | Typical debloat | This kit |
+|---|---|---|
+| Switches off junk apps | ✅ | ✅ |
+| Keeps apps asleep in the background | ❌ | ✅ every app, even new installs |
+| Still working after a restart | half of it | ✅ the TV re-applies everything itself |
+| Wireless debugging turns itself back on | ❌ | ✅ with ADB Auto Enable |
+| One remote button to make the TV feel freshly restarted | ❌ | ✅ with Key Mapper |
+| Checked with real before/after numbers | rarely | ✅ [see results](docs/07-measuring.md) |
 
 ## What you need
 
@@ -109,8 +127,8 @@ This puts apps you're not using to sleep and speeds up the menu animations. Your
 
 | Want this? | Guide |
 |---|---|
-| Keep everything working after the TV restarts (otherwise, run Step 6 again after a restart) | [Make it stick](docs/04-boot-agent.md) |
-| Change what the remote's buttons do, or add a "refresh my TV" button | [Remote buttons](docs/05-key-mapper.md) |
+| Keep everything working after the TV restarts, with **Termux** and **ADB Auto Enable** (otherwise, run Step 6 again after a restart) | [Make it stick](docs/04-boot-agent.md) |
+| Remote button tricks with **Key Mapper** (free): add a "refresh my TV" button, or turn spare buttons (like Live TV) into app shortcuts | [Remote buttons](docs/05-key-mapper.md) |
 | A clean home screen with rotating wallpapers like the screenshots | [Launcher & wallpapers](docs/06-launcher-and-wallpapers.md) |
 | More switches: antenna TV, AirPlay, PatchWall (only if you don't use them) | [Junk apps in detail](docs/02-audit-and-debloat.md) |
 
