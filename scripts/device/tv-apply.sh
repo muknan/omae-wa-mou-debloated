@@ -33,6 +33,10 @@ XIAOMI_ANIM_KEY=1
 # 1 = remove Netflix's power-management exemption (some firmwares whitelist it). 0 = leave it.
 UNWHITELIST_NETFLIX=1
 
+# Helper apps whose permanent notifications get hidden (they'd show up as a badge on the home screen).
+# They're snoozed for 30 days, re-done every run; the apps themselves keep working normally.
+QUIET_APPS="io.github.sds100.keymapper com.tpn.adbautoenable"
+
 # 1 = start Key Mapper's Expert Mode if it isn't running (needed for Key Mapper "Execute with ADB" actions on
 # TVs where its own auto-start can't pair). 0 = don't.
 START_KEYMAPPER_EXPERT_MODE=1
@@ -122,5 +126,12 @@ if [ "$START_KEYMAPPER_EXPERT_MODE" = "1" ] && pm path $KM >/dev/null 2>&1 && ! 
         log "Key Mapper Expert Mode: starter missing - open Key Mapper > Expert Mode once"
     fi
 fi
+
+# Hide helper apps' permanent notifications (after Expert Mode starts, since Key Mapper posts when it connects).
+for k in $(cmd notification list 2>/dev/null); do
+    for p in $QUIET_APPS; do
+        case "$k" in *"|$p|"*) cmd notification snooze --for 2592000000 "$k" >/dev/null 2>&1 && log "hid a notification from $p" ;; esac
+    done
+done
 
 log "apply done (on screen: ${TOP:-none}; anim $(settings get global animator_duration_scale))"

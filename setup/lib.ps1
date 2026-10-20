@@ -11,6 +11,11 @@ $script:Ans = $null
 $script:AutoMode = $false
 $script:IsWin = ($env:OS -eq 'Windows_NT')
 
+# Plain UTF-8 without a byte-order mark (Windows PowerShell's -Encoding UTF8 adds one, which trips up other tools).
+$script:Utf8 = New-Object System.Text.UTF8Encoding($false)
+function Write-Text([string]$path, [string]$text) { [IO.File]::WriteAllText($path, $text, $script:Utf8) }
+function Add-Line([string]$path, [string]$line) { [IO.File]::AppendAllText($path, $line + "`n", $script:Utf8) }
+
 # ------------------------------------------------------------------ console UI
 function Say([string]$t = '', [string]$c = 'Gray') { Write-Host $t -ForegroundColor $c }
 function Ok([string]$t) { Write-Host "  [ok] $t" -ForegroundColor Green }
@@ -160,13 +165,33 @@ function Get-HelperApk([string]$id) {
     return [pscustomobject]@{ File = $file; Package = $h.package; Name = $h.name; Version = $h.version }
 }
 
+# adb.exe can't open paths longer than 260 characters (deeply nested folders, OneDrive). Hand it a short
+# copy in the temp folder instead.
+function Get-AdbSafePath([string]$file) {
+    if ($file.Length -lt 200) { return $file }
+    $base = [IO.Path]::GetFileNameWithoutExtension($file)
+    $short = Join-Path ([IO.Path]::GetTempPath()) ('owmd-' + $base.Substring(0, [math]::Min(30, $base.Length)) + [IO.Path]::GetExtension($file))
+    Copy-Item -LiteralPath $file -Destination $short -Force
+    return $short
+}
+
 function Install-Helper([string]$id) {
+    $h = (Get-Content (Join-Path $script:Root 'catalog/helpers.json') -Raw | ConvertFrom-Json).helpers | Where-Object { $_.id -eq $id }
+    $have = ''
+    if (Sh1 "pm path $($h.package)") { $have = (Sh1 "dumpsys package $($h.package) 2>/dev/null | grep -m1 versionName") -replace '.*versionName=', '' }
+    if ($have -eq $h.version) {
+        Ok "$($h.name) $($h.version) is already installed"
+        return [pscustomobject]@{ File = $null; Package = $h.package; Name = $h.name; Version = $h.version; Already = $true }
+    }
     $apk = Get-HelperApk $id
     $already = Sh1 "pm path $($apk.Package)"
-    $out = (Invoke-Adb -s $script:Dev install -r $apk.File) -join ' '
+    $path = Get-AdbSafePath $apk.File
+    $out = (Invoke-Adb -s $script:Dev install -r $path) -join ' '
+    if ($path -ne $apk.File) { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue }
     if ($out -notmatch 'Success') { throw "$($apk.Name) did not install: $out" }
     if (-not $already) { Add-Change @{ type = 'install'; package = $apk.Package; name = $apk.Name } }
     Ok "$($apk.Name) installed"
+    $apk | Add-Member -Force Already $false
     return $apk
 }
 
@@ -236,14 +261,14 @@ function Open-DeviceFolder {
     if ($null -eq $script:State.stepsDone) { $script:State.stepsDone = @() }
     if ($null -eq $script:State.skip) { $script:State.skip = @() }
 }
-function Save-State { $script:State | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $script:Dir 'state.json') -Encoding UTF8 }
+function Save-State { Write-Text (Join-Path $script:Dir 'state.json') ($script:State | ConvertTo-Json -Depth 6) }
 function Set-StepDone([string]$s) { $script:State.stepsDone = @(@($script:State.stepsDone) + $s | Sort-Object -Unique); Save-State }
 function Test-StepDone([string]$s) { return (@($script:State.stepsDone) -contains $s) }
 
 function Add-Change([hashtable]$h) {
     $h['time'] = (Get-Date).ToString('s')
     $h['device'] = $script:Dev
-    Add-Content -Path (Join-Path $script:Dir 'changes.jsonl') -Value ($h | ConvertTo-Json -Compress) -Encoding UTF8
+    Add-Line (Join-Path $script:Dir 'changes.jsonl') ($h | ConvertTo-Json -Compress)
 }
 function Get-Changes {
     $f = Join-Path $script:Dir 'changes.jsonl'
@@ -264,7 +289,7 @@ function Save-Snapshot {
     foreach ($k in 'window_animation_scale', 'transition_animation_scale', 'animator_duration_scale', 'mitv_fast_cur_anim_scale') {
         $snap.anim[$k] = Sh1 "settings get global $k"
     }
-    $snap | ConvertTo-Json -Depth 4 | Set-Content $f -Encoding UTF8
+    Write-Text $f ($snap | ConvertTo-Json -Depth 4)
 }
 
 # ------------------------------------------------------------------ catalog
@@ -334,6 +359,8 @@ function Test-TvHealth($base) {
 
 # adb push that fails loudly instead of leaving an old file on the TV.
 function Send-File([string]$local, [string]$remote) {
-    $out = (Invoke-Adb -s $script:Dev push $local $remote) -join ' '
+    $path = Get-AdbSafePath $local
+    $out = (Invoke-Adb -s $script:Dev push $path $remote) -join ' '
+    if ($path -ne $local) { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue }
     if ($out -notmatch 'pushed') { throw "Could not copy $([IO.Path]::GetFileName($local)) to the TV: $out" }
 }

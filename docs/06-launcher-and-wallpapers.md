@@ -3,8 +3,8 @@
 > **Easier:** double-click `Start-Here.cmd` and the setup wizard does this for you. This page explains what it does, and how to do it by hand.
 
 <p>
-  <img src="../screenshots/home_wp6.jpg" width="49%" />
-  <img src="../screenshots/plugin_settings.jpg" width="49%" />
+  <img src="../screenshots/home-02.jpg" width="49%" />
+  <img src="../screenshots/wallhaven-plugin.jpg" width="49%" />
 </p>
 
 ## Projectivy Launcher

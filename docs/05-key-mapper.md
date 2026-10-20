@@ -2,7 +2,7 @@
 
 > **Easier:** double-click `Start-Here.cmd` and the setup wizard does this for you. This page explains what it does, and how to do it by hand.
 
-<img src="../screenshots/keymapper_list.jpg" width="70%" />
+<img src="../screenshots/keymapper-keymaps.jpg" width="70%" />
 
 [Key Mapper](https://github.com/keymapperorg/KeyMapper) is free and open source, and it works with a TV remote. The mappings in the screenshot are just **examples** of what one person liked; make your own.
 
@@ -41,8 +41,19 @@ Runs [`tv-refresh.sh`](../scripts/device/tv-refresh.sh): re-applies everything a
    - Execution mode: **ADB**
 4. Add a second action, **Show volume dialog**. Key Mapper waits for the script to finish, so the volume bar flashes exactly when the refresh is done. That's a non-intrusive "done" signal that needs no notifications.
 
-### Why not a toast?
-On some firmwares an app's toasts are blocked together with its notifications ("Suppressing toast … by user request"). Key Mapper's ongoing notifications only go away if its notification permission is revoked, and that kills its toasts too. The volume bar works either way. (The shell can't show the volume UI itself on some firmwares, so it has to be Key Mapper's action.)
+### No notification clutter
+Key Mapper always keeps one or two minimum-priority notifications posted (key map status, keyboard toggle), and
+launchers like Projectivy show them as a badge on the home screen. `tv-apply.sh` hides them every time it runs
+(at boot, and every time you press the refresh button) by snoozing them for 30 days (`QUIET_APPS`). The app is
+not touched: no permission changes, no restarts.
+
+Don't fix this by revoking Key Mapper's notification permission: revoking restarts the app, which itself posts
+"Accessibility service needs restarting!", and some firmwares grant the permission back at boot anyway.
+
+### Why the volume bar and not a toast?
+On some firmwares an app's toasts are blocked together with its notifications ("Suppressing toast … by user
+request"). The volume bar works everywhere. (The shell can't show the volume UI itself on some firmwares, so it has
+to be Key Mapper's action.)
 
 ## Costs
 Key Mapper ≈ 50 MB plus Expert Mode ≈ 47 MB of always-resident memory. Worth it if you use it; skip Expert Mode if you don't need the refresh button.

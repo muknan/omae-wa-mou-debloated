@@ -14,7 +14,7 @@ param(
     [string]$Answers,
     [switch]$Auto,
     [switch]$Plan,
-    [ValidateSet('debloat', 'background', 'stick', 'remote', 'launcher')][string[]]$Steps,
+    [string[]]$Steps,          # debloat, background, stick, remote, launcher (commas or spaces)
     [switch]$Undo,
     [switch]$Status,
     [switch]$NoReboot,
@@ -324,7 +324,8 @@ function Get-BackgroundGroups {
 
 function New-ConfText($c) {
     $l = @('# Written by the omae-wa-mou-debloated setup wizard. Re-run the wizard to change it.')
-    foreach ($k in 'ANIM_SCALE', 'INCLUDE_USER_APPS', 'PREINSTALLED_APPS', 'STOP_ONLY', 'EXTRA_PROTECT', 'XIAOMI_ANIM_KEY', 'UNWHITELIST_NETFLIX', 'START_KEYMAPPER_EXPERT_MODE') {
+    foreach ($k in 'ANIM_SCALE', 'INCLUDE_USER_APPS', 'PREINSTALLED_APPS', 'STOP_ONLY', 'EXTRA_PROTECT', 'XIAOMI_ANIM_KEY', 'UNWHITELIST_NETFLIX', 'START_KEYMAPPER_EXPERT_MODE', 'QUIET_APPS') {
+        if ($null -eq $c.$k) { continue }
         $l += ('{0}="{1}"' -f $k, $c.$k)
     }
     return ($l -join "`n") + "`n"
@@ -333,7 +334,7 @@ function New-ConfText($c) {
 function Publish-Agent {
     $c = $script:State.conf
     $f = Join-Path $script:Dir 'tv-apply.conf'
-    [IO.File]::WriteAllText($f, (New-ConfText $c))
+    Write-Text $f (New-ConfText $c)
     $hadOwn = Sh1 '[ -f /data/local/tmp/tv-apply.sh ] && [ ! -f /data/local/tmp/tv-apply.conf ] && echo yes'
     if ($hadOwn -eq 'yes') { [void](Sh 'cp /data/local/tmp/tv-apply.sh /data/local/tmp/tv-apply.sh.bak'); Info 'Kept a copy of the existing tv-apply.sh as tv-apply.sh.bak' }
     foreach ($s in 'tv-apply.sh', 'tv-refresh.sh') { Send-File ([IO.Path]::Combine($script:Root, 'scripts', 'device', $s)) "/data/local/tmp/$s" }
@@ -383,6 +384,7 @@ function Step-Background {
         XIAOMI_ANIM_KEY             = $(if ((Sh1 'settings get global mitv_fast_cur_anim_scale') -notmatch 'null') { '1' } else { '0' })
         UNWHITELIST_NETFLIX         = $(if ($script:Info.All -contains 'com.netflix.ninja') { '1' } else { '0' })
         START_KEYMAPPER_EXPERT_MODE = $(if ($script:Info.All -contains 'io.github.sds100.keymapper') { '1' } else { '0' })
+        QUIET_APPS                  = 'io.github.sds100.keymapper com.tpn.adbautoenable'
     }
     $script:State.conf = $c; Save-State
     Add-Change @{ type = 'deploy'; anim = "$anim"; stopOnly = $c.STOP_ONLY; protect = $c.EXTRA_PROTECT; preinstalled = $c.PREINSTALLED_APPS }
@@ -449,7 +451,7 @@ function Step-Stick {
         $log = @(Sh "cat $st/setup.log 2>/dev/null")
         foreach ($l in ($log | Select-Object -Skip $seen)) {
             if ($l -match '^>>> (.*)') {
-                if ($l -match 'Approve') { OnTv 'A box "Allow USB debugging?" appears. Tick "Always allow from this computer" and choose Allow.' }
+                if ($l -match 'Approve') { OnTv 'If a box "Allow USB debugging?" appears, tick "Always allow from this computer" and choose Allow. (No box = already allowed.)' }
                 else { Info $matches[1] }
             }
         }
@@ -484,9 +486,10 @@ function Invoke-AaePair([string]$code, [int]$port) {
     return $false
 }
 
-function Connect-AaeApi {
+function Connect-AaeApi([bool]$launch = $true) {
     [void](Invoke-Adb -s $script:Dev forward tcp:19093 tcp:9093)
     try { return (Invoke-RestMethod -Uri 'http://127.0.0.1:19093/api/status' -TimeoutSec 5) } catch { }
+    if (-not $launch) { return $null }
     # Not running yet: opening the app once starts its service. (Never while the TV shows a pairing box:
     # switching apps closes it.)
     [void](Sh 'am start -n com.tpn.adbautoenable/.MainActivity >/dev/null 2>&1')
@@ -502,11 +505,14 @@ function Step-AdbAutoEnable {
     Say ''
     Info 'Android 14+ switches wireless debugging off after a restart or a Wi-Fi drop, which would stop the boot helper.'
     Info 'ADB Auto Enable (free, open source) switches it back on by itself.'
-    try { [void](Install-Helper 'adb-auto-enable') } catch { Bad $_.Exception.Message; return }
-    $s = Connect-AaeApi
+    try { $aae = Install-Helper 'adb-auto-enable' } catch { Bad $_.Exception.Message; return }
+    # Only open the app right after installing it (that starts its service once; after that it starts at boot).
+    $s = Connect-AaeApi (-not $aae.Already)
+    Set-Quiet 'com.tpn.adbautoenable'
     if ($null -eq $s -or $null -eq $s.isPaired) {
-        Warn "Couldn't reach ADB Auto Enable's setup page through the PC (some TVs already use its port)."
-        Info "Open http://$($script:Dev -replace ':\d+$', ''):9093 in a phone or PC browser and follow 'Pair Device' there."
+        Warn "Couldn't reach ADB Auto Enable's setup page (some TVs, like Xiaomi, already use its port)."
+        Info 'Often that''s fine: those TVs keep debugging on port 5555 by themselves. The test restart at the end will tell.'
+        Info "If the restart test fails, open http://$($script:Dev -replace ':\d+$', ''):9093 in a phone or PC browser and use 'Pair Device'."
         return
     }
     if ($s.isPaired) { Ok 'ADB Auto Enable is already paired.'; return }
@@ -541,6 +547,13 @@ function Add-AccessibilityService([string]$component) {
     Add-Change @{ type = 'accessibility-add'; component = $component }
 }
 
+# Helper apps post permanent "running" notifications (they show up as a badge on the home screen). Hide them
+# by snoozing them for 30 days: the apps keep working, nothing restarts. The boot script repeats this every run.
+function Set-Quiet([string]$pkg) {
+    $n = [int](Sh1 "c=0; for k in `$(cmd notification list 2>/dev/null | grep '|$pkg|'); do cmd notification snooze --for 2592000000 `$k >/dev/null 2>&1 && c=`$((c+1)); done; echo `$c")
+    if ($n -gt 0) { Ok "Hid $n permanent notification(s) from $pkg (no badge on your home screen)" }
+}
+
 function Step-Remote {
     Title 'Step 4' $StepNames.remote
     if ($script:Info.Sdk -lt 26) { Warn 'Key Mapper needs Android 8 or newer. Skipping.'; return }
@@ -550,16 +563,15 @@ function Step-Remote {
     if (-not (Ask-YesNo 'Set it up?' $true)) { return }
     $km = 'io.github.sds100.keymapper'
     if (Sh1 "pm path $km") { Ok 'Key Mapper is already installed.' } else { try { [void](Install-Helper 'keymapper') } catch { Bad $_.Exception.Message; return } }
-    [void](Sh "pm grant $km android.permission.WRITE_SECURE_SETTINGS")
     Add-AccessibilityService "$km/$km.system.accessibility.MyAccessibilityService"
     Ok 'Key Mapper can now see remote buttons (its accessibility service is on).'
     $script:State.conf.START_KEYMAPPER_EXPERT_MODE = '1'; Save-State
     $script:Info.All = @($script:Info.All) + $km
     [void](Publish-Agent)
-    [void](Sh "am start -n $km/.MainActivity")
     $starter = "/storage/emulated/0/Android/data/$km/starter"
     if (-not (Sh1 "ls $starter 2>/dev/null")) {
-        OnTv 'Key Mapper is open. Skip its intro screens, then open its menu and choose "Expert Mode". Just opening it is enough.'
+        [void](Sh "am start -n $km/.MainActivity")
+        OnTv 'Key Mapper is open. Skip its intro screens (if it asks to send notifications, choose Don''t allow), then open its menu and choose "Expert Mode". Just opening it is enough.'
         for ($i = 0; $i -lt 100 -and -not (Sh1 "ls $starter 2>/dev/null"); $i++) { Start-Sleep -Seconds 3 }
     }
     if (Sh1 "ls $starter 2>/dev/null") {
@@ -578,12 +590,14 @@ function Step-Remote {
     Info 'Bonus idea: map a button you never use (Live TV, the brand button) to "Launch app" for your favourite app.'
     $mark = Add-LogMark
     Say ''
-    Info 'When it is saved, press your new button on the remote. Waiting up to 5 minutes...'
+    Info 'When it is saved, press Home, then your new button on the remote. Already have this key map? Just press it.'
+    Info 'Waiting up to 5 minutes...'
     for ($i = 0; $i -lt 100; $i++) {
-        if (Get-LogAfterMark $mark 'refresh done') { Ok 'It works! The refresh ran from your remote button.'; Set-StepDone 'remote'; return }
+        if (Get-LogAfterMark $mark 'refresh done') { Ok 'It works! The refresh ran from your remote button.'; Set-Quiet $km; Set-StepDone 'remote'; return }
         Start-Sleep -Seconds 3
     }
     Warn "Didn't see the button being pressed. You can finish the key map later; everything else is ready."
+    Set-Quiet $km
     Set-StepDone 'remote'
 }
 
@@ -601,15 +615,21 @@ function Step-Launcher {
     Ok 'Projectivy Launcher is installed.'
     Info 'Projectivy takes over the Home button with a small accessibility helper. The stock launcher stays installed;'
     Info 'Projectivy needs it in the background on Google TV.'
-    if (Ask-YesNo 'Switch on Projectivy''s Home-button helper for you?' $true) {
-        Add-AccessibilityService "$pj/$pj.services.ProjectivyAccessibilityService"
-        Ok 'Done.'
+    $pjA11y = "$pj/$pj.services.ProjectivyAccessibilityService"
+    if ((Sh1 'settings get secure enabled_accessibility_services') -split ':' -contains $pjA11y) { Ok 'Projectivy''s Home-button helper is already on.' }
+    elseif (Ask-YesNo 'Switch on Projectivy''s Home-button helper for you?' $true) {
+        Add-AccessibilityService $pjA11y
+        Ok 'Projectivy''s Home-button helper is on.'
     }
-    [void](Sh "monkey -p $pj -c android.intent.category.LEANBACK_LAUNCHER 1 >/dev/null 2>&1")
-    OnTv 'Projectivy is open. In its settings, turn on the option to override the default launcher if it asks.'
+    if ($script:Info.Home -eq $pj) { Ok 'Projectivy is already your home screen.' }
+    else {
+        [void](Sh "monkey -p $pj -c android.intent.category.LEANBACK_LAUNCHER 1 >/dev/null 2>&1")
+        OnTv 'Projectivy is open. In its settings, turn on the option to override the default launcher if it asks.'
+    }
     if (Ask-YesNo 'Add rotating wallpapers from Wallhaven (Booru Wallpaper Provider plugin)?' $true) {
         try {
-            [void](Install-Helper 'booru-wallpapers')
+            $bw = Install-Helper 'booru-wallpapers'
+            if ($bw.Already) { Info 'Keeping your existing wallpaper settings.'; Set-StepDone 'launcher'; return }
             Say '  Set it up on the TV:' White
             Info '1. Open "Booru Wallpaper Provider" from your apps. Booru URL: https://wallhaven.cc   Booru type: Wallhaven'
             Info '   Optional search, e.g.  ratio:16:9'
@@ -621,9 +641,17 @@ function Step-Launcher {
 }
 
 # ====================================================================== finish, test restart, report
+# Android saves package and permission changes to disk about 10 seconds after they happen. Restarting sooner
+# can silently lose them, so always give it time first.
+function Wait-ForSave {
+    Info 'Letting Android save the changes...'
+    Start-Sleep -Seconds 15
+}
+
 function Test-Restart {
     $ip = $script:Dev -replace ':\d+$', ''
     $mark = Add-LogMark
+    Wait-ForSave
     Info 'Restarting the TV. Please don''t touch it for about 5 minutes.'
     [void](Invoke-Adb -s $script:Dev reboot)
     Start-Sleep -Seconds 40
@@ -640,7 +668,17 @@ function Test-Restart {
     Ok 'TV is back. Waiting for the boot helper...'
     for ($i = 0; $i -lt 80; $i++) {
         $l = Get-LogAfterMark $mark 'apply start (uptime'
-        if ($l -match 'uptime ([\d.]+)s') { Ok ("Re-applied by itself {0:N0} seconds after the TV started. No PC needed." -f [double]$matches[1]); Start-Sleep -Seconds 20; return $true }
+        if ($l -match 'uptime ([\d.]+)s') {
+            Ok ("Re-applied by itself {0:N0} seconds after the TV started. No PC needed." -f [double]$matches[1])
+            # The helper runs a second pass ~2 minutes later for apps that start late; measure after that.
+            Info 'Waiting for its second pass (about 2 minutes) before measuring...'
+            for ($j = 0; $j -lt 40; $j++) {
+                if (@(Sh "sed -n '/$mark/,`$p' /data/local/tmp/tv-apply.log 2>/dev/null | grep 'apply done'").Count -ge 2) { break }
+                Start-Sleep -Seconds 6
+            }
+            Start-Sleep -Seconds 15
+            return $true
+        }
         Start-Sleep -Seconds 6
     }
     Warn 'The boot helper did not run within 8 minutes. See docs/08-troubleshooting.md, "Boot helper".'
@@ -664,7 +702,7 @@ function Write-Report($before, $after, [bool]$restartOk) {
         '## Undo', '', 'Double-click Start-Here.cmd and choose "Undo everything", or run:', '',
         '```', ".\setup\Wizard.ps1 -Device $script:Dev -Undo", '```')
     $f = Join-Path $script:Dir 'report.md'
-    $r -join "`n" | Set-Content $f -Encoding UTF8
+    Write-Text $f ($r -join "`n")
     return $f
 }
 
@@ -679,8 +717,9 @@ function Finish-Setup {
     $before = $script:State.before
     $after = Get-Measure
     Say ''
-    Ok ("Free memory: {0} MB at the start, {1} MB now" -f $before.FreeMb, $after.FreeMb)
-    Ok ("App processes running: {0} at the start, {1} now" -f $before.AppProcesses, $after.AppProcesses)
+    $when = if ($restartOk) { 'after a restart' } else { 'now' }
+    Ok ("Free memory: {0} MB at the start, {1} MB {2}" -f $before.FreeMb, $after.FreeMb, $when)
+    Ok ("App processes running: {0} at the start, {1} {2}" -f $before.AppProcesses, $after.AppProcesses, $when)
     $f = Write-Report $before $after $restartOk
     Ok "Report saved: $f"
     Say ''
@@ -703,6 +742,7 @@ function Invoke-Undo {
             if (-not ($snap -and @($snap.disabled) -contains $c.package)) { [void](Sh "pm enable --user 0 $($c.package)"); Ok "back on: $($c.package)" }
             $enabled[$c.package] = $true
         }
+        if ($c.type -eq 'notifications-off') { [void](Sh "pm grant $($c.package) android.permission.POST_NOTIFICATIONS"); Ok "notifications back on: $($c.package)" }
         if ($c.type -eq 'accessibility-add') {
             $cur = (Sh1 'settings get secure enabled_accessibility_services') -split ':' | Where-Object { $_ -and $_ -ne $c.component }
             [void](Sh ('settings put secure enabled_accessibility_services ' + $(if ($cur) { $cur -join ':' } else { "''" })))
@@ -719,6 +759,7 @@ function Invoke-Undo {
             if ($v -and $v -ne 'null') { [void](Sh "settings put global $k $v") } elseif ($k -ne 'mitv_fast_cur_anim_scale') { [void](Sh "settings put global $k 1.0") }
         }
         Ok 'animation speed restored'
+        [void](Sh "for k in `$(cmd notification snoozed 2>/dev/null | grep -oE '^[^ ]+' | grep -E 'keymapper|adbautoenable'); do cmd notification unsnooze `$k; done")
         [void](Sh 'rm -f /data/local/tmp/tv-apply.sh /data/local/tmp/tv-refresh.sh /data/local/tmp/tv-apply.conf /data/local/tmp/tv-apply.log; [ -f /data/local/tmp/tv-apply.sh.bak ] && mv /data/local/tmp/tv-apply.sh.bak /data/local/tmp/tv-apply.sh')
         Ok 'scripts removed from the TV'
     }
@@ -726,10 +767,12 @@ function Invoke-Undo {
     if ($inst.Count -and (Ask-YesNo "Also uninstall the helper apps the wizard installed ($(($inst | ForEach-Object { $_.name }) -join ', '))?" $true)) {
         foreach ($i in $inst) { [void](Invoke-Adb -s $script:Dev uninstall $i.package); Ok "uninstalled $($i.name)" }
     }
+    $stillOff = @($enabled.Keys | Where-Object { (Sh 'pm list packages -d') -contains "package:$_" -and -not ($snap -and @($snap.disabled) -contains $_) })
+    if ($stillOff.Count) { Warn "Still switched off: $($stillOff -join ', '). Run Undo again, or: adb shell pm enable --user 0 <package>" }
     Add-Change @{ type = 'undo' }
     Move-Item (Join-Path $script:Dir 'changes.jsonl') (Join-Path $script:Dir ("changes-undone-{0}.jsonl" -f (Get-Date -Format 'yyyyMMdd-HHmmss')))
     $script:State.stepsDone = @(); $script:State.conf = $null; Save-State
-    if (Ask-YesNo 'Restart the TV now to finish? (recommended)' $true) { [void](Invoke-Adb -s $script:Dev reboot) }
+    if (Ask-YesNo 'Restart the TV now to finish? (recommended)' $true) { Wait-ForSave; [void](Invoke-Adb -s $script:Dev reboot) }
     Ok 'Undo complete.'
 }
 
@@ -787,8 +830,8 @@ function Write-Plan {
     }
     foreach ($q in $qs) { $template.features[$q.id] = $q.recommend }
     $pf = Join-Path $script:Dir 'plan.json'; $af = Join-Path $script:Dir 'answers-template.json'
-    $plan | ConvertTo-Json -Depth 8 | Set-Content $pf -Encoding UTF8
-    $template | ConvertTo-Json -Depth 5 | Set-Content $af -Encoding UTF8
+    Write-Text $pf ($plan | ConvertTo-Json -Depth 8)
+    Write-Text $af ($template | ConvertTo-Json -Depth 5)
     Ok "Plan written (nothing changed on the TV): $pf"
     Ok "Answers template: $af"
     Info ("{0} junk packages, {1} questions, {2} preinstalled apps to choose from, {3} apps for the sleep list" -f $plan.debloat.low.Count, $qs.Count, $plan.debloat.appCandidates.Count, $plan.background.asleep.Count)
@@ -796,7 +839,7 @@ function Write-Plan {
 
 # ====================================================================== main
 function Select-Steps {
-    if ($Steps) { return $Steps }
+    if ($Steps) { return $Steps }  # already split and checked in Start-Wizard
     $preset = Get-Answer 'steps' $null
     if ($preset) { return @($StepNames.Keys | Where-Object { $preset.$_ }) }
     $sel = @{}
@@ -826,6 +869,12 @@ function Start-Wizard {
     Say '  omae-wa-mou-debloated  |  make a slow Google TV fast, and keep it that way' Cyan
     Say '  No root. Nothing deleted. Everything can be undone.' DarkCyan
     $script:AutoMode = [bool]$Auto
+    # -Steps a,b arrives as one string through powershell -File / Start-Here.cmd: split it ourselves.
+    if ($Steps) {
+        $script:Steps = @($Steps | ForEach-Object { $_ -split '[,\s]+' } | Where-Object { $_ })
+        $bad = @($script:Steps | Where-Object { @($StepNames.Keys) -notcontains $_ })
+        if ($bad.Count) { Bad "Unknown step(s): $($bad -join ', '). Use: $(@($StepNames.Keys) -join ', ')"; return }
+    }
     if ($Answers) { $script:Ans = Get-Content $Answers -Raw | ConvertFrom-Json }
     if ($script:AutoMode -and -not $Device) { Bad '-Auto needs -Device <TV IP>.'; return }
 

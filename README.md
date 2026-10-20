@@ -8,11 +8,12 @@ and you can undo all of it. One double-click, a few questions, done.
 *Omae wa mou debloated.* Your apps are already asleep. Even after a reboot.
 
 <p align="center">
-  <img src="screenshots/home_wp6.jpg" width="49%" />
-  <img src="screenshots/home_wp1.jpg" width="49%" />
-  <img src="screenshots/home_wp2.jpg" width="49%" />
-  <img src="screenshots/home_wp5.jpg" width="49%" />
+  <img src="screenshots/home-01.jpg" width="49%" />
+  <img src="screenshots/home-05.jpg" width="49%" />
+  <img src="screenshots/home-06.jpg" width="49%" />
+  <img src="screenshots/home-09.jpg" width="49%" />
 </p>
+<p align="center"><sub>Same TV, same home screen. A new wallpaper from Wallhaven every so often, zero ads, zero "top picks for you".</sub></p>
 
 ## What it does
 
@@ -37,6 +38,7 @@ Then the TV restarts and quietly undoes half of it: background limits reset, men
 | Wireless debugging turns itself back on | ❌ | ✅ with ADB Auto Enable |
 | One remote button to make the TV feel freshly restarted | ❌ | ✅ with Key Mapper |
 | Checks the TV after every change and rolls back if something breaks | ❌ | ✅ |
+| No leftover "running" notifications from the helpers | n/a | ✅ hidden automatically |
 
 ## Which TVs?
 
@@ -47,8 +49,9 @@ Then the TV restarts and quietly undoes half of it: background limits reset, men
 | **Amazon Fire TV** | ✅ junk apps, sleep, boot helper. No custom home screen (Fire OS blocks it) |
 | Samsung, LG, Roku, Hisense VIDAA | ❌ not Android |
 
-Built and tested on a Xiaomi TV X Pro 2025 (Google TV 14, 2 GB). The catalog also covers
-packages from community-tested lists for 90+ models from more than 15 brands. Packages it doesn't know are left alone.
+Built and tested on a Xiaomi TV X Pro 2025 (Google TV 14, 2 GB): full runs, restart tests, and a real Undo and
+re-run. The catalog also covers packages from community-tested lists for 90+ models from more than 15 brands.
+Packages it doesn't know are left alone.
 
 ---
 
@@ -66,17 +69,9 @@ Then Settings > System > **Developer options** > turn on **USB debugging** (and 
 **3. Double-click `Start-Here.cmd`** in the extracted folder and answer the questions.
 
 That's it. The wizard finds your TV on the network, tells you whenever you need to press something on the TV,
-and does the rest. It looks like this:
+and does the rest. This is a real run:
 
-```
-  Here is the plan. [x] = will do,  (done) = already done on this TV:
-    1) [x] Switch off junk apps (ads, tracking, demo mode) (recommended)
-    2) [x] Keep apps asleep when you are not using them + faster menus (recommended)
-    3) [x] Make it survive restarts (installs small free helper apps on the TV) (recommended)
-    4) [ ] A "fresh boot" button on your remote (Key Mapper) (optional)
-    5) [ ] Ad-free home screen with rotating wallpapers (Projectivy) (optional)
-  Press Enter to start, or type numbers to tick/untick (e.g. 4 5)
-```
+<p align="center"><img src="screenshots/wizard-debloat.jpg" width="90%" /></p>
 
 > Windows says "Windows protected your PC"? Click **More info** > **Run anyway**. It's a plain text script;
 > open it in Notepad if you want to see what it does.
@@ -105,6 +100,48 @@ Only the questions that matter for **your** TV are asked. Not sure? Press Enter 
 | Preinstalled apps you never use | you pick, default none |
 | Which apps may keep running (music, VPN)? | detected automatically, you can change it |
 
+## See it work
+
+**It survives a restart.** At the end the wizard restarts the TV and waits for the TV to re-apply everything by
+itself. Then the boot helper's own log on the TV shows it, every single boot:
+
+<p align="center">
+  <img src="screenshots/wizard-restart.jpg" width="49%" />
+  <img src="screenshots/boot-helper-log.jpg" width="49%" />
+</p>
+
+**The fresh-boot button.** A [Key Mapper](https://github.com/keymapperorg/KeyMapper) key map: double press any
+spare button, every background app goes to sleep, and the volume bar flashes when it's done. Spare buttons can
+also open apps directly.
+
+<p align="center">
+  <img src="screenshots/keymapper-refresh-button.jpg" width="49%" />
+  <img src="screenshots/keymapper-keymaps.jpg" width="49%" />
+</p>
+
+**The home screen.** [Projectivy Launcher](https://play.google.com/store/apps/details?id=com.spocky.projengmenu)
+with the [Booru Wallpaper Provider](https://github.com/Kurocon/projectivy-booru-wallpaper-provider) plugin
+pointed at [Wallhaven](https://wallhaven.cc).
+
+<p align="center">
+  <img src="screenshots/launcher-quick-menu.jpg" width="49%" />
+  <img src="screenshots/launcher-all-apps.jpg" width="49%" />
+  <img src="screenshots/launcher-wallpaper-settings.jpg" width="49%" />
+  <img src="screenshots/wallhaven-plugin.jpg" width="49%" />
+</p>
+
+<details>
+<summary><b>More wallpapers</b></summary>
+<p align="center">
+  <img src="screenshots/home-02.jpg" width="49%" />
+  <img src="screenshots/home-03.jpg" width="49%" />
+  <img src="screenshots/home-04.jpg" width="49%" />
+  <img src="screenshots/home-07.jpg" width="49%" />
+  <img src="screenshots/home-08.jpg" width="49%" />
+  <img src="screenshots/home-10.jpg" width="49%" />
+</p>
+</details>
+
 ## How it keeps you safe
 
 - **Nothing is deleted.** Apps are switched off (`pm disable-user`), never uninstalled. No root.
@@ -122,7 +159,7 @@ Only the questions that matter for **your** TV are asked. Not sure? Press Enter 
 
 Double-click `Start-Here.cmd` > **Undo everything**. It switches everything back on, removes the background
 limits, the scripts and the accessibility helpers it added, restores the animation speed, and offers to
-uninstall the helper apps. Then restart the TV.
+uninstall the helper apps it installed. Then the TV restarts.
 
 ## Stuck?
 
@@ -157,6 +194,8 @@ uninstall the helper apps. Then restart the TV.
 - Android 14+ turns wireless debugging off after a restart or Wi-Fi drop. **ADB Auto Enable** turns it back on,
   so the boot helper always gets in.
 - The remote button is a **Key Mapper** key map that runs the same script and flashes the volume bar when done.
+- The helpers' permanent "running" notifications are snoozed by the same script, so no badge shows up on your
+  home screen.
 - Every tweak was tested on a real TV. Some popular tips made things worse and were left out: see
   [what we measured](docs/07-measuring.md).
 
