@@ -23,6 +23,11 @@ and only come back when the human has to press something on the TV.
 - If something is unsupported or unclear, stop and say so. Don't try a more aggressive alternative.
 - Downloaded APKs must match the SHA-256 in [`catalog/helpers.json`](catalog/helpers.json). The wizard checks
   this; don't install helper apps from anywhere else.
+- Don't revoke apps' notification permission to silence them: revoking restarts the app (Key Mapper then posts a
+  "needs restarting" warning) and some firmwares grant it back at boot. The boot script hides helper notifications
+  by snoozing them instead.
+- Don't restart the TV within ~15 seconds of switching packages on or off: Android saves those changes to disk
+  with a delay, and an immediate restart can lose them. The wizard already waits; do the same by hand.
 
 ## 1. Tools you have
 
@@ -33,7 +38,7 @@ and only come back when the human has to press something on the TV.
 | `setup/Wizard.ps1 -Device <ip> -PairCode <code> [-PairPort <port>]` | Pairs ADB Auto Enable (Android 14+), see step 5. |
 | `setup/Wizard.ps1 -Device <ip> -Status` / `-Undo -Auto` | Show what's applied / undo everything. |
 | `tests/DryRun.ps1 -Device <ip> -Steps debloat,background -Answers <file> -Auto` | Same as the real run, but every change is printed instead of done. Use it to preview. |
-| `adb` | Read-only checks (`adb -s <ip>:5555 shell ...`). Use `shell -n` so adb doesn't eat your stdin. |
+| `adb` | Read-only checks (`adb -s <ip>:5555 shell ...`). Use `shell -n` so adb doesn't eat your stdin, and add `2>/dev/null` after `dumpsys` when piping it into `grep -m1` (otherwise "Broken pipe" errors end up in your output). |
 
 On Windows run PowerShell scripts as `powershell -NoProfile -ExecutionPolicy Bypass -File <script> <args>`.
 On macOS/Linux use PowerShell 7 (`pwsh`); this path is less tested, so preview with `tests/DryRun.ps1` first.
@@ -122,16 +127,18 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\DryRun.ps1 -Device <ip
 powershell -NoProfile -ExecutionPolicy Bypass -File setup\Wizard.ps1 -Device <ip> -Answers my-tv\<tv>\answers.json -Auto
 ```
 
-Watch the output. Relay every line starting with `ON THE TV >>` to the human immediately; the wizard is waiting
-for them. Lines with `[x]` are failures, `[!]` are warnings, `[ok]` is progress.
+A full run takes 10-20 minutes and restarts the TV once at the end, so run it in the background, write its output
+to a log file and follow that. Relay every line starting with `ON THE TV >>` to the human immediately; the wizard
+is waiting for them. Lines with `[x]` are failures, `[!]` are warnings, `[ok]` is progress. Re-running is safe:
+steps that are already done are detected and skipped.
 
 ## 5. Steps that need the human's hands
 
 | Step | What the human does | What you do |
 |---|---|---|
 | Boot helper (stick) | Approve "Allow USB debugging?" for Termux on the TV | Nothing; the wizard types into Termux and waits |
-| ADB Auto Enable (Android 14+) | Wireless debugging > *Pair device with pairing code*, read you the 6-digit code | `Wizard.ps1 -Device <ip> -PairCode <code>` (add `-PairPort` if it asks) |
-| Remote button (Key Mapper) | Open Key Mapper's *Expert Mode* screen once; create the key map (steps are printed); press the button | Watch for "It works!" |
+| ADB Auto Enable (Android 14+) | Wireless debugging > *Pair device with pairing code*, read you the 6-digit code | `Wizard.ps1 -Device <ip> -PairCode <code>` (add `-PairPort` if it asks). If the wizard says it couldn't reach the setup page, that's normal on TVs that already use its port (Xiaomi): if the restart test passes, no pairing is needed. |
+| Remote button (Key Mapper) | Open Key Mapper's *Expert Mode* screen once (choose *Don't allow* if it asks to send notifications); create the key map (steps are printed); press Home, then the button | Watch for "It works!" |
 | Launcher (Projectivy) | Press *Install* in the Play Store; accept Projectivy's own setup; set the wallpaper plugin to `https://wallhaven.cc`, type *Wallhaven* | Nothing |
 
 ## 6. Finish
@@ -139,6 +146,10 @@ for them. Lines with `[x]` are failures, `[!]` are warnings, `[ok]` is progress.
 The wizard restarts the TV (if `testRestart`), checks that the boot helper re-applied everything by itself,
 and writes `my-tv/<tv>/report.md`. Summarise it for the human in 3-4 lines: what was switched off, free memory
 before/after, whether it survives restarts, and how to undo (`Start-Here.cmd` > Undo everything).
+
+To double-check afterwards (read-only): `adb shell -n tail /data/local/tmp/tv-apply.log` shows one
+`apply start (uptime ...)` line about 80 s and another about 210 s after every restart, and
+`adb shell -n cmd notification list | grep keymapper` should print nothing.
 
 ## 7. TVs the catalog doesn't know well
 
