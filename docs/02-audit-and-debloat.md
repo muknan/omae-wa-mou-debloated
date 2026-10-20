@@ -1,12 +1,14 @@
 # 2. Audit & debloat
 
+> **Easier:** double-click `Start-Here.cmd` and the setup wizard does this for you. This page explains what it does, and how to do it by hand.
+
 ## Audit first (read-only)
 ```powershell
 .\scripts\pc\Audit.ps1 -Device <TV-IP>:5555
 ```
 Saves build info, memory, CPU hogs, packages, launchers and background usage to a folder. The two files worth reading first:
-- `cpu.txt` — anything sitting near 100%? (On the test TV, Xiaomi's AirPlay daemon was stuck at a full core.)
-- `background-24h.txt` — which apps run all day even though you didn't open them.
+- `cpu.txt`: anything sitting near 100%? (On the test TV, Xiaomi's AirPlay daemon was stuck at a full core.)
+- `background-24h.txt`: which apps run all day even though you didn't open them.
 
 Quick checks by hand:
 ```powershell
@@ -16,7 +18,8 @@ adb shell dumpsys cpuinfo | more       # CPU hogs
 ```
 
 ## The list
-[`lists/xiaomi-google-tv.txt`](../lists/xiaomi-google-tv.txt) — one package per line with a tier:
+The wizard uses the multi-brand [catalog](../catalog/) and only asks about what your TV has. The manual script
+below uses [`lists/xiaomi-google-tv.txt`](../lists/xiaomi-google-tv.txt): one package per line with a tier:
 
 | Tier | Meaning |
 |---|---|
@@ -24,7 +27,7 @@ adb shell dumpsys cpuinfo | more       # CPU hogs
 | `CONDITIONAL` | Only if you don't use the feature: PatchWall, antenna TV, AirPlay, Ambient Mode. |
 | `DNT` | Do not touch. Never applied; kept as documentation with the reason. |
 
-**Other brands:** copy the file, keep only packages your TV actually has, and tier them yourself. Look each one up and test in small batches.
+**Other brands:** the [catalog](../catalog/packages.csv) has risk levels for 15+ brands. Copy the lines for packages your TV actually has into a list file in this format, and test in small batches.
 
 ## Apply
 ```powershell

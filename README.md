@@ -47,7 +47,7 @@ Then the TV restarts and quietly undoes half of it: background limits reset, men
 | **Amazon Fire TV** | ✅ junk apps, sleep, boot helper. No custom home screen (Fire OS blocks it) |
 | Samsung, LG, Roku, Hisense VIDAA | ❌ not Android |
 
-Tested end to end on a Xiaomi TV X Pro 2025 (Google TV 14, 2 GB). The catalog also covers
+Built and tested on a Xiaomi TV X Pro 2025 (Google TV 14, 2 GB). The catalog also covers
 packages from community-tested lists for 90+ models from more than 15 brands. Packages it doesn't know are left alone.
 
 ---

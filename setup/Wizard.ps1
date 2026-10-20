@@ -87,8 +87,10 @@ function Find-Tvs {
 }
 
 function Connect-Serial([string]$serial) {
+    $script:LastConnect = 'refused'
     $out = (Invoke-Adb connect $serial) -join ' '
     if ($out -notmatch 'connected to|authenticate') { return $false }
+    $script:LastConnect = 'unauthorized'
     $told = $false
     for ($i = 0; $i -lt 60; $i++) {
         $st = Get-AdbState $serial
@@ -141,6 +143,7 @@ function Connect-Tv {
     if ($Device) {
         $d = if ($Device -match ':\d+$') { $Device } else { "${Device}:5555" }
         if (Connect-Serial $d) { return }
+        if ($script:LastConnect -eq 'unauthorized') { throw "The TV didn't allow this computer. Run again and press Allow on the TV (tick 'Always allow')." }
         if ($script:AutoMode) { throw "Can't connect to $d. Is debugging on, and did you allow this computer on the TV?" }
         if (Connect-Pairing ($d -replace ':\d+$', '')) { return }
         throw "Can't connect to $d."
@@ -159,6 +162,7 @@ function Connect-Tv {
         if ($c -eq $opts.Count - 1) { continue }
         $ip = if ($c -eq $opts.Count - 2) { (Read-Host '  TV IP address').Trim() -replace ':\d+$', '' } else { $tvs[$c].Ip }
         if (Connect-Serial "${ip}:5555") { return }
+        if ($script:LastConnect -eq 'unauthorized') { Warn 'The TV did not allow this computer yet. Choose your TV again and press Allow on the TV.'; continue }
         if (Connect-Pairing $ip) { return }
         Warn 'That did not work. Check that debugging is still on (it switches off if the TV loses Wi-Fi) and try again.'
     }
@@ -167,7 +171,7 @@ function Connect-Tv {
 function Show-TvCard {
     $i = $script:Info
     Say ''
-    Ok ("Connected: {0} {1}  |  {2}, Android {3}  |  {4:N1} GB RAM  |  {5}" -f $i.Maker, $i.Model, $i.Platform, $i.Android, ($i.RamMb / 1024), $i.Abi)
+    Ok ("Connected: {0} {1}  |  {2}, Android {3}  |  {4} GB RAM  |  {5}" -f $i.Maker, $i.Model, $i.Platform, $i.Android, ([math]::Ceiling($i.RamMb / 512) / 2), $i.Abi)
     Info "Home app: $($i.Home)   |   apps you installed: $($i.User.Count)   |   already switched off: $($i.Disabled.Count)"
     if ($i.Sdk -lt 28) { Warn "Android $($i.Android) is old: junk apps can be switched off, but keeping apps asleep needs Android 9 or newer." }
     if ($i.Platform -eq 'Fire TV') { Info 'Fire TV: the junk-app and sleep steps work; the Projectivy home screen step does not (Fire OS blocks other launchers).' }
@@ -332,8 +336,8 @@ function Publish-Agent {
     [IO.File]::WriteAllText($f, (New-ConfText $c))
     $hadOwn = Sh1 '[ -f /data/local/tmp/tv-apply.sh ] && [ ! -f /data/local/tmp/tv-apply.conf ] && echo yes'
     if ($hadOwn -eq 'yes') { [void](Sh 'cp /data/local/tmp/tv-apply.sh /data/local/tmp/tv-apply.sh.bak'); Info 'Kept a copy of the existing tv-apply.sh as tv-apply.sh.bak' }
-    foreach ($s in 'tv-apply.sh', 'tv-refresh.sh') { [void](Invoke-Adb -s $script:Dev push ([IO.Path]::Combine($script:Root, 'scripts', 'device', $s)) "/data/local/tmp/$s") }
-    [void](Invoke-Adb -s $script:Dev push $f /data/local/tmp/tv-apply.conf)
+    foreach ($s in 'tv-apply.sh', 'tv-refresh.sh') { Send-File ([IO.Path]::Combine($script:Root, 'scripts', 'device', $s)) "/data/local/tmp/$s" }
+    Send-File $f /data/local/tmp/tv-apply.conf
     [void](Sh 'chmod 755 /data/local/tmp/tv-apply.sh /data/local/tmp/tv-refresh.sh; chmod 644 /data/local/tmp/tv-apply.conf')
     $out = Sh 'sh /data/local/tmp/tv-apply.sh; tail -n 40 /data/local/tmp/tv-apply.log'
     return $out
@@ -393,10 +397,9 @@ function Step-Background {
 
 # ====================================================================== step 3: make it stick
 function Wait-TermuxShell {
-    $uid = Sh1 'dumpsys package com.termux | grep -m1 -oE ''userId=[0-9]+'''
-    $user = 'u0_a' + ([int]($uid -replace '\D', '') - 10000)
     for ($i = 0; $i -lt 90; $i++) {
-        if ([int](Sh1 "ps -A -o USER,NAME | grep -cE '^$user +(bash|login)'") -gt 0) { return $true }
+        $user = ((Sh1 'ps -A -o USER,NAME | grep -m1 -E '' com\.termux$''') -split '\s+')[0]
+        if ($user -and [int](Sh1 "ps -A -o USER,NAME | grep -cE '^$user +(bash|login)$'") -gt 0) { return $true }
         if ($i -eq 3) { Info 'Termux is setting itself up on the TV (the first start takes a minute)...' }
         Start-Sleep -Seconds 2
     }
@@ -418,9 +421,11 @@ function Step-Stick {
     }
     try { [void](Install-Helper 'termux-boot') } catch { Bad $_.Exception.Message; return }
     [void](Sh 'pm grant com.termux android.permission.READ_EXTERNAL_STORAGE; pm grant com.termux android.permission.WRITE_EXTERNAL_STORAGE')
+    # Keep power saving from cutting the boot script short (removed again when Termux is uninstalled).
+    [void](Sh 'cmd deviceidle whitelist +com.termux >/dev/null 2>&1')
     $st = '/sdcard/Download/tvagent'
     [void](Sh "mkdir -p $st; rm -f $st/status $st/setup.log")
-    foreach ($s in 'setup.sh', '10-tv-agent.sh') { [void](Invoke-Adb -s $script:Dev push ([IO.Path]::Combine($script:Root, 'scripts', 'termux', $s)) "$st/$s") }
+    foreach ($s in 'setup.sh', '10-tv-agent.sh') { Send-File ([IO.Path]::Combine($script:Root, 'scripts', 'termux', $s)) "$st/$s" }
     # Termux:Boot must be opened once, or Android never tells it about restarts.
     [void](Sh 'monkey -p com.termux.boot -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; am start -n com.termux.boot/.BootActivity >/dev/null 2>&1')
     Start-Sleep -Seconds 3
@@ -433,7 +438,11 @@ function Step-Stick {
     $seen = 0
     for ($i = 0; $i -lt 400; $i++) {
         if ($typed -eq 0 -or ($i -eq 15 -and -not $status)) {
+            if ($typed) { [void](Sh 'am start -n com.termux/.app.TermuxActivity; input keyevent 66') }
             [void](Sh "input text 'bash%s$st/setup.sh'"); [void](Sh 'input keyevent 66'); $typed++
+        }
+        if ($i -eq 40 -and -not $status) {
+            OnTv "Termux didn't pick up the command. Open Termux on the TV and type:  bash $st/setup.sh  then press Enter."
         }
         Start-Sleep -Seconds 3
         $status = Sh1 "cat $st/status 2>/dev/null"
@@ -476,10 +485,13 @@ function Invoke-AaePair([string]$code, [int]$port) {
 }
 
 function Connect-AaeApi {
+    [void](Invoke-Adb -s $script:Dev forward tcp:19093 tcp:9093)
+    try { return (Invoke-RestMethod -Uri 'http://127.0.0.1:19093/api/status' -TimeoutSec 5) } catch { }
+    # Not running yet: opening the app once starts its service. (Never while the TV shows a pairing box:
+    # switching apps closes it.)
     [void](Sh 'am start -n com.tpn.adbautoenable/.MainActivity >/dev/null 2>&1')
     Start-Sleep -Seconds 4
     [void](Sh 'input keyevent KEYCODE_HOME')
-    [void](Invoke-Adb -s $script:Dev forward tcp:19093 tcp:9093)
     for ($i = 0; $i -lt 6; $i++) {
         try { return (Invoke-RestMethod -Uri 'http://127.0.0.1:19093/api/status' -TimeoutSec 5) } catch { Start-Sleep -Seconds 3 }
     }
@@ -507,6 +519,16 @@ function Step-AdbAutoEnable {
     $code = (Read-Host '  Type the 6-digit code').Trim()
     [void](Invoke-AaePair $code 0)
     [void](Invoke-Adb -s $script:Dev forward --remove tcp:19093)
+}
+
+# The TV log trims itself to 300 lines, so mark it and look for lines after the mark.
+function Add-LogMark {
+    $id = 'wizard-mark-' + (Get-Random)
+    [void](Sh "echo $id >> /data/local/tmp/tv-apply.log")
+    return $id
+}
+function Get-LogAfterMark([string]$id, [string]$pattern) {
+    return Sh1 "sed -n '/$id/,`$p' /data/local/tmp/tv-apply.log 2>/dev/null | grep -m1 '$pattern'"
 }
 
 # ====================================================================== step 4: remote button
@@ -551,14 +573,14 @@ function Step-Remote {
     Info '   Set the trigger to "Double press".'
     Info '2. Actions > + > "Shell command". Script:  sh /data/local/tmp/tv-refresh.sh   Execution mode: ADB'
     Info '3. Add a second action: "Show volume dialog" (this is the "done" signal).'
-    Info '4. Save. Tip: in Expert Mode settings, turn off "Auto start", the boot helper already does that.'
+    Info '4. Save. Tip: in Key Mapper''s Expert Mode settings, turn off "Auto start" (the boot helper starts it instead).'
+    if (-not (Test-StepDone 'stick')) { Warn 'Without step 3, Expert Mode stops at every restart and the button needs the wizard again. Step 3 fixes that.' }
     Info 'Bonus idea: map a button you never use (Live TV, the brand button) to "Launch app" for your favourite app.'
-    $mark = [int](Sh1 'wc -l < /data/local/tmp/tv-apply.log')
+    $mark = Add-LogMark
     Say ''
     Info 'When it is saved, press your new button on the remote. Waiting up to 5 minutes...'
     for ($i = 0; $i -lt 100; $i++) {
-        $new = Sh "tail -n +$($mark + 1) /data/local/tmp/tv-apply.log | grep 'refresh done'"
-        if ($new) { Ok 'It works! The refresh ran from your remote button.'; Set-StepDone 'remote'; return }
+        if (Get-LogAfterMark $mark 'refresh done') { Ok 'It works! The refresh ran from your remote button.'; Set-StepDone 'remote'; return }
         Start-Sleep -Seconds 3
     }
     Warn "Didn't see the button being pressed. You can finish the key map later; everything else is ready."
@@ -591,7 +613,7 @@ function Step-Launcher {
             Say '  Set it up on the TV:' White
             Info '1. Open "Booru Wallpaper Provider" from your apps. Booru URL: https://wallhaven.cc   Booru type: Wallhaven'
             Info '   Optional search, e.g.  ratio:16:9'
-            Info '2. In Projectivy: Settings > Appearance > Wallpaper, pick the Booru Wallpaper Provider.'
+            Info '2. In Projectivy''s settings, open the wallpaper options and pick Booru Wallpaper Provider as the source.'
             Info 'Keep wallpaper blur and colour effects off: on small TVs they cost smoothness.'
         } catch { Bad $_.Exception.Message }
     }
@@ -601,7 +623,7 @@ function Step-Launcher {
 # ====================================================================== finish, test restart, report
 function Test-Restart {
     $ip = $script:Dev -replace ':\d+$', ''
-    $mark = [int](Sh1 'wc -l < /data/local/tmp/tv-apply.log 2>/dev/null')
+    $mark = Add-LogMark
     Info 'Restarting the TV. Please don''t touch it for about 5 minutes.'
     [void](Invoke-Adb -s $script:Dev reboot)
     Start-Sleep -Seconds 40
@@ -616,9 +638,8 @@ function Test-Restart {
         return $false
     }
     Ok 'TV is back. Waiting for the boot helper...'
-    if ($mark -gt 0 -and [int](Sh1 'wc -l < /data/local/tmp/tv-apply.log') -lt $mark) { $mark = 0 }
     for ($i = 0; $i -lt 80; $i++) {
-        $l = Sh "tail -n +$($mark + 1) /data/local/tmp/tv-apply.log | grep 'apply start (uptime' | head -n 1"
+        $l = Get-LogAfterMark $mark 'apply start (uptime'
         if ($l -match 'uptime ([\d.]+)s') { Ok ("Re-applied by itself {0:N0} seconds after the TV started. No PC needed." -f [double]$matches[1]); Start-Sleep -Seconds 20; return $true }
         Start-Sleep -Seconds 6
     }
@@ -824,7 +845,11 @@ function Start-Wizard {
 
     if ($Plan) { Write-Plan; return }
     if ($Status) { Show-Status; return }
-    if ($PairCode) { if (Connect-AaeApi) { [void](Invoke-AaePair $PairCode $PairPort) } else { Bad 'ADB Auto Enable is not reachable.' }; return }
+    if ($PairCode) {
+        if (Connect-AaeApi) { [void](Invoke-AaePair $PairCode $PairPort) } else { Bad 'ADB Auto Enable is not reachable.' }
+        [void](Invoke-Adb -s $script:Dev forward --remove tcp:19093)
+        return
+    }
     if ($Undo) { Invoke-Undo; return }
 
     if (@($script:State.stepsDone).Count -and -not $script:AutoMode -and -not $Steps) {
@@ -838,12 +863,17 @@ function Start-Wizard {
     if (-not $script:State.before) { $script:State.before = Get-Measure; Save-State }
     $todo = Select-Steps
     foreach ($s in $todo) {
-        switch ($s) {
-            'debloat' { Step-Debloat }
-            'background' { Step-Background }
-            'stick' { Step-Stick }
-            'remote' { Step-Remote }
-            'launcher' { Step-Launcher }
+        try {
+            switch ($s) {
+                'debloat' { Step-Debloat }
+                'background' { Step-Background }
+                'stick' { Step-Stick }
+                'remote' { Step-Remote }
+                'launcher' { Step-Launcher }
+            }
+        } catch {
+            Bad "This step stopped: $($_.Exception.Message)"
+            Info 'Nothing half-done is left behind that Undo can''t fix. Run Start-Here.cmd again to retry.'
         }
     }
     Finish-Setup

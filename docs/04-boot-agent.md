@@ -1,6 +1,8 @@
 # 4. Boot agent: make it stick
 
-**The problem:** at every cold boot Android resets background app-ops (and some firmwares reset animation speed). Android 14 also blocks the shell from disabling another app's boot receivers. So nothing set over ADB is permanent; it has to be re-applied at boot.
+> **Easier:** double-click `Start-Here.cmd` and the setup wizard does this for you. This page explains what it does, and how to do it by hand.
+
+**The problem:** on many firmwares a cold boot resets background app-ops (and some reset animation speed), and every restart wakes apps back up. Android 14 also blocks the shell from disabling another app's boot receivers. So nothing set over ADB is permanent; it has to be re-applied at boot.
 
 **The fix:** at boot, a tiny Termux script connects to the TV's *own* ADB (`127.0.0.1:5555`), runs `tv-apply.sh` twice (early, and again 2 min later for apps that start late), then force-stops Termux so nothing stays in memory.
 
@@ -56,7 +58,11 @@ Android switches wireless debugging off when the TV drops off Wi-Fi, and then th
 adb install .\ADB-auto-enable-<version>.apk
 adb shell pm grant com.tpn.adbautoenable android.permission.WRITE_SECURE_SETTINGS
 ```
-That one permission is enough for "turn debugging on at boot". Its pairing web page (port 9093) isn't needed for that; on some Xiaomi TVs a system service already holds port 9093 anyway.
+On TVs that keep listening on port 5555 after a restart (like the Xiaomi test TV), that one permission is enough.
+On most Android 14+ TVs the port is random after a restart, so ADB Auto Enable must also be **paired once** so it can
+switch it back to 5555: open `http://<TV-IP>:9093` in a browser, then on the TV choose Developer options → Wireless
+debugging → *Pair device with pairing code* and type the code and port into that page. The wizard does this for you.
+(On some Xiaomi TVs a system service already uses port 9093; those don't need the pairing.)
 **Security trade-off:** the TV keeps ADB open on your LAN. Only approved keys can connect, but use this only on a network you trust.
 
 ## Change what it does

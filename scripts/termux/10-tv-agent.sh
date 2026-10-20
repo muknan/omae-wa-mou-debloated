@@ -12,7 +12,7 @@ T=127.0.0.1:5555
 for i in $(seq 1 80); do
     adb connect "$T" >/dev/null 2>&1
     [ "$(adb -s "$T" get-state 2>/dev/null)" = "device" ] && break
-    [ "$i" -le 12 ] && sleep 5 || sleep 15
+    if [ "$i" -le 12 ]; then sleep 5; else sleep 15; fi
 done
 
 if [ "$(adb -s "$T" get-state 2>/dev/null)" = "device" ]; then

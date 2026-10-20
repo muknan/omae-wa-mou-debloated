@@ -28,7 +28,7 @@ function Sh([string]$cmd) {
 function Invoke-Adb {
     if ($args[0] -in 'connect', 'mdns') { return (& $script:Adb @args 2>&1 | ForEach-Object { "$_" }) }
     Write-Host "    DRYRUN adb: $($args -join ' ')" -ForegroundColor DarkYellow
-    return 'Success'
+    return 'Success: 1 file pushed'
 }
 function Add-Change([hashtable]$h) { Write-Host "    DRYRUN log: $($h | ConvertTo-Json -Compress)" -ForegroundColor DarkYellow }
 function Save-State { }

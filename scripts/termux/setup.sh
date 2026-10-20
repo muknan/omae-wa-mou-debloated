@@ -25,7 +25,7 @@ cp "$S/10-tv-agent.sh" ~/.termux/boot/10-tv-agent.sh || fail "copy boot script"
 chmod 700 ~/.termux/boot/10-tv-agent.sh
 
 echo ">>> step 3/3: Approve the 'Allow debugging?' prompt on the TV and tick 'Always allow'"
-for i in $(seq 1 90); do
+for _ in $(seq 1 90); do
     adb connect 127.0.0.1:5555 >/dev/null 2>&1
     [ "$(adb -s 127.0.0.1:5555 get-state 2>/dev/null)" = "device" ] && break
     sleep 2

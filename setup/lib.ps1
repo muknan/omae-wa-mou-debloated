@@ -331,3 +331,9 @@ function Test-TvHealth($base) {
     }
     return $problems
 }
+
+# adb push that fails loudly instead of leaving an old file on the TV.
+function Send-File([string]$local, [string]$remote) {
+    $out = (Invoke-Adb -s $script:Dev push $local $remote) -join ' '
+    if ($out -notmatch 'pushed') { throw "Could not copy $([IO.Path]::GetFileName($local)) to the TV: $out" }
+}

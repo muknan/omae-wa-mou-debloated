@@ -1,5 +1,7 @@
 # 1. ADB setup & pairing
 
+> **Easier:** double-click `Start-Here.cmd` and the setup wizard does this for you. This page explains what it does, and how to do it by hand.
+
 ## Install ADB on Windows
 ```powershell
 winget install --id Google.PlatformTools -e
@@ -12,8 +14,13 @@ adb version
 
 ## Turn on debugging on the TV
 1. Settings → System → About → click **Android TV OS build** 7 times ("You are now a developer").
-2. Settings → System → **Developer options** → **Wireless debugging** → **On**.
+   Older Android TVs: Settings → Device Preferences → About → **Build**.
+2. Settings → System → **Developer options** → turn on **USB debugging**, and **Wireless debugging** or
+   **Network debugging** if your TV has it.
 3. Note the TV's IP (Settings → Network & Internet → your Wi-Fi, or on the Wireless debugging screen).
+
+Fire TV: Settings → My Fire TV → About → click the device name 7 times, then Developer options → **ADB debugging**.
+NVIDIA Shield: Settings → Device Preferences → About → **Build** 7 times, then Developer options → **Network debugging**.
 
 ## Connect
 Many Google TVs also listen on the classic port **5555** while wireless debugging is on:

@@ -38,6 +38,7 @@ UNWHITELIST_NETFLIX=1
 START_KEYMAPPER_EXPERT_MODE=1
 # ====================================================================
 CONF=/data/local/tmp/tv-apply.conf
+# shellcheck source=/dev/null
 [ -f "$CONF" ] && . "$CONF"
 
 LOG=/data/local/tmp/tv-apply.log
@@ -53,7 +54,8 @@ PROTECT="$PROTECT $(settings get secure default_input_method | sed 's/\/.*//')"
 PROTECT="$PROTECT $(settings get secure enabled_accessibility_services | tr ':' '\n' | sed 's/\/.*//')"
 # Launcher wallpaper plugins (e.g. Projectivy's Booru/Wallhaven provider) - the launcher calls them in the background.
 PROTECT="$PROTECT $(cmd package query-services --brief -a tv.projectivy.plugin.WALLPAPER_PROVIDER 2>/dev/null | grep -oE '^ *[a-z0-9_.]+/' | tr -d ' /')"
-PROTECT=$(echo $PROTECT)   # collapse newlines to spaces so the matching below works
+# shellcheck disable=SC2086,SC2116  # deliberate: collapses newlines into single spaces for the matching below
+PROTECT=$(echo $PROTECT)
 
 listed() { case " $2 " in *" $1 "*) return 0;; esac; return 1; }
 
@@ -68,7 +70,9 @@ for p in $USER_APPS $PREINSTALLED_APPS; do
     BG_BLOCK="$BG_BLOCK $p"
 done
 
-log "apply start (uptime $(cut -d' ' -f1 /proc/uptime)s, $(echo $BG_BLOCK | wc -w) blocked + $(echo $STOP_ONLY | wc -w) stop-only)"
+# shellcheck disable=SC2086  # deliberate word splitting: counts the words in $1
+count() { set -- $1; echo $#; }
+log "apply start (uptime $(cut -d' ' -f1 /proc/uptime)s, $(count "$BG_BLOCK") blocked + $(count "$STOP_ONLY") stop-only)"
 
 for k in window_animation_scale transition_animation_scale animator_duration_scale; do
     settings put global "$k" "$ANIM_SCALE"
@@ -113,7 +117,7 @@ if [ "$START_KEYMAPPER_EXPERT_MODE" = "1" ] && pm path $KM >/dev/null 2>&1 && ! 
     if [ -f "$SRC" ] && cp "$SRC" "$DST" && chmod 700 "$DST"; then
         setsid "$DST" --apk="$APK" --lib="$(dirname "$APK")/lib/$ABI" --package="$KM" --version="$VER" </dev/null >/dev/null 2>&1
         sleep 2
-        ps -A -o NAME | grep -qx keymapper_sysbridge && log "started Key Mapper Expert Mode" || log "Key Mapper Expert Mode failed to start"
+        if ps -A -o NAME | grep -qx keymapper_sysbridge; then log "started Key Mapper Expert Mode"; else log "Key Mapper Expert Mode failed to start"; fi
     else
         log "Key Mapper Expert Mode: starter missing - open Key Mapper > Expert Mode once"
     fi

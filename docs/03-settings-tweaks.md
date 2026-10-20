@@ -1,5 +1,7 @@
 # 3. Settings tweaks
 
+> **Easier:** double-click `Start-Here.cmd` and the setup wizard does this for you. This page explains what it does, and how to do it by hand.
+
 All reversible. Run them yourself, or let `tv-apply.sh` handle the ones that reset at boot.
 
 ## Animation speed (the one you'll actually feel)
@@ -19,7 +21,7 @@ adb shell settings put global activity_starts_logging_enabled 0          # no pe
 adb shell settings put global user_experience_enabled 0                  # Xiaomi "user experience" program
 adb shell settings put secure screensaver_enabled 0                      # only if you don't use the screensaver
 ```
-Undo by putting back `1`. (`send_action_app_error 0` also works, but Google Services may re-enable it — not worth fighting.)
+Undo by putting back `1`. (`send_action_app_error 0` also works, but Google Services may re-enable it. Not worth fighting.)
 
 ## Background limits (what tv-apply.sh does per app)
 ```powershell
@@ -28,7 +30,7 @@ adb shell am set-standby-bucket <package> restricted              # fewest jobs/
 adb shell am force-stop <package>                                 # asleep until you open it
 ```
 Streaming apps are fine with this, because playback happens while they're on screen. Music players and VPNs aren't: put those in `STOP_ONLY` in `tv-apply.sh` (stopped at boot, but allowed to run once you start them).
-These app-ops are reset at every cold boot, which is why the [boot agent](04-boot-agent.md) exists.
+On many firmwares, the test TV included, these app-ops reset at every cold boot, and a force-stopped app wakes up again at the next restart. That's why the [boot agent](04-boot-agent.md) exists.
 
 ## Things we measured and **didn't** do
 | Tweak | Why not |

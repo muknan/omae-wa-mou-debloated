@@ -1,5 +1,7 @@
 # 5. Key Mapper: remote buttons & the refresh button
 
+> **Easier:** double-click `Start-Here.cmd` and the setup wizard does this for you. This page explains what it does, and how to do it by hand.
+
 <img src="../screenshots/keymapper_list.jpg" width="70%" />
 
 [Key Mapper](https://github.com/keymapperorg/KeyMapper) is free and open source, and it works with a TV remote. The mappings in the screenshot are just **examples** of what one person liked; make your own.
