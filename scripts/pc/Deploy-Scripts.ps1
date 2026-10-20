@@ -26,7 +26,10 @@ if ($CleanStaging) {
 
 if ($Remove) {
     & $adb -s $Device shell "rm -f /data/local/tmp/tv-apply.sh /data/local/tmp/tv-refresh.sh /data/local/tmp/tv-apply.log; rm -rf /sdcard/Download/tvagent"
-    Write-Host "Removed. (Uninstall Termux / Termux:Boot from TV Settings if you installed them.)"
+    # Back to stock animation speed (1.0). The background limits clear themselves at the next restart.
+    & $adb -s $Device shell "for k in window_animation_scale transition_animation_scale animator_duration_scale mitv_fast_cur_anim_scale; do settings put global `$k 1.0; done"
+    Write-Host "Removed and animations reset. Restart the TV to clear the background limits."
+    Write-Host "(If you installed Termux / Termux:Boot for the boot helper, uninstall them from the TV's app settings.)"
     return
 }
 

@@ -1,10 +1,8 @@
 # omae-wa-mou-debloated
 
-> *"Omae wa mou debloated."* — your Google TV, a few minutes before it notices it's fast now.
-> *NANI?!*
+**Make a slow Google TV fast again.** No rooting, nothing permanent, and you can undo all of it.
 
-A no-root, fully reversible kit to debloat and speed up an **Android / Google TV** over Wi-Fi ADB — and to make the tweaks **survive reboots**, which most guides quietly skip.
-Built and tested on a **Xiaomi TV X Pro 2025 (Google TV, Android 14, 2 GB RAM)** running **Projectivy Launcher**, but everything is configurable for other TVs.
+*Omae wa mou debloated.* (Your TV is already debloated. It just doesn't know it yet.)
 
 <p align="center">
   <img src="screenshots/home_wp6.jpg" width="49%" />
@@ -12,107 +10,171 @@ Built and tested on a **Xiaomi TV X Pro 2025 (Google TV, Android 14, 2 GB RAM)**
   <img src="screenshots/home_wp2.jpg" width="49%" />
   <img src="screenshots/home_wp5.jpg" width="49%" />
 </p>
-<p align="center"><sub>Projectivy Launcher with wallpapers cycled from Wallhaven by the Booru Wallpaper Provider plugin.</sub></p>
 
-## What it does
+## What this does
 
-| | |
-|---|---|
-| **Debloat (reversible)** | A tiered package list (`LOW` / `CONDITIONAL` / `DNT`) applied in small batches with a health check in between. `pm disable-user` only — nothing is uninstalled. |
-| **Keeps background apps asleep** | Every app you install (automatically, no list to maintain) gets its background activity blocked and is force-stopped when it's not on screen. Your launcher, keyboard, accessibility apps and launcher wallpaper plugins are protected automatically. |
-| **Survives reboots** | Android resets these limits (and on Xiaomi, animation speed) at every cold boot. A tiny Termux boot agent re-applies everything through the TV's own ADB, then exits — nothing stays in memory. |
-| **One-button "fresh boot"** | Key Mapper + a double-press runs a refresh: re-applies everything and clears cached apps in ~4 s, then flashes the volume bar as a "done" signal. |
-| **Snappier UI** | 0.5× animations, plus a few safe settings tweaks. |
-| **Measured, not folklore** | Every change was verified on a real TV, and several popular "tweaks" were *measured and rejected* (see [docs/07-measuring.md](docs/07-measuring.md)). |
+- Switches off the junk apps your TV came with (ads, tracking, stuff you never use)
+- Stops apps from running in the background when you're not using them
+- Makes menus feel snappier
+- Everything can be undone with one command
 
-## Results on the test TV
+Made on a Xiaomi Google TV, but it works on most Google TVs.
 
-| | Before | After |
-|---|---|---|
-| Free memory 4–5 min after boot | 530 MB | **612 MB** |
-| App processes after boot | 40 | **33** |
-| Memory swapped to zram after boot | 568 MB | **383 MB** |
-| Stuck AirPlay daemon (100% of a CPU core) | yes | gone |
-| Apps auto-starting at boot (Surfshark, Spotify, Prime…) | running | asleep |
+## What you need
 
-Your numbers will differ — use [`scripts/pc/Audit.ps1`](scripts/pc/Audit.ps1) to get your own before/after.
+- A **Windows PC** on the **same Wi-Fi** as your TV
+- About **20 minutes**
+- Your TV remote
 
-## Quick start (Windows)
+---
 
-You need a PC on the same Wi-Fi as the TV. Open **PowerShell** in this repo's folder.
+## Step 1: Download this kit
 
-**1. Install ADB** (Google's official platform-tools):
+1. At the top of this page, click the green **Code** button, then **Download ZIP**.
+2. Find the ZIP in your Downloads folder, right-click it, and choose **Extract All**.
+3. Open the extracted folder (`omae-wa-mou-debloated-main`).
+4. Right-click an empty spot inside the folder and choose **Open in Terminal**.
+
+A blue or black window opens. That's where you'll paste the commands below.
+Paste this one first so Windows lets the kit run:
+
+```powershell
+Get-ChildItem -Recurse | Unblock-File; Set-ExecutionPolicy -Scope Process Bypass -Force
+```
+
+## Step 2: Install the tool that talks to your TV
+
+Paste this and press Enter:
+
 ```powershell
 winget install --id Google.PlatformTools -e
 ```
 
-**2. Turn on debugging on the TV:** Settings → System → About → click *Android TV OS build* 7× → back to System → **Developer options** → **Wireless debugging** → On. Note the IP shown there.
+When it finishes, **close the window and open it again** (Step 1, point 4). Then paste Step 1's command again.
 
-**3. Connect** (replace with your TV's IP; approve the prompt on the TV and tick *Always allow*):
+## Step 3: Unlock developer options on the TV
+
+On your TV, with the remote:
+
+1. Go to **Settings > System > About**.
+2. Scroll to **Android TV OS build** and press OK on it **7 times**. You'll see "You are now a developer".
+3. Go back to **Settings > System > Developer options**.
+4. Turn on **Wireless debugging** (on some TVs it's called **Network debugging**).
+5. Write down the **IP address** shown there. It looks like `192.168.1.50`.
+
+## Step 4: Connect your PC to the TV
+
+In the commands below, **replace `192.168.1.50` with your TV's IP address** from Step 3.
+
 ```powershell
 adb connect 192.168.1.50:5555
 ```
-If 5555 is refused, use *Pair device with pairing code* — see [docs/01-adb-setup.md](docs/01-adb-setup.md).
 
-**4. Look before you touch** (read-only):
-```powershell
-.\scripts\pc\Audit.ps1 -Device 192.168.1.50:5555
-```
+A box pops up on the TV asking to allow debugging. Tick **Always allow from this computer** and press **Allow**.
 
-**5. Debloat** — dry run first, then for real (pauses after every 3 packages so you can test):
+You should see `connected to 192.168.1.50:5555`.
+Didn't work? See [Stuck?](#stuck) below.
+
+## Step 5: Switch off the junk apps
+
+First, see what would be switched off. This changes nothing:
+
 ```powershell
 .\scripts\pc\Debloat.ps1 -Device 192.168.1.50:5555 -List .\lists\xiaomi-google-tv.txt -Tier LOW -WhatIf
-.\scripts\pc\Debloat.ps1 -Device 192.168.1.50:5555 -List .\lists\xiaomi-google-tv.txt -Tier LOW
-```
-`CONDITIONAL` packages (PatchWall, antenna TV, AirPlay…) are opt-in, one by one:
-```powershell
-.\scripts\pc\Debloat.ps1 -Device 192.168.1.50:5555 -List .\lists\xiaomi-google-tv.txt -Tier CONDITIONAL -Only com.mitv.tvhome.atv,com.mitv.tvhome.oemtab
 ```
 
-**6. Edit the CONFIG block** at the top of [`scripts/device/tv-apply.sh`](scripts/device/tv-apply.sh) (animation speed, which apps may run in the background, etc.), then deploy:
+Happy with the list? Run it for real:
+
+```powershell
+.\scripts\pc\Debloat.ps1 -Device 192.168.1.50:5555 -List .\lists\xiaomi-google-tv.txt -Tier LOW
+```
+
+It stops after every 3 apps. Each time, quickly check that the **Home button**, an **HDMI input** and **a streaming app** still work, then press Enter in the window to continue.
+
+> **Not on a Xiaomi TV?** The list is for Xiaomi. It only switches off apps your TV actually has, but check the preview carefully.
+
+## Step 6: Keep apps asleep in the background
+
 ```powershell
 .\scripts\pc\Deploy-Scripts.ps1 -Device 192.168.1.50:5555
 ```
 
-**7. Make it survive reboots** — install the boot agent: [docs/04-boot-agent.md](docs/04-boot-agent.md).
+This puts apps you're not using to sleep and speeds up the menu animations. Your launcher, keyboard and anything playing on screen are never touched.
 
-**8. Optional:** remote-button tricks with Key Mapper → [docs/05-key-mapper.md](docs/05-key-mapper.md). Launcher + wallpapers → [docs/06-launcher-and-wallpapers.md](docs/06-launcher-and-wallpapers.md).
+**That's it. Your TV is faster.**
 
-**Undo everything:**
+---
+
+## Optional extras
+
+| Want this? | Guide |
+|---|---|
+| Keep everything working after the TV restarts (otherwise, run Step 6 again after a restart) | [Make it stick](docs/04-boot-agent.md) |
+| Change what the remote's buttons do, or add a "refresh my TV" button | [Remote buttons](docs/05-key-mapper.md) |
+| A clean home screen with rotating wallpapers like the screenshots | [Launcher & wallpapers](docs/06-launcher-and-wallpapers.md) |
+| More switches: antenna TV, AirPlay, PatchWall (only if you don't use them) | [Junk apps in detail](docs/02-audit-and-debloat.md) |
+
+## Undo everything
+
 ```powershell
 .\scripts\pc\Debloat.ps1 -Device 192.168.1.50:5555 -Restore
 .\scripts\pc\Deploy-Scripts.ps1 -Device 192.168.1.50:5555 -Remove
 ```
 
-## Docs
+Then restart the TV. It's back to how it was.
+If you did the optional "Make it stick" guide, also uninstall **Termux** and **Termux:Boot** from the TV's app settings.
 
-1. [ADB setup & pairing](docs/01-adb-setup.md)
-2. [Audit & debloat](docs/02-audit-and-debloat.md)
-3. [Settings tweaks](docs/03-settings-tweaks.md)
-4. [Boot agent (make it stick)](docs/04-boot-agent.md)
-5. [Key Mapper: remote buttons & the refresh button](docs/05-key-mapper.md)
-6. [Launcher & wallpapers (Projectivy + Wallhaven)](docs/06-launcher-and-wallpapers.md)
-7. [Measuring jank (what helped, what didn't)](docs/07-measuring.md)
-8. [Troubleshooting](docs/08-troubleshooting.md)
+## Stuck?
 
-## Tools used
+| Problem | Fix |
+|---|---|
+| "running scripts is disabled" | Paste the command from Step 1 again. |
+| `adb` is not recognized | Close the window and open it again after Step 2. |
+| "cannot connect" or "refused" | Make sure **Wireless debugging** is still on (it switches off if the TV loses Wi-Fi), and that the PC and TV are on the same Wi-Fi. |
+| No popup on the TV | Look at the TV screen while you run Step 4. It can hide behind an app. |
+| Still can't connect on `:5555` | Your TV may need a pairing code instead. Follow [Connecting with a pairing code](docs/01-adb-setup.md#if-port-5555-is-refused-pair-with-a-code). |
+| Something stopped working | Run the **Undo** commands above. |
+
+More fixes: [Troubleshooting](docs/08-troubleshooting.md)
+
+---
+
+<details>
+<summary><b>For the curious: results, how it works, tools</b></summary>
+
+### Results on the test TV (Xiaomi TV X Pro 2025, 2 GB RAM)
+
+| | Before | After |
+|---|---|---|
+| Free memory after a restart | 530 MB | 612 MB |
+| Apps running after a restart | 40 | 33 |
+| Apps that start by themselves | running | asleep |
+
+### How it works
+
+- Junk apps are **disabled, not deleted**, so they come back with one command.
+- Android forgets "keep this app asleep" every time the TV restarts. The optional [boot helper](docs/04-boot-agent.md) quietly sets it again after each restart.
+- Every tweak was tested on a real TV. Some popular tips made things worse and were left out: see [what we measured](docs/07-measuring.md).
+
+### Tools used
 
 | Tool | What for |
 |---|---|
-| [Android SDK Platform-Tools](https://developer.android.com/tools/releases/platform-tools) | `adb` on the PC |
+| [Android Platform-Tools](https://developer.android.com/tools/releases/platform-tools) | lets the PC talk to the TV |
 | [Projectivy Launcher](https://play.google.com/store/apps/details?id=com.spocky.projengmenu) | ad-free home screen |
-| Booru Wallpaper Provider (Projectivy plugin, `nl.kurocon.plugin.wallpaperprovider.booru`) | rotating wallpapers from [Wallhaven](https://wallhaven.cc) |
-| [Termux](https://github.com/termux/termux-app) + [Termux:Boot](https://github.com/termux/termux-boot) | boot agent that re-applies tweaks |
-| [ADB Auto Enable](https://github.com/mouldybread/adb-auto-enable) | turns wireless debugging back on at boot |
-| [Key Mapper](https://github.com/keymapperorg/KeyMapper) | remap remote buttons, run the refresh |
+| Booru Wallpaper Provider (Projectivy plugin) | rotating wallpapers from [Wallhaven](https://wallhaven.cc) |
+| [Termux](https://github.com/termux/termux-app) + [Termux:Boot](https://github.com/termux/termux-boot) | re-applies settings after a restart |
+| [ADB Auto Enable](https://github.com/mouldybread/adb-auto-enable) | turns wireless debugging back on after a restart |
+| [Key Mapper](https://github.com/keymapperorg/KeyMapper) | remote button tricks |
 
-## Safety
+### All guides
 
-- No root, no flashing, no uninstalling. Every change is `disable-user`, a setting, or an app-op — all reversible.
-- Debloat runs in batches of 3 with a health check; test Home, Back, an HDMI input and a streaming app between batches.
-- Keeping ADB reachable on your LAN is a trade-off: only approved keys can connect, but don't do this on networks you don't trust.
-- Things that **broke** on the test TV are documented as `DNT` with the reason — read them before going off-list.
+[Connecting](docs/01-adb-setup.md) · [Junk apps](docs/02-audit-and-debloat.md) · [Settings tweaks](docs/03-settings-tweaks.md) · [Make it stick](docs/04-boot-agent.md) · [Remote buttons](docs/05-key-mapper.md) · [Launcher & wallpapers](docs/06-launcher-and-wallpapers.md) · [Measuring](docs/07-measuring.md) · [Troubleshooting](docs/08-troubleshooting.md)
 
-## License
+</details>
 
-MIT — see [LICENSE](LICENSE). Not affiliated with Xiaomi, Google, Projectivy, Termux or Key Mapper. Use at your own risk.
+## Good to know
+
+- No rooting, nothing deleted, nothing that can brick your TV.
+- Keeping wireless debugging on means devices on your Wi-Fi *could* ask to connect, but only ones you've approved get in. Use it on your home Wi-Fi only.
+- Not affiliated with Xiaomi, Google or any app above. MIT license, use at your own risk.

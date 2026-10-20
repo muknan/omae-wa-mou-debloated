@@ -49,8 +49,12 @@ $rows = Get-Content $List | Where-Object { $_ -match '^\s*[a-z]' } | ForEach-Obj
 $targets = $rows | Where-Object { $Tier -contains $_.Tier }
 if ($Only) { $targets = $targets | Where-Object { $Only -contains $_.Package } }
 $installed = (& $adb -s $Device shell "pm list packages") -replace '^package:', ''
+$alreadyOff = (& $adb -s $Device shell "pm list packages -d") -replace '^package:', ''
 $targets = $targets | Where-Object { $installed -contains $_.Package }
-if (-not $targets) { Write-Host "Nothing to do (none of the selected packages are installed)."; return }
+$skipped = @($targets | Where-Object { $alreadyOff -contains $_.Package })
+$targets = $targets | Where-Object { $alreadyOff -notcontains $_.Package }
+if ($skipped.Count) { Write-Host "$($skipped.Count) app(s) on the list are already switched off - skipping them." }
+if (-not $targets) { Write-Host "Nothing to do: everything selected is already off or not on this TV."; return }
 
 Write-Host "Will disable $(@($targets).Count) package(s) in batches of ${BatchSize}:`n"
 $targets | Format-Table Package, Tier, Note -AutoSize | Out-String | Write-Host
