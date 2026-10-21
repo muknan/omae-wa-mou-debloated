@@ -77,6 +77,11 @@ environment variables:
 | `PURITY` | `100` | SFW only |
 | `MIN_FAVORITES` | `0` | skip wallpapers with fewer favourites (the 3-month toplist is every upload, ranked) |
 
+The toplist is really every upload in the range, ranked, so the bottom half is weak (median ~16 favourites).
+A good balance, measured for 4K, General + Anime, SFW: **`TOP_RANGE=6M` with `MIN_FAVORITES=30`**, the top third,
+about 500 wallpapers, a full pass every ~19 hours. New uploads join as they reach 30. `3M` with `15` is fresher but
+smaller (~400). A 6-month list takes the helper about 2 minutes to read; that happens in the background.
+
 Then set the plugin's **Booru URL** to just `https://<your-project>.vercel.app` (no `#`, no query), re-select the
 plugin as described above, and open `https://<your-project>.vercel.app/api/v1/search` in a browser to see the
 current set (`meta.shuffle` says which set of how many). To try other settings without redeploying, put them in the

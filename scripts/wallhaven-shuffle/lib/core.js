@@ -7,7 +7,7 @@ export const PER_SET = 24;
 // repeat a set). The price: now and then a set is skipped; it comes back in a later pass.
 const SLOT_MINUTES = Number(process.env.SLOT_MINUTES || 55);
 const API_KEY = process.env.WALLHAVEN_API_KEY || '';
-const MAX_PAGES = 60; // 1440 wallpapers; keeps a long range (1y) from taking minutes to read
+const MAX_PAGES = 100; // 2400 wallpapers (6 months of 4K is ~1600); keeps a long range (1y) bounded
 const RANGES = new Set(['1d', '3d', '1w', '1M', '3M', '6M', '1y']);
 
 // The list settings from the request (the plugin URL's /r/<range>/<res>/<min favourites> part), else env, else defaults.
@@ -33,7 +33,8 @@ async function getJson(url) {
   }
 }
 
-// The whole toplist, read one page every ~0.7 s (well under Wallhaven's 45 requests/minute): 20-40 s for ~30 pages.
+// The whole toplist, read one page every ~1.4 s so even a long list stays under Wallhaven's 45 requests/minute:
+// ~45 s for 3 months of 4K (32 pages), ~2 minutes for 6 months (67 pages).
 export async function fetchToplist({ range, res, cats, purity }) {
   const base = 'https://wallhaven.cc/api/v1/search?sorting=toplist' +
     `&topRange=${range}&resolutions=${encodeURIComponent(res)}&categories=${cats}&purity=${purity}` +
@@ -42,7 +43,7 @@ export async function fetchToplist({ range, res, cats, purity }) {
   const pages = Math.min(first.meta?.last_page || 1, MAX_PAGES);
   const all = [...first.data];
   for (let p = 2; p <= pages; p++) {
-    await sleep(700);
+    await sleep(1400);
     all.push(...(await getJson(`${base}&page=${p}`)).data);
   }
   const seen = new Set();

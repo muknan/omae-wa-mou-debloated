@@ -13,7 +13,7 @@
 //   https://<your-app>.vercel.app/r/3M/3840x2160/20     -> ... only wallpapers with at least 20 favourites
 import { fetchToplist, listParams, pickSet, PER_SET } from '../../lib/core.js';
 
-export const config = { maxDuration: 120 };
+export const config = { maxDuration: 300 };
 
 const memory = new Map(); // "range|res" -> { at, items }: a warm instance skips even the CDN read
 
