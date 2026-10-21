@@ -1,7 +1,7 @@
 # 9. Quality-of-life extras
 
-> **Easier:** the wizard's step 2 sets up the daily refresh, and its extras step offers the ad-blocking DNS and
-> the YouTube-links switch. This page explains each one and how to do or undo it by hand.
+> **Easier:** the wizard's step 2 sets up the daily refresh and the Wi-Fi fix, and its extras step offers the
+> ad-blocking DNS and the YouTube-links switch. This page explains each one and how to do or undo it by hand.
 
 All of these were tested on the Xiaomi test TV. Each has a one-line undo.
 
@@ -69,6 +69,29 @@ Copy the `.plbackup` file to your PC (`adb pull /sdcard/Download/<file>`). Resto
 Key Mapper can only save backups through Android's "Save as" screen, which many Google TVs don't have. If
 **Back up everything** in Key Mapper shows nothing, write your key maps down (trigger + action); rebuilding them
 takes a few minutes. Restoring a Key Mapper backup file works with File Manager+ as the picker.
+
+## Wi-Fi that keeps dropping
+
+Android 12+ regularly checks that the router still answers. Many home routers skip some of these checks (often on
+IPv6, even when the TV has no IPv6 internet), and Android then drops and reconnects the network: usually for a
+second, sometimes for minutes. It looks like "the Wi-Fi keeps turning off". The test TV did it every 4-9 minutes.
+
+**Check it:** if this shows several `IP_REACHABILITY_LOST` lines, it's this.
+
+```powershell
+adb shell "dumpsys wifi | grep -c CMD_IP_REACHABILITY_LOST"
+```
+
+**Fix:** the boot helper turns these drops off at every boot (`WIFI_STAY_CONNECTED="1"` in `tv-apply.conf`, on by
+default). Real disconnects (router off, out of range) are still handled normally. By hand, until the next restart:
+
+```powershell
+adb shell cmd wifi set-ipreach-disconnect disabled
+```
+
+Undo: set `WIFI_STAY_CONNECTED="0"` and run `adb shell cmd wifi set-ipreach-disconnect enabled`. Fixing it on
+the router (firmware update, or switching IPv6 off if your internet provider doesn't use it) fixes it for every
+device in the house; a weak signal (below about -70 dBm in `dumpsys wifi | grep RSSI`) makes it worse.
 
 ## Give the TV a fixed IP address
 

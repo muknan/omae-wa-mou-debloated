@@ -30,6 +30,7 @@ First try: double-click **Start-Here.cmd** again. It remembers your TV and offer
 | A music app or VPN stops when you leave it | Re-run step 2 and move it to "stopped at startup, may run after you open it". |
 | An app you use is put to sleep too often | Re-run step 2 and move it to "left alone". |
 | A notification badge on the home screen | Usually Key Mapper's permanent notifications. They're hidden at every boot and every refresh-button press; press the refresh button once, or re-run step 2. |
+| Wi-Fi drops for a moment every few minutes | Usually the router, not the TV: see [Wi-Fi that keeps dropping](09-extras.md#wi-fi-that-keeps-dropping). The boot helper already works around the common case. |
 | Remote button does nothing | Expert Mode isn't running. Restart the TV (the boot helper starts it) or see [05](05-key-mapper.md). |
 | Home button opens the stock launcher | Projectivy needs its accessibility helper on and the stock launcher **enabled**. Re-run step 5. |
 | "Accessibility service" toast from Projectivy | Another accessibility app (Key Mapper) restarted briefly. Both reconnect on their own. |

@@ -32,6 +32,12 @@ function Invoke-Adb {
 }
 function Add-Change([hashtable]$h) { Write-Host "    DRYRUN log: $($h | ConvertTo-Json -Compress)" -ForegroundColor DarkYellow }
 function Save-State { }
+# The real tv-apply.conf in my-tv\<TV> is what the TV runs with; a dry run must not replace it.
+$realWriteText = ${function:Write-Text}
+function Write-Text([string]$path, [string]$text) {
+    if ($path -like '*tv-apply.conf') { Write-Host "    DRYRUN write: $path" -ForegroundColor DarkYellow; return }
+    & $realWriteText $path $text
+}
 
 $script:Adb = Find-Adb
 $script:AutoMode = $runAuto
