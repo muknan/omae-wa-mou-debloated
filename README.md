@@ -140,7 +140,7 @@ stay exactly where you put them.
   <img src="screenshots/launcher-quick-menu.jpg" width="49%" />
   <img src="screenshots/launcher-all-apps.jpg" width="49%" />
   <img src="screenshots/launcher-wallpaper-settings.jpg" width="49%" />
-  <img src="screenshots/wallhaven-plugin.jpg" width="49%" />
+  <img src="screenshots/wallhaven-plugin-settings.jpg" width="49%" />
 </p>
 
 <details>

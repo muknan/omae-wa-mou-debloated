@@ -4,7 +4,7 @@
 
 <p>
   <img src="../screenshots/home-02.jpg" width="49%" />
-  <img src="../screenshots/wallhaven-plugin.jpg" width="49%" />
+  <img src="../screenshots/wallhaven-plugin-settings.jpg" width="49%" />
 </p>
 
 ## Projectivy Launcher
