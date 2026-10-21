@@ -68,7 +68,8 @@ Send something like this, filling in recommendations. Keep it friendly and short
 > 9. Which apps should keep running in the background after you start them (music, VPN, cast receivers)?
 >    *(I'll detect music apps and VPNs automatically)*
 > 10. Extras: survive restarts (recommended), a "fresh boot" button on the remote (Key Mapper), an ad-free home
->     screen with rotating wallpapers (Projectivy)?
+>     screen with rotating wallpapers (Projectivy), a daily automatic refresh (recommended), ad-blocking DNS for
+>     every app (AdGuard; off by default, see the trade-offs in docs/09), YouTube links in SmartTube?
 > 11. Menu animations: normal, faster (suggested) or off?
 
 Skip questions that don't apply once you have the plan (the plan only lists questions for features the TV
@@ -105,17 +106,22 @@ Copy `answers-template.json` and fill it from the human's replies:
 
 ```json
 {
-  "steps": { "debloat": true, "background": true, "stick": true, "remote": false, "launcher": false },
+  "steps": { "debloat": true, "background": true, "stick": true, "remote": false, "launcher": false, "extras": false },
   "features": { "content": "off", "antenna": "keep", "airplay": "keep", "cast": "keep", "screensaver": "off" },
   "disableApps": ["com.example.preinstalled.app"],
   "skipPackages": [],
   "background": { "asleep": [], "stopOnly": ["com.spotify.tv.android"], "protect": [] },
   "animation": "0.5",
+  "dailyRefresh": true,
+  "privateDns": false,
+  "smartTubeLinks": true,
   "testRestart": true
 }
 ```
 
 - `features`: `"off"` switches off that question's packages, `"keep"` leaves them.
+- `dailyRefresh`: refresh once a day from 4:00 (`dailyRefreshHour` to change), never while something plays.
+  `privateDns` (AdGuard, only with the human's explicit yes) and `smartTubeLinks` belong to the `extras` step.
 - `background`: only list overrides; everything else uses the plan's suggestion. *asleep* = no background
   running until opened (default for installed apps), *stopOnly* = stopped at startup but may run after the human
   starts it (music, VPN), *protect* = never touched.

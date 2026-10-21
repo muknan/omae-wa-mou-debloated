@@ -54,6 +54,6 @@ if ($runUndo) {
     return
 }
 foreach ($s in $runSteps) {
-    switch ($s) { 'debloat' { Step-Debloat } 'background' { Step-Background } }
+    switch ($s) { 'debloat' { Step-Debloat } 'background' { Step-Background } 'extras' { Step-Extras } }
 }
 Write-Host "`nDry run finished. Nothing on the TV was changed." -ForegroundColor Green

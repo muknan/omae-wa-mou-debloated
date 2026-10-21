@@ -25,6 +25,7 @@ if ($CleanStaging) {
 }
 
 if ($Remove) {
+    & $adb -s $Device shell 'kill $(cat /data/local/tmp/tv-daily.pid 2>/dev/null) 2>/dev/null; rm -f /data/local/tmp/tv-daily.sh /data/local/tmp/tv-daily.pid /data/local/tmp/tv-daily.last'
     & $adb -s $Device shell "rm -f /data/local/tmp/tv-apply.sh /data/local/tmp/tv-refresh.sh /data/local/tmp/tv-apply.log; rm -rf /sdcard/Download/tvagent"
     # Back to stock animation speed (1.0). The background limits clear themselves at the next restart.
     & $adb -s $Device shell "for k in window_animation_scale transition_animation_scale animator_duration_scale mitv_fast_cur_anim_scale; do settings put global `$k 1.0; done"
@@ -33,10 +34,10 @@ if ($Remove) {
     return
 }
 
-foreach ($f in "tv-apply.sh", "tv-refresh.sh") {
+foreach ($f in "tv-apply.sh", "tv-refresh.sh", "tv-daily.sh") {
     & $adb -s $Device push (Join-Path $root "device\$f") "/data/local/tmp/$f" | Out-Null
 }
-& $adb -s $Device shell "chmod 755 /data/local/tmp/tv-apply.sh /data/local/tmp/tv-refresh.sh; sh /data/local/tmp/tv-apply.sh; tail -n 4 /data/local/tmp/tv-apply.log"
+& $adb -s $Device shell "chmod 755 /data/local/tmp/tv-apply.sh /data/local/tmp/tv-refresh.sh /data/local/tmp/tv-daily.sh; sh /data/local/tmp/tv-apply.sh; tail -n 4 /data/local/tmp/tv-apply.log"
 
 if ($Termux) {
     & $adb -s $Device shell "mkdir -p /sdcard/Download/tvagent"

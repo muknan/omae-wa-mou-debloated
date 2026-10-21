@@ -28,6 +28,9 @@ This kit fixes both, and, unlike most debloat guides, keeps it fixed after the T
 - **Survives restarts** (optional): a small helper app on the TV re-applies everything at every startup, no PC needed.
 - **Adds a "fresh boot" button** to your remote (optional): press a spare button twice and every background app
   goes to sleep, like a restart without the wait.
+- **Refreshes itself once a day** too, so you never have to remember. It never interrupts anything that's playing.
+- **Small extras** (optional): ad and tracker blocking for every app (AdGuard DNS), and YouTube links that open
+  straight in SmartTube.
 - **Gives you an ad-free home screen** with rotating wallpapers (optional).
 - **Undo everything** with one click.
 
@@ -237,7 +240,7 @@ uninstall the helper apps it installed. Then the TV restarts.
 ### Manual mode and all guides
 
 Prefer doing it by hand? The step-by-step guides and the original scripts (`scripts/pc/`) are still here:
-[Connecting](docs/01-adb-setup.md) · [Junk apps](docs/02-audit-and-debloat.md) · [Settings tweaks](docs/03-settings-tweaks.md) · [Make it stick](docs/04-boot-agent.md) · [Remote buttons](docs/05-key-mapper.md) · [Launcher & wallpapers](docs/06-launcher-and-wallpapers.md) · [Measuring](docs/07-measuring.md) · [Troubleshooting](docs/08-troubleshooting.md)
+[Connecting](docs/01-adb-setup.md) · [Junk apps](docs/02-audit-and-debloat.md) · [Settings tweaks](docs/03-settings-tweaks.md) · [Make it stick](docs/04-boot-agent.md) · [Remote buttons](docs/05-key-mapper.md) · [Launcher & wallpapers](docs/06-launcher-and-wallpapers.md) · [Measuring](docs/07-measuring.md) · [Troubleshooting](docs/08-troubleshooting.md) · [Extras: daily refresh, ad-blocking DNS, backups, fixed IP](docs/09-extras.md)
 
 </details>
 

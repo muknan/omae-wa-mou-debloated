@@ -37,6 +37,10 @@ UNWHITELIST_NETFLIX=1
 # They're snoozed for 30 days, re-done every run; the apps themselves keep working normally.
 QUIET_APPS="io.github.sds100.keymapper com.tpn.adbautoenable"
 
+# 1 = refresh once a day (like pressing the refresh button), from this hour on. Never while something plays.
+DAILY_REFRESH=1
+DAILY_REFRESH_HOUR=4
+
 # 1 = start Key Mapper's Expert Mode if it isn't running (needed for Key Mapper "Execute with ADB" actions on
 # TVs where its own auto-start can't pair). 0 = don't.
 START_KEYMAPPER_EXPERT_MODE=1
@@ -124,6 +128,15 @@ if [ "$START_KEYMAPPER_EXPERT_MODE" = "1" ] && pm path $KM >/dev/null 2>&1 && ! 
         if ps -A -o NAME | grep -qx keymapper_sysbridge; then log "started Key Mapper Expert Mode"; else log "Key Mapper Expert Mode failed to start"; fi
     else
         log "Key Mapper Expert Mode: starter missing - open Key Mapper > Expert Mode once"
+    fi
+fi
+
+# Daily refresh: start the tiny scheduler (tv-daily.sh) if it isn't running yet.
+if [ "$DAILY_REFRESH" = "1" ] && [ -f /data/local/tmp/tv-daily.sh ]; then
+    dp=$(cat /data/local/tmp/tv-daily.pid 2>/dev/null)
+    if [ -z "$dp" ] || ! grep -q tv-daily /proc/"$dp"/cmdline 2>/dev/null; then
+        setsid nohup sh /data/local/tmp/tv-daily.sh </dev/null >/dev/null 2>&1 &
+        log "started daily refresh (once a day from ${DAILY_REFRESH_HOUR}:00)"
     fi
 fi
 

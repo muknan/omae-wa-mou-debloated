@@ -30,6 +30,7 @@ $StepNames = [ordered]@{
     stick      = 'Make it survive restarts (installs small free helper apps on the TV)'
     remote     = 'A "fresh boot" button on your remote (Key Mapper)'
     launcher   = 'Ad-free home screen with rotating wallpapers (Projectivy)'
+    extras     = 'Small extras: ad-blocking DNS, YouTube links open in SmartTube'
 }
 $Recommended = @('debloat', 'background', 'stick')
 
@@ -324,7 +325,7 @@ function Get-BackgroundGroups {
 
 function New-ConfText($c) {
     $l = @('# Written by the omae-wa-mou-debloated setup wizard. Re-run the wizard to change it.')
-    foreach ($k in 'ANIM_SCALE', 'INCLUDE_USER_APPS', 'PREINSTALLED_APPS', 'STOP_ONLY', 'EXTRA_PROTECT', 'XIAOMI_ANIM_KEY', 'UNWHITELIST_NETFLIX', 'START_KEYMAPPER_EXPERT_MODE', 'QUIET_APPS') {
+    foreach ($k in 'ANIM_SCALE', 'INCLUDE_USER_APPS', 'PREINSTALLED_APPS', 'STOP_ONLY', 'EXTRA_PROTECT', 'XIAOMI_ANIM_KEY', 'UNWHITELIST_NETFLIX', 'START_KEYMAPPER_EXPERT_MODE', 'QUIET_APPS', 'DAILY_REFRESH', 'DAILY_REFRESH_HOUR') {
         if ($null -eq $c.$k) { continue }
         $l += ('{0}="{1}"' -f $k, $c.$k)
     }
@@ -337,9 +338,9 @@ function Publish-Agent {
     Write-Text $f (New-ConfText $c)
     $hadOwn = Sh1 '[ -f /data/local/tmp/tv-apply.sh ] && [ ! -f /data/local/tmp/tv-apply.conf ] && echo yes'
     if ($hadOwn -eq 'yes') { [void](Sh 'cp /data/local/tmp/tv-apply.sh /data/local/tmp/tv-apply.sh.bak'); Info 'Kept a copy of the existing tv-apply.sh as tv-apply.sh.bak' }
-    foreach ($s in 'tv-apply.sh', 'tv-refresh.sh') { Send-File ([IO.Path]::Combine($script:Root, 'scripts', 'device', $s)) "/data/local/tmp/$s" }
+    foreach ($s in 'tv-apply.sh', 'tv-refresh.sh', 'tv-daily.sh') { Send-File ([IO.Path]::Combine($script:Root, 'scripts', 'device', $s)) "/data/local/tmp/$s" }
     Send-File $f /data/local/tmp/tv-apply.conf
-    [void](Sh 'chmod 755 /data/local/tmp/tv-apply.sh /data/local/tmp/tv-refresh.sh; chmod 644 /data/local/tmp/tv-apply.conf')
+    [void](Sh 'chmod 755 /data/local/tmp/tv-apply.sh /data/local/tmp/tv-refresh.sh /data/local/tmp/tv-daily.sh; chmod 644 /data/local/tmp/tv-apply.conf')
     $out = Sh 'sh /data/local/tmp/tv-apply.sh; tail -n 40 /data/local/tmp/tv-apply.log'
     return $out
 }
@@ -374,6 +375,10 @@ function Step-Background {
         $choice = Ask-Choice 'Menu animation speed?' @('Normal (1x)', 'Faster (0.5x) - feels snappier', 'Off') 1
         $anim = @('1.0', '0.5', '0')[$choice]
     }
+    $daily = Get-Answer 'dailyRefresh' $null
+    if ($null -eq $daily) { $daily = Ask-YesNo 'Also refresh once a day by itself, like pressing the refresh button? (from 4:00, never while something plays)' $true }
+    $dailyHour = Get-Answer 'dailyRefreshHour' $null
+    if ($null -eq $dailyHour) { $dailyHour = 4 }
     $helpers = 'com.termux com.termux.boot com.tpn.adbautoenable'
     $c = [pscustomobject]@{
         ANIM_SCALE                  = "$anim"
@@ -385,6 +390,8 @@ function Step-Background {
         UNWHITELIST_NETFLIX         = $(if ($script:Info.All -contains 'com.netflix.ninja') { '1' } else { '0' })
         START_KEYMAPPER_EXPERT_MODE = $(if ($script:Info.All -contains 'io.github.sds100.keymapper') { '1' } else { '0' })
         QUIET_APPS                  = 'io.github.sds100.keymapper com.tpn.adbautoenable'
+        DAILY_REFRESH               = $(if ($daily) { '1' } else { '0' })
+        DAILY_REFRESH_HOUR          = "$([int]$dailyHour)"
     }
     $script:State.conf = $c; Save-State
     Add-Change @{ type = 'deploy'; anim = "$anim"; stopOnly = $c.STOP_ONLY; protect = $c.EXTRA_PROTECT; preinstalled = $c.PREINSTALLED_APPS }
@@ -652,6 +659,49 @@ function Step-Launcher {
     Set-StepDone 'launcher'
 }
 
+# ====================================================================== step 6: extras
+function Step-Extras {
+    Title 'Step 6' $StepNames.extras
+    # Ad and tracker blocking for every app via Android's Private DNS (AdGuard DNS).
+    $mode = Sh1 'settings get global private_dns_mode'; $dnsHost = Sh1 'settings get global private_dns_specifier'
+    if ($script:Info.Sdk -lt 28) { Info 'Private DNS needs Android 9 or newer. Skipping.' }
+    elseif ($dnsHost -eq 'dns.adguard-dns.com' -and $mode -eq 'hostname') { Ok 'Ad-blocking DNS (AdGuard) is already on.' }
+    else {
+        $want = Get-Answer 'privateDns' $null
+        if ($null -eq $want) {
+            Info 'AdGuard DNS blocks ad and tracking domains in every app. It cannot block YouTube''s own video ads.'
+            Info 'Trade-offs: AdGuard sees which sites the TV looks up, and a rare app may refuse to work (one switch undoes it).'
+            $want = Ask-YesNo 'Turn on ad-blocking DNS for the whole TV?' $false
+        }
+        if ($want) {
+            Add-Change @{ type = 'private-dns'; oldMode = $mode; oldHost = $dnsHost }
+            [void](Sh 'settings put global private_dns_specifier dns.adguard-dns.com; settings put global private_dns_mode hostname')
+            Start-Sleep -Seconds 8
+            $ad = Sh1 'ping -c1 -W2 doubleclick.net 2>&1 | grep -m1 -oE ''\([0-9.]+\)'''
+            $ok = Sh1 'ping -c1 -W2 www.google.com 2>&1 | grep -m1 -oE ''\([0-9.]+\)'''
+            if ($ok -and $ad -match '\((0\.0\.0\.0|127\.0\.0\.1)\)') { Ok 'Ad-blocking DNS is on: ad domains are blocked, normal sites work.' }
+            else {
+                $restoreMode = if ($mode -in '', 'null') { 'opportunistic' } else { $mode }
+                [void](Sh "settings put global private_dns_mode $restoreMode")
+                Warn 'AdGuard DNS did not answer as expected on this network, so it was switched back off.'
+            }
+        }
+    }
+    # YouTube links straight into SmartTube instead of an "open with" box every time.
+    $st = @('org.smarttube.stable', 'org.smarttube.beta', 'com.liskovsoft.smarttubetv.beta') | Where-Object { $script:Info.All -contains $_ } | Select-Object -First 1
+    if ($st -and $script:Info.Sdk -ge 31) {
+        $want = Get-Answer 'smartTubeLinks' $null
+        if ($null -eq $want) { $want = Ask-YesNo 'Open YouTube links in SmartTube? (the YouTube app, its remote button and casting are not affected)' $true }
+        if ($want) {
+            [void](Sh "pm set-app-links-user-selection --user 0 --package $st true youtube.com www.youtube.com m.youtube.com youtu.be")
+            [void](Sh 'pm set-app-links-allowed --user 0 --package com.google.android.youtube.tv false')
+            Add-Change @{ type = 'app-links'; package = $st }
+            Ok 'YouTube links now open in SmartTube.'
+        }
+    }
+    Set-StepDone 'extras'
+}
+
 # ====================================================================== finish, test restart, report
 # Android saves package and permission changes to disk about 10 seconds after they happen. Restarting sooner
 # can silently lose them, so always give it time first.
@@ -755,6 +805,17 @@ function Invoke-Undo {
             $enabled[$c.package] = $true
         }
         if ($c.type -eq 'notifications-off') { [void](Sh "pm grant $($c.package) android.permission.POST_NOTIFICATIONS"); Ok "notifications back on: $($c.package)" }
+        if ($c.type -eq 'private-dns') {
+            $m = if ("$($c.oldMode)" -in '', 'null') { 'opportunistic' } else { $c.oldMode }
+            [void](Sh "settings put global private_dns_mode $m")
+            if ("$($c.oldHost)" -in '', 'null') { [void](Sh 'settings delete global private_dns_specifier') } else { [void](Sh "settings put global private_dns_specifier $($c.oldHost)") }
+            Ok 'ad-blocking DNS off'
+        }
+        if ($c.type -eq 'app-links') {
+            [void](Sh "pm set-app-links-user-selection --user 0 --package $($c.package) false youtube.com www.youtube.com m.youtube.com youtu.be")
+            [void](Sh 'pm set-app-links-allowed --user 0 --package com.google.android.youtube.tv true')
+            Ok 'YouTube links back to normal'
+        }
         if ($c.type -eq 'accessibility-add') {
             $cur = (Sh1 'settings get secure enabled_accessibility_services') -split ':' | Where-Object { $_ -and $_ -ne $c.component }
             [void](Sh ('settings put secure enabled_accessibility_services ' + $(if ($cur) { $cur -join ':' } else { "''" })))
@@ -772,6 +833,7 @@ function Invoke-Undo {
         }
         Ok 'animation speed restored'
         [void](Sh "for k in `$(cmd notification snoozed 2>/dev/null | grep -oE '^[^ ]+' | grep -E 'keymapper|adbautoenable'); do cmd notification unsnooze `$k; done")
+        [void](Sh 'kill $(cat /data/local/tmp/tv-daily.pid 2>/dev/null) 2>/dev/null; rm -f /data/local/tmp/tv-daily.sh /data/local/tmp/tv-daily.pid /data/local/tmp/tv-daily.last')
         [void](Sh 'rm -f /data/local/tmp/tv-apply.sh /data/local/tmp/tv-refresh.sh /data/local/tmp/tv-apply.conf /data/local/tmp/tv-apply.log; [ -f /data/local/tmp/tv-apply.sh.bak ] && mv /data/local/tmp/tv-apply.sh.bak /data/local/tmp/tv-apply.sh')
         Ok 'scripts removed from the TV'
     }
@@ -832,12 +894,15 @@ function Write-Plan {
         stepsDone  = @($script:State.stepsDone)
     }
     $template = [ordered]@{
-        steps        = [ordered]@{ debloat = $true; background = $true; stick = $true; remote = $false; launcher = $false }
+        steps        = [ordered]@{ debloat = $true; background = $true; stick = $true; remote = $false; launcher = $false; extras = $false }
         features     = [ordered]@{}
         disableApps  = @()
         skipPackages = @()
         background   = [ordered]@{ asleep = @(); stopOnly = @(); protect = @() }
         animation    = '0.5'
+        dailyRefresh = $true
+        privateDns   = $false
+        smartTubeLinks = $true
         testRestart  = $true
     }
     foreach ($q in $qs) { $template.features[$q.id] = $q.recommend }
@@ -931,6 +996,7 @@ function Start-Wizard {
                 'stick' { Step-Stick }
                 'remote' { Step-Remote }
                 'launcher' { Step-Launcher }
+                'extras' { Step-Extras }
             }
         } catch {
             Bad "This step stopped: $($_.Exception.Message)"
