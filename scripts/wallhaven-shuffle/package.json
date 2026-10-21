@@ -1,0 +1,7 @@
+{
+  "name": "wallhaven-shuffle",
+  "private": true,
+  "type": "module",
+  "description": "Serves a Wallhaven toplist to Projectivy's Booru wallpaper plugin 24 at a time, in shuffled order.",
+  "engines": { "node": ">=20" }
+}

@@ -1,0 +1,7 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    { "source": "/r/:range/:res/api/v1/search", "destination": "/api/v1/search?range=:range&res=:res" },
+    { "source": "/r/:range/:res/:fav/api/v1/search", "destination": "/api/v1/search?range=:range&res=:res&fav=:fav" }
+  ]
+}

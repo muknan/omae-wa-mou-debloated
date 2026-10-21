@@ -61,7 +61,9 @@ phone app still uses it. Undo: run both lines again with `false` and `true` swap
 ## Wallpapers: top of the last month, in your TV's resolution
 
 See [06](06-launcher-and-wallpapers.md#rotating-wallpapers-from-wallhaven). `topRange=1M` gives a fresher set
-than `6M`; Projectivy re-asks every so often, so the list follows Wallhaven's toplist as it changes.
+than `6M`; Projectivy re-asks every so often, so the list follows Wallhaven's toplist as it changes. To get a
+different 24 every hour and eventually the whole toplist instead of the same top 24, deploy the small
+[shuffle helper](06-launcher-and-wallpapers.md#a-fresh-24-every-hour-through-the-whole-toplist-optional).
 
 ## Back up your launcher
 

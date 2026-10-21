@@ -52,6 +52,36 @@ Projectivy caches the list and only re-asks the plugin every so often. To switch
 pick another source, then pick Booru Wallpaper Provider again**. Check **Show wallpapers**: the names are Wallhaven
 image IDs, so you can look any of them up at `https://wallhaven.cc/w/<id>`.
 
+### A fresh 24 every hour, through the whole toplist (optional)
+With the URL above, Projectivy asks about once an hour and gets the **same top 24** every time. Wallhaven can't
+return "a random 24 from the toplist" (its random sort ignores `topRange`), so this needs a tiny helper in between:
+[`scripts/wallhaven-shuffle`](../scripts/wallhaven-shuffle), one free Vercel function with no dependencies.
+
+- It reads the whole toplist (e.g. the last 3 months in 4K: ~750 wallpapers), shuffles it, and answers the plugin
+  in Wallhaven's own format with the next 24. One pass shows every wallpaper once, then it reshuffles; new uploads
+  join as the toplist changes.
+- It works by the clock (a new set every 55 minutes), so it needs no database. Sets that come up while the TV is
+  off are skipped and appear in a later pass.
+- The list is cached by Vercel's CDN, so the plugin gets an answer in well under a second and Wallhaven sees one
+  full read every 6 hours (paced under its rate limit).
+
+**Deploy your own** (free Vercel account): **Add New > Project**, import your fork of this repo, set **Root
+Directory** to `scripts/wallhaven-shuffle`, deploy. Or from that folder: `npx vercel deploy --prod`. Optional
+environment variables:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `TOP_RANGE` | `3M` | `1d` `3d` `1w` `1M` `3M` `6M` `1y` |
+| `RESOLUTIONS` | `3840x2160` | your TV's `wm size` |
+| `CATEGORIES` | `111` | general / anime / people as 0-1 flags: `110` = no People |
+| `PURITY` | `100` | SFW only |
+| `MIN_FAVORITES` | `0` | skip wallpapers with fewer favourites (the 3-month toplist is every upload, ranked) |
+
+Then set the plugin's **Booru URL** to just `https://<your-project>.vercel.app` (no `#`, no query), re-select the
+plugin as described above, and open `https://<your-project>.vercel.app/api/v1/search` in a browser to see the
+current set (`meta.shuffle` says which set of how many). To try other settings without redeploying, put them in the
+plugin URL instead: `https://<your-project>.vercel.app/r/6M/2560x1440/20`.
+
 ### Ask for the next wallpaper over ADB
 Projectivy listens for the same "wallpaper updated" broadcast the plugin sends:
 ```powershell
