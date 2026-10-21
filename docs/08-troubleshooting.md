@@ -29,7 +29,7 @@ First try: double-click **Start-Here.cmd** again. It remembers your TV and offer
 | An app or feature stopped working | Undo just that package: `adb shell pm enable --user 0 <package>` (the list is in `my-tv\<your TV>\report.md`), or *Undo everything*. Then tell the wizard to skip it: add it to `skipPackages` in an answers file, or simply untick it next time. |
 | A music app or VPN stops when you leave it | Re-run step 2 and move it to "stopped at startup, may run after you open it". |
 | An app you use is put to sleep too often | Re-run step 2 and move it to "left alone". |
-| A notification badge on the home screen | Usually Key Mapper's permanent notifications. They're hidden at every boot and every refresh-button press; press the refresh button once, or re-run step 2. |
+| A notification badge on the home screen | Usually Key Mapper's permanent notifications. The background helper hides them within a minute; if one stays, the helper isn't running: press the refresh button once, or re-run step 2. |
 | Wi-Fi drops for a moment every few minutes | Usually the router's IPv6, not the TV: see [Wi-Fi that keeps dropping](09-extras.md#wi-fi-that-keeps-dropping). |
 | Remote button does nothing | Expert Mode isn't running. Restart the TV (the boot helper starts it) or see [05](05-key-mapper.md). |
 | Home button opens the stock launcher | Projectivy needs its accessibility helper on and the stock launcher **enabled**. Re-run step 5. |

@@ -12,8 +12,10 @@ and cached apps are cleared. You never have to remember to press it.
 
 - `scripts/device/tv-daily.sh` is a tiny shell script (about 3 MB of memory) started by `tv-apply.sh`, the same
   way Key Mapper's Expert Mode runs. It survives standby and is restarted by the boot helper after a restart.
-- It checks every 15 minutes and refreshes on the first check at or after 4:00 each day. When the TV is in
-  standby it's asleep too, so in practice the refresh happens within 15 minutes of turning the TV on.
+- It checks every minute and refreshes on the first check at or after 4:00 each day. When the TV is in
+  standby it's asleep too, so in practice the refresh happens within a minute of turning the TV on.
+- The same check re-hides helper notifications that came back (see [05](05-key-mapper.md#no-notification-clutter)),
+  so it keeps running even with the daily refresh switched off.
 - **It never interrupts:** if anything is playing (music, video), it waits for the next check.
 - Settings in `tv-apply.conf` (re-read at every check, no restart needed):
 

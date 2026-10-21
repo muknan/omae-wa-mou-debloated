@@ -34,7 +34,8 @@ XIAOMI_ANIM_KEY=1
 UNWHITELIST_NETFLIX=1
 
 # Helper apps whose permanent notifications get hidden (they'd show up as a badge on the home screen).
-# They're snoozed for 30 days, re-done every run; the apps themselves keep working normally.
+# They're snoozed for 30 days, re-done every run and checked every minute by tv-daily.sh (apps re-post them when
+# they restart, which undoes the snooze); the apps themselves keep working normally.
 QUIET_APPS="io.github.sds100.keymapper com.tpn.adbautoenable"
 
 # 1 = refresh once a day (like pressing the refresh button), from this hour on. Never while something plays.
@@ -131,12 +132,13 @@ if [ "$START_KEYMAPPER_EXPERT_MODE" = "1" ] && pm path $KM >/dev/null 2>&1 && ! 
     fi
 fi
 
-# Daily refresh: start the tiny scheduler (tv-daily.sh) if it isn't running yet.
-if [ "$DAILY_REFRESH" = "1" ] && [ -f /data/local/tmp/tv-daily.sh ]; then
+# Daily refresh + re-hiding helper notifications: start the tiny background helper (tv-daily.sh) if it isn't
+# running yet.
+if { [ "$DAILY_REFRESH" = "1" ] || [ -n "$QUIET_APPS" ]; } && [ -f /data/local/tmp/tv-daily.sh ]; then
     dp=$(cat /data/local/tmp/tv-daily.pid 2>/dev/null)
     if [ -z "$dp" ] || ! grep -q tv-daily /proc/"$dp"/cmdline 2>/dev/null; then
         setsid nohup sh /data/local/tmp/tv-daily.sh </dev/null >/dev/null 2>&1 &
-        log "started daily refresh (once a day from ${DAILY_REFRESH_HOUR}:00)"
+        if [ "$DAILY_REFRESH" = "1" ]; then log "started background helper (daily refresh from ${DAILY_REFRESH_HOUR}:00)"; else log "started background helper"; fi
     fi
 fi
 

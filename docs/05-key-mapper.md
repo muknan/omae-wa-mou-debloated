@@ -44,11 +44,15 @@ Runs [`tv-refresh.sh`](../scripts/device/tv-refresh.sh): re-applies everything a
 ### No notification clutter
 Key Mapper always keeps one or two minimum-priority notifications posted (key map status, keyboard toggle), and
 launchers like Projectivy show them as a badge on the home screen. `tv-apply.sh` hides them every time it runs
-(at boot, and every time you press the refresh button) by snoozing them for 30 days (`QUIET_APPS`). The app is
-not touched: no permission changes, no restarts.
+(at boot, and every time you press the refresh button) by snoozing them for 30 days (`QUIET_APPS`). Key Mapper
+posts them again whenever it restarts, so the background helper (`tv-daily.sh`) checks every minute and hides any
+that came back. The app is not touched: no permission changes, no restarts.
 
 Don't fix this by revoking Key Mapper's notification permission: revoking restarts the app, which itself posts
-"Accessibility service needs restarting!", and some firmwares grant the permission back at boot anyway.
+"Accessibility service needs restarting!", and some firmwares grant the permission back at boot anyway. The
+`POST_NOTIFICATION` app-op is ignored on Android 13+, and Key Mapper's own **Settings > Show pause/resume
+notification** opens Android's per-channel notification screen, which Google TV doesn't have (Key Mapper crashes
+and restarts).
 
 ### Why the volume bar and not a toast?
 On some firmwares an app's toasts are blocked together with its notifications ("Suppressing toast … by user
