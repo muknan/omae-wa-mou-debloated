@@ -132,7 +132,8 @@ worked. Spare buttons can also open your favourite apps directly.
 **The home screen.** [Projectivy Launcher](https://play.google.com/store/apps/details?id=com.spocky.projengmenu)
 is a free home-screen app that replaces the ad-filled one. With the
 [Booru Wallpaper Provider](https://github.com/Kurocon/projectivy-booru-wallpaper-provider) plugin pointed at
-[Wallhaven](https://wallhaven.cc), it shows a new wallpaper every so often. Your Netflix, YouTube and other apps
+[Wallhaven](https://wallhaven.cc), it shows a new wallpaper every so often: the most popular ones of the last 6 months, in
+exactly your TV's resolution ([how](docs/06-launcher-and-wallpapers.md#rotating-wallpapers-from-wallhaven)). Your Netflix, YouTube and other apps
 stay exactly where you put them.
 
 <p align="center">

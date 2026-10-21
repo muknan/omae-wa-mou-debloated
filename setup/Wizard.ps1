@@ -602,6 +602,14 @@ function Step-Remote {
 }
 
 # ====================================================================== step 5: launcher
+# Wallhaven query for the plugin's "Booru URL" field. The plugin appends /api/v1/search?q=...&sorting=random to
+# whatever is typed there; ending our URL with # turns that into a fragment that is never sent, so these filters win.
+function Get-WallhavenUrl {
+    $phys = Sh1 'wm size 2>/dev/null | grep -m1 Physical'
+    $res = if ($phys -match '(\d+)x(\d+)' -and [int]$matches[1] -ge 3840) { '3840x2160' } else { '1920x1080' }
+    return "https://wallhaven.cc/api/v1/search?sorting=toplist&topRange=6M&resolutions=$res#"
+}
+
 function Step-Launcher {
     Title 'Step 5' $StepNames.launcher
     if ($script:Info.Platform -eq 'Fire TV') { Warn 'Fire TV does not allow other home screens. Skipping.'; return }
@@ -630,10 +638,14 @@ function Step-Launcher {
         try {
             $bw = Install-Helper 'booru-wallpapers'
             if ($bw.Already) { Info 'Keeping your existing wallpaper settings.'; Set-StepDone 'launcher'; return }
+            $url = Get-WallhavenUrl
             Say '  Set it up on the TV:' White
-            Info '1. Open "Booru Wallpaper Provider" from your apps. Booru URL: https://wallhaven.cc   Booru type: Wallhaven'
-            Info '   Optional search, e.g.  ratio:16:9'
-            Info '2. In Projectivy''s settings, open the wallpaper options and pick Booru Wallpaper Provider as the source.'
+            Info '1. Open "Booru Wallpaper Provider" from your apps. Booru type: Wallhaven. Booru URL (type it exactly, # included):'
+            Say "       $url" Cyan
+            Info '   That is the most popular wallpapers of the last 6 months in your TV''s exact resolution.'
+            Info '2. Projectivy settings > Appearance > Wallpaper > Launcher wallpaper: scroll to the bottom and pick'
+            Info '   "Booru Wallpaper Provider". (Changed the URL later? Pick another source and then Booru again, so'
+            Info '   Projectivy fetches the new list right away.)'
             Info 'Keep wallpaper blur and colour effects off: on small TVs they cost smoothness.'
         } catch { Bad $_.Exception.Message }
     }

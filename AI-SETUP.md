@@ -139,7 +139,7 @@ steps that are already done are detected and skipped.
 | Boot helper (stick) | Approve "Allow USB debugging?" for Termux on the TV | Nothing; the wizard types into Termux and waits |
 | ADB Auto Enable (Android 14+) | Wireless debugging > *Pair device with pairing code*, read you the 6-digit code | `Wizard.ps1 -Device <ip> -PairCode <code>` (add `-PairPort` if it asks). If the wizard says it couldn't reach the setup page, that's normal on TVs that already use its port (Xiaomi): if the restart test passes, no pairing is needed. |
 | Remote button (Key Mapper) | Open Key Mapper's *Expert Mode* screen once (choose *Don't allow* if it asks to send notifications); create the key map (steps are printed); press Home, then the button | Watch for "It works!" |
-| Launcher (Projectivy) | Press *Install* in the Play Store; accept Projectivy's own setup; set the wallpaper plugin to `https://wallhaven.cc`, type *Wallhaven* | Nothing |
+| Launcher (Projectivy) | Press *Install* in the Play Store; accept Projectivy's own setup; in the wallpaper plugin set type *Wallhaven* and the Booru URL the wizard prints (top wallpapers of the last 6 months in the TV's resolution, see [docs/06](docs/06-launcher-and-wallpapers.md#rotating-wallpapers-from-wallhaven)); re-select the plugin as Projectivy's wallpaper source so it fetches the new list | Nothing |
 
 ## 6. Finish
 
