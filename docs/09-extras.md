@@ -1,7 +1,7 @@
 # 9. Quality-of-life extras
 
-> **Easier:** the wizard's step 2 sets up the daily refresh and the Wi-Fi fix, and its extras step offers the
-> ad-blocking DNS and the YouTube-links switch. This page explains each one and how to do or undo it by hand.
+> **Easier:** the wizard's step 2 sets up the daily refresh, and its extras step offers the ad-blocking DNS and
+> the YouTube-links switch. This page explains each one and how to do or undo it by hand.
 
 All of these were tested on the Xiaomi test TV. Each has a one-line undo.
 
@@ -72,26 +72,26 @@ takes a few minutes. Restoring a Key Mapper backup file works with File Manager+
 
 ## Wi-Fi that keeps dropping
 
-Android 12+ regularly checks that the router still answers. Many home routers skip some of these checks (often on
-IPv6, even when the TV has no IPv6 internet), and Android then drops and reconnects the network: usually for a
-second, sometimes for minutes. It looks like "the Wi-Fi keeps turning off". The test TV did it every 4-9 minutes.
-
-**Check it:** if this shows several `IP_REACHABILITY_LOST` lines, it's this.
+If the Wi-Fi icon blinks off every few minutes, or videos rebuffer for no reason, check this first:
 
 ```powershell
 adb shell "dumpsys wifi | grep -c CMD_IP_REACHABILITY_LOST"
+adb shell "logcat -d | grep -m3 'NUD_FAILED'"
 ```
 
-**Fix:** the boot helper turns these drops off at every boot (`WIFI_STAY_CONNECTED="1"` in `tv-apply.conf`, on by
-default). Real disconnects (router off, out of range) are still handled normally. By hand, until the next restart:
+Several `IP_REACHABILITY_LOST` events, with `NUD_FAILED` for `fe80::...`, mean the **router's IPv6 is half-broken**:
+it announces itself as the IPv6 gateway but doesn't answer there. Android 14 checks, decides the network is gone and
+resets the connection (about a second each time). The test TV did this every 4-9 minutes on an ISP router.
 
-```powershell
-adb shell cmd wifi set-ipreach-disconnect disabled
-```
+There's no fix on the TV without root (`cmd wifi set-ipreach-disconnect disabled` and the
+`ip_reachability_*` device_config flags were tried; neither stops it). Fix it on the router, which helps every
+device in the house:
 
-Undo: set `WIFI_STAY_CONNECTED="0"` and run `adb shell cmd wifi set-ipreach-disconnect enabled`. Fixing it on
-the router (firmware update, or switching IPv6 off if your internet provider doesn't use it) fixes it for every
-device in the house; a weak signal (below about -70 dBm in `dumpsys wifi | grep RSSI`) makes it worse.
+1. Restart the router and update its firmware. If that doesn't help:
+2. Router admin page > **IPv6** (sometimes under *WAN* or *LAN*) > **disable**, or set the LAN side to *IPv4 only*.
+   Nothing you watch needs IPv6; everything falls back to IPv4.
+3. If the TV is on a Wi-Fi extender or mesh node (often a network name ending in `+`, `_EXT` or `_RPT`), try
+   the main router's network or an Ethernet cable.
 
 ## Give the TV a fixed IP address
 

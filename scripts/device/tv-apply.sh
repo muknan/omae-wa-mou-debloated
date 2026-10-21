@@ -33,11 +33,6 @@ XIAOMI_ANIM_KEY=1
 # 1 = remove Netflix's power-management exemption (some firmwares whitelist it). 0 = leave it.
 UNWHITELIST_NETFLIX=1
 
-# 1 = don't drop Wi-Fi when the router misses a "still there?" check. Many home routers ignore these checks
-# (often on IPv6), and Android 12+ then briefly disconnects every few minutes. Real disconnects (router off, out
-# of range) are still handled normally. Not saved by Android, so it's re-done at every boot. 0 = Android default.
-WIFI_STAY_CONNECTED=1
-
 # Helper apps whose permanent notifications get hidden (they'd show up as a badge on the home screen).
 # They're snoozed for 30 days, re-done every run; the apps themselves keep working normally.
 QUIET_APPS="io.github.sds100.keymapper com.tpn.adbautoenable"
@@ -92,7 +87,6 @@ for k in window_animation_scale transition_animation_scale animator_duration_sca
 done
 [ "$XIAOMI_ANIM_KEY" = "1" ] && settings put global mitv_fast_cur_anim_scale "$ANIM_SCALE"
 [ "$UNWHITELIST_NETFLIX" = "1" ] && cmd deviceidle sys-whitelist -com.netflix.ninja >/dev/null 2>&1
-[ "$WIFI_STAY_CONNECTED" = "1" ] && [ "${SDK:-0}" -ge 31 ] && cmd wifi set-ipreach-disconnect disabled >/dev/null 2>&1
 
 # "restricted" standby bucket exists from Android 11; older versions get the strictest one they have.
 BUCKET=restricted; [ "${SDK:-0}" -lt 30 ] && BUCKET=rare

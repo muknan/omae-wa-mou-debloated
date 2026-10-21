@@ -27,7 +27,6 @@ if ($CleanStaging) {
 if ($Remove) {
     & $adb -s $Device shell 'kill $(cat /data/local/tmp/tv-daily.pid 2>/dev/null) 2>/dev/null; rm -f /data/local/tmp/tv-daily.sh /data/local/tmp/tv-daily.pid /data/local/tmp/tv-daily.last'
     & $adb -s $Device shell "rm -f /data/local/tmp/tv-apply.sh /data/local/tmp/tv-refresh.sh /data/local/tmp/tv-apply.log; rm -rf /sdcard/Download/tvagent"
-    & $adb -s $Device shell 'cmd wifi set-ipreach-disconnect enabled >/dev/null 2>&1'
     # Back to stock animation speed (1.0). The background limits clear themselves at the next restart.
     & $adb -s $Device shell "for k in window_animation_scale transition_animation_scale animator_duration_scale mitv_fast_cur_anim_scale; do settings put global `$k 1.0; done"
     Write-Host "Removed and animations reset. Restart the TV to clear the background limits."
