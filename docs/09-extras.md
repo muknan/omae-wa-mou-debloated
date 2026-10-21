@@ -95,7 +95,7 @@ device in the house; a weak signal (below about -70 dBm in `dumpsys wifi | grep 
 
 ## Give the TV a fixed IP address
 
-Your router hands out addresses, and they can change (the test TV moved from `192.168.0.232` to `192.168.1.13`
+Your router hands out addresses, and they can change (the test TV moved to a different address
 overnight). The boot helper doesn't care, but the wizard and any PC commands do. In your router's admin page
 (usually `http://192.168.1.1` or `http://192.168.0.1`), find **DHCP reservation** / **Static lease** / **Address
 reservation** and reserve the TV's current IP for its MAC address:
