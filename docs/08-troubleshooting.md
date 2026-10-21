@@ -1,6 +1,9 @@
 # 8. Troubleshooting
 
 First try: double-click **Start-Here.cmd** again. It remembers your TV and offers *Show status* and *Undo everything*.
+*Show status* is a quick health check: did the boot helper run this boot, is Key Mapper's Expert Mode running, is
+the background helper running (and when it last refreshed), any helper notifications showing, Private DNS, and how
+often Wi-Fi reconnected since boot (many reconnects point at the router, see the row below).
 
 ## Connecting
 

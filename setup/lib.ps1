@@ -111,16 +111,41 @@ function Install-Adb {
     return $a
 }
 
+# A Wi-Fi blip (some routers make the TV reconnect every few minutes, see docs/09) shows up as "device offline"
+# or "device ... not found". The command never reached the TV then, so reconnect and run it again.
+function Test-AdbLost([string[]]$out) {
+    $lostLine = "^(error|adb(\.exe)?): (device offline|device '[^']*' not found|no devices/emulators found|closed)$"
+    return ($LASTEXITCODE -ne 0) -and @($out | Where-Object { $_ -match $lostLine }).Count -gt 0
+}
+# Wait, then reconnect if the TV answers on its ADB port within 1.5 s. $false = it's really gone (off,
+# restarting): give up at once instead of letting adb connect hang ~20 s per try.
+function Restore-AdbLink([int]$try) {
+    Start-Sleep -Seconds (2 * $try)
+    if ($script:Dev -notmatch '^(.+):(\d+)$') { return $true } # USB: just try again
+    $tcp = New-Object Net.Sockets.TcpClient
+    try { if (-not $tcp.ConnectAsync($Matches[1], [int]$Matches[2]).Wait(1500)) { return $false } }
+    catch { return $false }
+    finally { $tcp.Close() }
+    [void](& $script:Adb connect $script:Dev 2>&1)
+    return $true
+}
+
 function Invoke-Adb {
-    $out = & $script:Adb @args 2>&1 | ForEach-Object { "$_" }
-    return $out
+    for ($try = 1; ; $try++) {
+        $out = @(& $script:Adb @args 2>&1 | ForEach-Object { "$_" })
+        if ($args[0] -in 'connect', 'disconnect', 'pair', 'mdns', 'devices' -or $try -ge 4 -or -not (Test-AdbLost $out)) { return $out }
+        if (-not (Restore-AdbLink $try)) { return $out }
+    }
 }
 
 # Run a shell command on the TV and return its output lines. Avoid double quotes inside $cmd (Windows
 # PowerShell mangles them when passing arguments); use single quotes.
 function Sh([string]$cmd) {
-    $out = & $script:Adb -s $script:Dev shell -n $cmd 2>&1 | ForEach-Object { "$_" }
-    return $out
+    for ($try = 1; ; $try++) {
+        $out = @(& $script:Adb -s $script:Dev shell -n $cmd 2>&1 | ForEach-Object { "$_" })
+        if ($try -ge 4 -or -not (Test-AdbLost $out)) { return $out }
+        if (-not (Restore-AdbLink $try)) { return $out }
+    }
 }
 function Sh1([string]$cmd) { return ((Sh $cmd) -join "`n").Trim() }
 

@@ -62,8 +62,12 @@ return "a random 24 from the toplist" (its random sort ignores `topRange`), so t
   join as the toplist changes.
 - It works by the clock (a new set every 55 minutes), so it needs no database. Sets that come up while the TV is
   off are skipped and appear in a later pass.
-- The list is cached by Vercel's CDN, so the plugin gets an answer in well under a second and Wallhaven sees one
-  full read every 6 hours (paced under its rate limit).
+- Every toplist page is cached by Vercel's CDN on its own (6 hours, then refreshed in the background), so the
+  plugin gets an answer in well under a second and Wallhaven sees each page about four times a day. Vercel's
+  outgoing addresses are shared, and so is Wallhaven's rate limit: pages it refuses are simply asked for again a
+  couple of minutes later, and progress is never lost.
+- On a cold start (first use, or after the cache was dropped) the plugin gets the toplist's first page within ~5 s
+  while the list is built; the shuffle takes over about a minute later.
 
 **Deploy your own** (free Vercel account): **Add New > Project**, import your fork of this repo, set **Root
 Directory** to `scripts/wallhaven-shuffle`, deploy. Or from that folder: `npx vercel deploy --prod`. Optional

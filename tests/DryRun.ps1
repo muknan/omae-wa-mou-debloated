@@ -14,10 +14,11 @@ param(
     [switch]$Undo
 )
 $tvDevice = if ($Device -match ':\d+$') { $Device } else { "${Device}:5555" }
-$runSteps = $Steps; $runAuto = [bool]$Auto; $runAnswers = $Answers; $runUndo = [bool]$Undo
+# -Steps a,b arrives as one string through powershell -File: split it (the wizard does the same).
+$runSteps = @($Steps | ForEach-Object { $_ -split '[,\s]+' } | Where-Object { $_ }); $runAuto = [bool]$Auto; $runAnswers = $Answers; $runUndo = [bool]$Undo
 . (Join-Path $PSScriptRoot '..\setup\Wizard.ps1')
 
-$ReadOnly = '^(pm list|pm path|dumpsys|getprop|cat |ls |ps |settings get|cmd package query|cmd package resolve|cmd role get|logcat|pidof|grep|wc |tail|for k in|cut |\[ -f)'
+$ReadOnly = '^(pm list|pm path|pm get-app-links|dumpsys|getprop|cat |ls |ps |settings get|cmd package query|cmd package resolve|cmd role get|logcat|pidof|grep|wc |tail|for k in ro.|cut |\[ -f)'
 function Sh([string]$cmd) {
     if ($cmd -match $ReadOnly) { return (& $script:Adb -s $script:Dev shell -n $cmd 2>&1 | ForEach-Object { "$_" }) }
     Write-Host "    DRYRUN shell: $cmd" -ForegroundColor DarkYellow
@@ -60,6 +61,9 @@ if ($runUndo) {
     return
 }
 foreach ($s in $runSteps) {
-    switch ($s) { 'debloat' { Step-Debloat } 'background' { Step-Background } 'extras' { Step-Extras } }
+    switch ($s) {
+        'debloat' { Step-Debloat } 'background' { Step-Background } 'extras' { Step-Extras }
+        default { throw "DryRun can run debloat, background and extras; '$s' is not one of them" }
+    }
 }
 Write-Host "`nDry run finished. Nothing on the TV was changed." -ForegroundColor Green

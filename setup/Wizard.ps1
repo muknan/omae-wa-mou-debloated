@@ -70,10 +70,10 @@ function Find-Tvs {
             $c = New-Object Net.Sockets.TcpClient
             $probes += [pscustomobject]@{ Ip = "$base.$i"; Client = $c; Task = $c.ConnectAsync("$base.$i", 5555) }
         }
-        try { [void][Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($probes.Task), 2500) } catch { }
+        try { [void][Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($probes.Task), 2500) } catch { <# addresses that refuse or time out: expected #> }
         foreach ($p in $probes) {
             if ($p.Task.Status -eq 'RanToCompletion' -and $p.Client.Connected -and $p.Ip -ne $ip) { [void]$found.Add([pscustomobject]@{ Ip = $p.Ip; Kind = 'port5555' }) }
-            try { $p.Client.Close() } catch { }
+            try { $p.Client.Close() } catch { <# already closed #> }
         }
     }
     foreach ($l in (Invoke-Adb mdns services)) {
@@ -495,7 +495,7 @@ function Invoke-AaePair([string]$code, [int]$port) {
 
 function Connect-AaeApi([bool]$launch = $true) {
     [void](Invoke-Adb -s $script:Dev forward tcp:19093 tcp:9093)
-    try { return (Invoke-RestMethod -Uri 'http://127.0.0.1:19093/api/status' -TimeoutSec 5) } catch { }
+    try { return (Invoke-RestMethod -Uri 'http://127.0.0.1:19093/api/status' -TimeoutSec 5) } catch { <# not running yet: started below #> }
     if (-not $launch) { return $null }
     # Not running yet: opening the app once starts its service. (Never while the TV shows a pairing box:
     # switching apps closes it.)
@@ -650,6 +650,7 @@ function Step-Launcher {
             Info '1. Open "Booru Wallpaper Provider" from your apps. Booru type: Wallhaven. Booru URL (type it exactly, # included):'
             Say "       $url" Cyan
             Info '   That is the most popular wallpapers of the last 6 months in your TV''s exact resolution.'
+            Info '   (It shows the same top 24 each time. For a fresh 24 every hour, see the optional shuffle helper in docs/06.)'
             Info '2. Projectivy settings > Appearance > Wallpaper > Launcher wallpaper: scroll to the bottom and pick'
             Info '   "Booru Wallpaper Provider". (Changed the URL later? Pick another source and then Booru again, so'
             Info '   Projectivy fetches the new list right away.)'
@@ -689,7 +690,9 @@ function Step-Extras {
     }
     # YouTube links straight into SmartTube instead of an "open with" box every time.
     $st = @('org.smarttube.stable', 'org.smarttube.beta', 'com.liskovsoft.smarttubetv.beta') | Where-Object { $script:Info.All -contains $_ } | Select-Object -First 1
-    if ($st -and $script:Info.Sdk -ge 31) {
+    $linked = $st -and ((Sh1 "pm get-app-links --user 0 $st") -match 'Enabled:[\s\S]*youtube\.com')
+    if ($linked) { Ok 'YouTube links already open in SmartTube.' }
+    elseif ($st -and $script:Info.Sdk -ge 31) {
         $want = Get-Answer 'smartTubeLinks' $null
         if ($null -eq $want) { $want = Ask-YesNo 'Open YouTube links in SmartTube? (the YouTube app, its remote button and casting are not affected)' $true }
         if ($want) {
@@ -834,7 +837,7 @@ function Invoke-Undo {
         Ok 'animation speed restored'
         [void](Sh "for k in `$(cmd notification snoozed 2>/dev/null | grep -oE '^[^ ]+' | grep -E 'keymapper|adbautoenable'); do cmd notification unsnooze `$k; done")
         [void](Sh 'kill $(cat /data/local/tmp/tv-daily.pid 2>/dev/null) 2>/dev/null; rm -f /data/local/tmp/tv-daily.sh /data/local/tmp/tv-daily.pid /data/local/tmp/tv-daily.last')
-        [void](Sh 'rm -f /data/local/tmp/tv-apply.sh /data/local/tmp/tv-refresh.sh /data/local/tmp/tv-apply.conf /data/local/tmp/tv-apply.log; [ -f /data/local/tmp/tv-apply.sh.bak ] && mv /data/local/tmp/tv-apply.sh.bak /data/local/tmp/tv-apply.sh')
+        [void](Sh 'rm -f /data/local/tmp/tv-apply.sh /data/local/tmp/tv-refresh.sh /data/local/tmp/tv-apply.conf /data/local/tmp/tv-apply.log /data/local/tmp/tv-apply.boot; [ -f /data/local/tmp/tv-apply.sh.bak ] && mv /data/local/tmp/tv-apply.sh.bak /data/local/tmp/tv-apply.sh')
         Ok 'scripts removed from the TV'
     }
     $inst = @($ch | Where-Object { $_.type -eq 'install' })
@@ -859,6 +862,29 @@ function Show-Status {
     foreach ($p in 'com.termux', 'com.termux.boot', 'com.tpn.adbautoenable', 'io.github.sds100.keymapper', 'com.spocky.projengmenu') {
         Info ("{0,-32} {1}" -f $p, $(if ($script:Info.All -contains $p) { 'installed' } else { '-' }))
     }
+    # One round trip: key=value lines for the health checks below.
+    $h = @{}
+    # (No double quotes in here: Windows PowerShell 5.1 mangles them on the way to adb.)
+    Sh ('d=/data/local/tmp; ' +
+        'echo boot=$(cmp -s $d/tv-apply.boot /proc/sys/kernel/random/boot_id && echo 1 || echo 0); ' +
+        'echo expert=$(ps -A -o NAME | grep -cx keymapper_sysbridge); ' +
+        'p=$(cat $d/tv-daily.pid 2>/dev/null); echo helper=$(grep -c tv-daily /proc/$p/cmdline 2>/dev/null || echo 0); ' +
+        'echo daily=$(cat $d/tv-daily.last 2>/dev/null); ' +
+        'echo notifs=$(cmd notification list 2>/dev/null | grep -cE ''\|(io.github.sds100.keymapper|com.tpn.adbautoenable)\|''); ' +
+        'echo dns=$(settings get global private_dns_mode) $(settings get global private_dns_specifier); ' +
+        'echo drops=$(dumpsys wifi 2>/dev/null | grep -c CMD_IP_REACHABILITY_LOST)') |
+        ForEach-Object { if ($_ -match '^(\w+)=(.*)$') { $h[$Matches[1]] = $Matches[2].Trim() } }
+    $mark = { param([bool]$good) if ($good) { 'ok' } else { 'CHECK' } }
+    $hasAgent = $script:Info.All -contains 'com.termux.boot'
+    $hasKm = $script:Info.All -contains 'io.github.sds100.keymapper'
+    Say '  Health:' White
+    if ($hasAgent) { Info ("{0,-32} {1}" -f 'Boot helper ran this boot', (& $mark ($h.boot -eq '1'))) }
+    if ($hasKm) { Info ("{0,-32} {1}" -f 'Key Mapper Expert Mode', (& $mark ($h.expert -eq '1'))) }
+    Info ("{0,-32} {1}" -f 'Background helper (tv-daily)', $(if ($h.helper -eq '1') { "ok, last daily refresh: $(if ($h.daily) { $h.daily } else { 'not yet' })" } else { 'not running' }))
+    Info ("{0,-32} {1}" -f 'Helper notifications visible', $(if ($h.notifs -eq '0') { 'none' } else { "$($h.notifs) (hidden within a minute)" }))
+    Info ("{0,-32} {1}" -f 'Private DNS', $h.dns)
+    $drops = [int]$h.drops
+    Info ("{0,-32} {1}" -f 'Wi-Fi reconnects this boot', $(if ($drops -ge 3) { "$drops - likely the router's IPv6, see docs/09 'Wi-Fi that keeps dropping'" } else { "$drops" }))
     Say '  Last lines of the TV''s own log:' White
     Sh 'tail -n 6 /data/local/tmp/tv-apply.log 2>/dev/null' | ForEach-Object { Info $_ }
 }

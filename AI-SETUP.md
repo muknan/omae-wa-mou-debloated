@@ -36,7 +36,7 @@ and only come back when the human has to press something on the TV.
 | `setup/Wizard.ps1 -Device <ip> -Plan` | Connects, detects the TV and writes `my-tv/<tv>/plan.json` + `answers-template.json`. **Changes nothing.** |
 | `setup/Wizard.ps1 -Device <ip> -Answers <file> -Auto [-Steps ...]` | Runs the setup with no questions, using the answers file. |
 | `setup/Wizard.ps1 -Device <ip> -PairCode <code> [-PairPort <port>]` | Pairs ADB Auto Enable (Android 14+), see step 5. |
-| `setup/Wizard.ps1 -Device <ip> -Status` / `-Undo -Auto` | Show what's applied / undo everything. |
+| `setup/Wizard.ps1 -Device <ip> -Status` / `-Undo -Auto` | Health check (boot helper ran this boot, Expert Mode, background helper, helper notifications, Private DNS, Wi-Fi reconnects) / undo everything. Run `-Status` after a restart to confirm everything came back. |
 | `tests/DryRun.ps1 -Device <ip> -Steps debloat,background -Answers <file> -Auto` | Same as the real run, but every change is printed instead of done. Use it to preview. |
 | `adb` | Read-only checks (`adb -s <ip>:5555 shell ...`). Use `shell -n` so adb doesn't eat your stdin, and add `2>/dev/null` after `dumpsys` when piping it into `grep -m1` (otherwise "Broken pipe" errors end up in your output). |
 

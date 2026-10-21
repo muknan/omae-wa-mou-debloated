@@ -29,6 +29,8 @@ On the test TV: Live TV = `KEY_MEMO`, PatchWall/Mi = `KEY_WWW`. Buttons for apps
 
 ## The refresh button ("fresh boot without rebooting")
 Runs [`tv-refresh.sh`](../scripts/device/tv-refresh.sh): re-applies everything and clears cached apps in about 4 s, never touching the app on screen.
+Apps that are busy are left running too: music playing in the background, a connected VPN (anything with a
+foreground service or a playing media session). Only at start-up is everything on the lists stopped.
 
 1. Make sure the scripts are on the TV (`Deploy-Scripts.ps1`).
 2. **Expert Mode** is needed so Key Mapper can run commands with ADB rights. Start it once:

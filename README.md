@@ -232,7 +232,7 @@ uninstall the helper apps it installed. Then the TV restarts.
 .\setup\Wizard.ps1 -Device 192.168.1.50 -Plan        # detect + plan, change nothing
 .\setup\Wizard.ps1 -Device 192.168.1.50 -Answers answers.json -Auto
 .\setup\Wizard.ps1 -Device 192.168.1.50 -Steps background,stick
-.\setup\Wizard.ps1 -Device 192.168.1.50 -Status
+.\setup\Wizard.ps1 -Device 192.168.1.50 -Status      # health check: boot helper, Expert Mode, Wi-Fi drops, ...
 .\setup\Wizard.ps1 -Device 192.168.1.50 -Undo
 .\tests\DryRun.ps1 -Device 192.168.1.50              # run the steps with every change printed instead of done
 ```

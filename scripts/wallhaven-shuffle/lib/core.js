@@ -1,14 +1,19 @@
-// Shared code for the two endpoints: reading the Wallhaven toplist and picking the current set of 24.
+// Shared code for the endpoints: settings, reading one Wallhaven toplist page, and picking the current set of 24.
 // Env vars (all optional): TOP_RANGE, RESOLUTIONS, MIN_FAVORITES, CATEGORIES (e.g. 110 = no People),
 // PURITY, SLOT_MINUTES, WALLHAVEN_API_KEY.
 
 export const PER_SET = 24;
+export const MAX_PAGES = 100; // 2400 wallpapers (6 months of 4K is ~1600); keeps a long range (1y) bounded
+// CDN caching: a good answer stays fresh for 6 hours, then is served stale (instantly) for up to a week while a
+// new one is fetched in the background.
+export const CACHE_GOOD = 'public, max-age=0, s-maxage=21600, stale-while-revalidate=604800';
 // A bit shorter than Projectivy's ~1-hour refresh, so two refreshes never land in the same window (which would
 // repeat a set). The price: now and then a set is skipped; it comes back in a later pass.
 const SLOT_MINUTES = Number(process.env.SLOT_MINUTES || 55);
 const API_KEY = process.env.WALLHAVEN_API_KEY || '';
-const MAX_PAGES = 100; // 2400 wallpapers (6 months of 4K is ~1600); keeps a long range (1y) bounded
 const RANGES = new Set(['1d', '3d', '1w', '1M', '3M', '6M', '1y']);
+
+export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // The list settings from the request (the plugin URL's /r/<range>/<res>/<min favourites> part), else env, else defaults.
 export function listParams(query = {}) {
@@ -22,34 +27,32 @@ export function listParams(query = {}) {
   return { range, res, fav, cats, purity };
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// The query string that identifies one list (also the CDN cache key of /api/list and /api/page).
+export const listQuery = (p) => `range=${p.range}&res=${encodeURIComponent(p.res)}&cats=${p.cats}&purity=${p.purity}`;
 
-async function getJson(url) {
-  for (let attempt = 0; ; attempt++) {
-    const r = await fetch(url, { headers: { 'user-agent': 'wallhaven-shuffle (Projectivy Booru plugin helper)' } });
-    if (r.ok) return r.json();
-    if (attempt >= 3 || (r.status !== 429 && r.status < 500)) throw new Error(`Wallhaven answered ${r.status} for ${url.replace(/apikey=[^&]+/, 'apikey=***')}`);
-    await sleep(r.status === 429 ? 15000 * (attempt + 1) : 2000); // 429 = rate limited (45 requests/minute)
-  }
+// Our own endpoints, through the CDN (so cached pages and lists come back in milliseconds).
+export function selfUrl(req, path, p, extra = '') {
+  const host = req.headers['x-forwarded-host'] || req.headers.host;
+  const scheme = /^(localhost|127\.0\.0\.1)(:|$)/.test(host) ? 'http' : 'https'; // `vercel dev` / local tests
+  return `${scheme}://${host}${path}?${listQuery(p)}${extra}`;
 }
 
-// The whole toplist, read one page every ~1.4 s so even a long list stays under Wallhaven's 45 requests/minute:
-// ~45 s for 3 months of 4K (32 pages), ~2 minutes for 6 months (67 pages).
-export async function fetchToplist({ range, res, cats, purity }) {
-  const base = 'https://wallhaven.cc/api/v1/search?sorting=toplist' +
-    `&topRange=${range}&resolutions=${encodeURIComponent(res)}&categories=${cats}&purity=${purity}` +
+// One page of the toplist straight from Wallhaven: { data, last_page }. No waiting on a rate limit (429): the
+// caller skips the page and a later call fills it in. Vercel's outgoing addresses are shared with other projects,
+// so Wallhaven's 45 requests/minute limit is shared too.
+export async function fetchToplistPage(p, page) {
+  const url = 'https://wallhaven.cc/api/v1/search?sorting=toplist' +
+    `&topRange=${p.range}&resolutions=${encodeURIComponent(p.res)}&categories=${p.cats}&purity=${p.purity}&page=${page}` +
     (API_KEY ? `&apikey=${API_KEY}` : '');
-  const first = await getJson(`${base}&page=1`);
-  const pages = Math.min(first.meta?.last_page || 1, MAX_PAGES);
-  const all = [...first.data];
-  for (let p = 2; p <= pages; p++) {
-    await sleep(1400);
-    all.push(...(await getJson(`${base}&page=${p}`)).data);
+  for (let attempt = 0; ; attempt++) {
+    const r = await fetch(url, { headers: { 'user-agent': 'wallhaven-shuffle (Projectivy Booru plugin helper)' } });
+    if (r.ok) {
+      const j = await r.json();
+      return { data: j.data || [], last_page: j.meta?.last_page || 1 };
+    }
+    if (r.status < 500 || attempt >= 1) throw new Error(`Wallhaven answered ${r.status} for page ${page}`);
+    await sleep(2000); // one retry for a server error
   }
-  const seen = new Set();
-  const items = all.filter((w) => w && w.id && !seen.has(w.id) && seen.add(w.id)).sort((a, b) => (a.id < b.id ? -1 : 1));
-  if (!items.length) throw new Error('Wallhaven returned an empty list');
-  return items;
 }
 
 function seededRandom(seedText) {
@@ -73,8 +76,8 @@ function shuffled(items, seedText) {
   return out;
 }
 
-// The set for the hour `now` falls in. Each pass shuffles the list with a new seed and hands out sets 1..N, one
-// per hour, so every wallpaper is shown once per pass; then the next pass reshuffles.
+// The set for the time window (SLOT_MINUTES) `now` falls in. Each pass shuffles the list with a new seed and hands
+// out sets 1..N, one per window, so every wallpaper is shown once per pass; then the next pass reshuffles.
 export function pickSet(items, now, seedText) {
   const slotMs = SLOT_MINUTES * 60 * 1000;
   const slot = Math.floor(now / slotMs);

@@ -82,6 +82,8 @@ done
 # shellcheck disable=SC2086  # deliberate word splitting: counts the words in $1
 count() { set -- $1; echo $#; }
 log "apply start (uptime $(cut -d' ' -f1 /proc/uptime)s, $(count "$BG_BLOCK") blocked + $(count "$STOP_ONLY") stop-only)"
+# Remember which boot the start-up run belonged to (the wizard's status check compares it with the current one).
+[ "$(cut -d. -f1 /proc/uptime)" -le 600 ] && cat /proc/sys/kernel/random/boot_id > /data/local/tmp/tv-apply.boot 2>/dev/null
 
 for k in window_animation_scale transition_animation_scale animator_duration_scale; do
     settings put global "$k" "$ANIM_SCALE"
@@ -105,12 +107,22 @@ fi
 
 # Force-stop = fully asleep (no jobs, alarms or broadcasts) until opened. Never the app on screen.
 TOP=$(dumpsys activity activities 2>/dev/null | grep -m1 -E 'topResumedActivity|mResumedActivity' | sed 's/.* u0 //; s/\/.*//')
+# After start-up (refresh button, daily refresh), also leave apps alone that are busy: playing something, or
+# running a foreground service (music in the background, a connected VPN). At boot everything listed is stopped.
+BUSY=""
+if [ "$(cut -d. -f1 /proc/uptime)" -gt 600 ]; then
+    BUSY=$( { dumpsys activity services 2>/dev/null |
+                awk '/\* ServiceRecord\{/ { s = $0; sub(/.* u0 /, "", s); sub(/\/.*/, "", s); pkg = s } /isForeground=true/ { print pkg }'
+              dumpsys media_session 2>/dev/null |
+                awk '/^ *package=/ { pkg = $0; sub(/.*package=/, "", pkg) } /state=PlaybackState \{state=(PLAYING|3[,)])/ { print pkg }'
+            } | sort -u | tr '\n' ' ')
+fi
 for p in $BG_BLOCK $STOP_ONLY; do
-    if [ "$p" != "$TOP" ] && pm path "$p" >/dev/null 2>&1; then
-        was=$(pidof "$p")
-        am force-stop "$p"
-        [ -n "$was" ] && log "force-stopped running $p"
-    fi
+    if [ "$p" = "$TOP" ] || ! pm path "$p" >/dev/null 2>&1; then continue; fi
+    if listed "$p" "$BUSY"; then log "left $p running (busy: playing or a foreground service)"; continue; fi
+    was=$(pidof "$p")
+    am force-stop "$p"
+    [ -n "$was" ] && log "force-stopped running $p"
 done
 
 # Key Mapper Expert Mode. Same steps as Key Mapper's own start.sh, but paths are read fresh (survives app
