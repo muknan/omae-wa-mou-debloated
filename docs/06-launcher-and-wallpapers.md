@@ -76,15 +76,23 @@ environment variables:
 | Variable | Default | Meaning |
 |---|---|---|
 | `TOP_RANGE` | `3M` | `1d` `3d` `1w` `1M` `3M` `6M` `1y` |
-| `RESOLUTIONS` | `3840x2160` | your TV's `wm size` |
+| `RESOLUTIONS` | `3840x2160` | exact sizes, e.g. your TV's `wm size` (used when `ATLEAST` is not set) |
+| `ATLEAST` | (none) | a minimum size instead, e.g. `3840x2160`: 4K and anything larger |
+| `RATIOS` | (none) | aspect ratios, e.g. `16x9,16x10` |
+| `MAX_WIDTH` | `0` | skip wider images, e.g. `3840`: 5K/8K files are slow for a small TV to decode (`0` = no limit) |
 | `CATEGORIES` | `111` | general / anime / people as 0-1 flags: `110` = no People |
 | `PURITY` | `100` | SFW only |
-| `MIN_FAVORITES` | `0` | skip wallpapers with fewer favourites (the 3-month toplist is every upload, ranked) |
+| `MIN_FAVORITES` | `0` | skip wallpapers with fewer favourites (the toplist is every upload, ranked) |
 
 The toplist is really every upload in the range, ranked, so the bottom half is weak (median ~16 favourites).
-A good balance, measured for 4K, General + Anime, SFW: **`TOP_RANGE=6M` with `MIN_FAVORITES=30`**, the top third,
-about 500 wallpapers, a full pass every ~19 hours. New uploads join as they reach 30. `3M` with `15` is fresher but
-smaller (~400). A 6-month list takes the helper about 2 minutes to read; that happens in the background.
+A good balance, measured for General + Anime, SFW: **`TOP_RANGE=6M`, `ATLEAST=3840x2160`, `RATIOS=16x9,16x10`,
+`MIN_FAVORITES=50`, `MAX_WIDTH=3840`**: about 300 wallpapers for the TV, a full pass every ~12 hours. With a
+favourites minimum the list stops reading once two pages in a row have none left that qualify. Why these ratios:
+16:9 fills a TV and 16:10 fills most laptops. With "Fill", either one crops only a sliver on the other kind of
+screen. 21:9, 4:3 and 5:4 lose a quarter or more of the picture.
+
+Every setting can also go in the address, which wins over the variables:
+`/api/v1/search?atleast=3840x2160&ratios=16x9,16x10&fav=50&maxw=3840` (the same works for `/api/list`).
 
 Then set the plugin's **Booru URL** to just `https://<your-project>.vercel.app` (no `#`, no query), re-select the
 plugin as described above, and open `https://<your-project>.vercel.app/api/v1/search` in a browser to see the

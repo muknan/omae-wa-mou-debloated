@@ -10,3 +10,8 @@ the whole list. One dependency-free Vercel function.
 - `lib/core.js` has the shared code and the settings.
 
 Setup, settings and how it behaves: [docs/06](../../docs/06-launcher-and-wallpapers.md#a-fresh-24-every-hour-through-the-whole-toplist-optional).
+
+## On a Windows PC
+
+[`windows/`](windows) is a small tray app that uses the same list as the desktop wallpaper: see its
+[README](windows/README.md).

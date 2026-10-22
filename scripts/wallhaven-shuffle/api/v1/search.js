@@ -12,9 +12,10 @@
 // This endpoint never talks to Wallhaven itself. The plugin's own query (tags, sorting) is ignored. Pick the list
 // with the URL you give the plugin:
 //   https://<your-app>.vercel.app                       -> defaults (3M, 3840x2160, all categories, SFW) or env vars
+//   .../api/v1/search?atleast=3840x2160&ratios=16x9,16x10&maxw=3840&fav=50  -> any setting as a query parameter
 //   https://<your-app>.vercel.app/r/6M/2560x1440        -> top of the last 6 months, 1440p
 //   https://<your-app>.vercel.app/r/3M/3840x2160/20     -> ... only wallpapers with at least 20 favourites
-import { PER_SET, listParams, pickSet, selfUrl } from '../../lib/core.js';
+import { PER_SET, listParams, listQuery, pageQuery, passes, pickSet, selfUrl } from '../../lib/core.js';
 
 const LIST_WAIT_MS = 5000; // the plugin gives up after ~10 s
 
@@ -24,11 +25,11 @@ const withTimeout = (promise, ms) => Promise.race([promise, new Promise((done) =
 
 // The list (complete or partial), or null if nothing usable arrived in time.
 async function getList(req, p) {
-  const key = `${p.range}|${p.res}|${p.cats}|${p.purity}`;
+  const key = listQuery(p);
   const hit = memory.get(key);
   if (hit && Date.now() < hit.until) return hit.items;
   try {
-    const r = await withTimeout(fetch(selfUrl(req, '/api/list', p)), LIST_WAIT_MS);
+    const r = await withTimeout(fetch(selfUrl(req, '/api/list', listQuery(p))), LIST_WAIT_MS);
     if (r && r.ok) {
       const j = await r.json();
       if (j.items?.length >= PER_SET) {
@@ -48,17 +49,18 @@ export default async function handler(req, res) {
   try {
     const all = await getList(req, p);
     if (!all) { // list not ready yet: the toplist's first page (cached by the CDN like every page)
-      const r = await withTimeout(fetch(selfUrl(req, '/api/page', p, '&n=1')), 4000);
+      const r = await withTimeout(fetch(selfUrl(req, '/api/page', `${pageQuery(p)}&n=1`)), 4000);
       if (!r || !r.ok) throw new Error('the list is being built and Wallhaven is not answering right now');
-      const top = (await r.json()).data;
+      const page1 = (await r.json()).data;
+      const top = page1.filter(passes(p)).length >= 8 ? page1.filter(passes(p)) : page1;
       console.log(`list not ready, served the first page to ${agent(req)}`);
       res.setHeader('cache-control', 'no-store');
       return res.status(200).json({ data: top, meta: { current_page: 1, last_page: 1, per_page: PER_SET, total: top.length, query: null, seed: null, shuffle: { fallback: 'list is being built' } } });
     }
-    const filtered = fav ? all.filter((w) => (w.favorites || 0) >= fav) : all;
+    const filtered = all.filter(passes(p));
     const items = filtered.length >= PER_SET ? filtered : all; // a too-strict minimum falls back to the whole list
     const now = Date.now();
-    const { set, pass, index, sets, nextChange } = pickSet(items, now, `${range}|${resolutions}|${fav}|${p.cats}|${p.purity}`);
+    const { set, pass, index, sets, nextChange } = pickSet(items, now, listQuery(p));
     const secondsLeft = Math.max(30, Math.floor((nextChange - now) / 1000));
     console.log(`set ${index + 1}/${sets} pass ${pass} pool ${items.length} for ${agent(req)}`);
     res.setHeader('cache-control', `public, max-age=0, s-maxage=${secondsLeft}`);
@@ -66,7 +68,7 @@ export default async function handler(req, res) {
       data: set,
       meta: {
         current_page: 1, last_page: 1, per_page: PER_SET, total: set.length, query: null, seed: null,
-        shuffle: { toplist: range, resolutions, categories: p.cats, purity: p.purity, min_favorites: fav, pool: items.length, set: index + 1, sets, pass, next_set_at: new Date(nextChange).toISOString() },
+        shuffle: { toplist: range, resolutions: p.atleast ? `>=${p.atleast}` : resolutions, ratios: p.ratios, max_width: p.maxw, categories: p.cats, purity: p.purity, min_favorites: fav, pool: items.length, set: index + 1, sets, pass, next_set_at: new Date(nextChange).toISOString() },
       },
     });
   } catch (err) {

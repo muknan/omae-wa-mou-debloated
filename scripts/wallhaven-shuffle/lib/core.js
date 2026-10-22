@@ -1,6 +1,8 @@
 // Shared code for the endpoints: settings, reading one Wallhaven toplist page, and picking the current set of 24.
-// Env vars (all optional): TOP_RANGE, RESOLUTIONS, MIN_FAVORITES, CATEGORIES (e.g. 110 = no People),
-// PURITY, SLOT_MINUTES, WALLHAVEN_API_KEY.
+// Env vars (all optional): TOP_RANGE, RESOLUTIONS (exact) or ATLEAST (minimum, e.g. 3840x2160) with RATIOS
+// (e.g. 16x9,16x10), MAX_WIDTH (e.g. 3840: skip 5K/8K, which small TVs can't decode comfortably), MIN_FAVORITES,
+// CATEGORIES (e.g. 110 = no People), PURITY, SLOT_MINUTES, WALLHAVEN_API_KEY.
+// Each can also come from the request (?range=&res=&atleast=&ratios=&maxw=&fav=&cats=&purity=), which wins.
 
 export const PER_SET = 24;
 export const MAX_PAGES = 100; // 2400 wallpapers (6 months of 4K is ~1600); keeps a long range (1y) bounded
@@ -19,22 +21,33 @@ export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 export function listParams(query = {}) {
   const range = RANGES.has(query.range) ? query.range : (process.env.TOP_RANGE || '3M');
   const res = /^\d{3,5}x\d{3,5}(,\d{3,5}x\d{3,5})*$/.test(query.res || '') ? query.res : (process.env.RESOLUTIONS || '3840x2160');
+  // atleast = minimum size (any larger one too); then res is not used. ratios narrows it to these aspect ratios.
+  const atleast = /^\d{3,5}x\d{3,5}$/.test(query.atleast || '') ? query.atleast : (query.res ? '' : (process.env.ATLEAST || ''));
+  const ratios = /^\d{1,2}x\d{1,2}(,\d{1,2}x\d{1,2})*$/.test(query.ratios || '') ? query.ratios : (process.env.RATIOS || '');
+  const maxw = /^\d{1,5}$/.test(query.maxw || '') ? Number(query.maxw) : Number(process.env.MAX_WIDTH || 0); // 0 = no limit
   const fav = /^\d{1,5}$/.test(query.fav || '') ? Number(query.fav) : Number(process.env.MIN_FAVORITES || 0);
   // Wallhaven's own filter switches, as 0/1 flags: categories = general, anime, people; purity = SFW, sketchy, NSFW
   // (sketchy/NSFW need an API key). Defaults match Wallhaven's site: all categories, SFW only.
   const cats = /^[01]{3}$/.test(query.cats || '') ? query.cats : (process.env.CATEGORIES || '111');
   const purity = /^[01]{3}$/.test(query.purity || '') ? query.purity : (process.env.PURITY || '100');
-  return { range, res, fav, cats, purity };
+  return { range, res, atleast, ratios, maxw, fav, cats, purity };
 }
 
-// The query string that identifies one list (also the CDN cache key of /api/list and /api/page).
-export const listQuery = (p) => `range=${p.range}&res=${encodeURIComponent(p.res)}&cats=${p.cats}&purity=${p.purity}`;
+// What Wallhaven is asked for: the CDN cache key of /api/page.
+export const pageQuery = (p) => `range=${p.range}` +
+  (p.atleast ? `&atleast=${p.atleast}` : `&res=${encodeURIComponent(p.res)}`) +
+  (p.ratios ? `&ratios=${encodeURIComponent(p.ratios)}` : '') + `&cats=${p.cats}&purity=${p.purity}`;
+// ... plus the filters applied while putting the list together: the CDN cache key of /api/list.
+export const listQuery = (p) => `${pageQuery(p)}&fav=${p.fav}&maxw=${p.maxw}`;
+
+// Keeps a wallpaper that passes the favourites minimum and the width limit.
+export const passes = (p) => (w) => (w.favorites || 0) >= p.fav && (!p.maxw || (w.dimension_x || 0) <= p.maxw);
 
 // Our own endpoints, through the CDN (so cached pages and lists come back in milliseconds).
-export function selfUrl(req, path, p, extra = '') {
+export function selfUrl(req, path, query) {
   const host = req.headers['x-forwarded-host'] || req.headers.host;
   const scheme = /^(localhost|127\.0\.0\.1)(:|$)/.test(host) ? 'http' : 'https'; // `vercel dev` / local tests
-  return `${scheme}://${host}${path}?${listQuery(p)}${extra}`;
+  return `${scheme}://${host}${path}?${query}`;
 }
 
 // One page of the toplist straight from Wallhaven: { data, last_page }. No waiting on a rate limit (429): the
@@ -42,7 +55,8 @@ export function selfUrl(req, path, p, extra = '') {
 // so Wallhaven's 45 requests/minute limit is shared too.
 export async function fetchToplistPage(p, page) {
   const url = 'https://wallhaven.cc/api/v1/search?sorting=toplist' +
-    `&topRange=${p.range}&resolutions=${encodeURIComponent(p.res)}&categories=${p.cats}&purity=${p.purity}&page=${page}` +
+    `&topRange=${p.range}` + (p.atleast ? `&atleast=${p.atleast}` : `&resolutions=${encodeURIComponent(p.res)}`) +
+    (p.ratios ? `&ratios=${encodeURIComponent(p.ratios)}` : '') + `&categories=${p.cats}&purity=${p.purity}&page=${page}` +
     (API_KEY ? `&apikey=${API_KEY}` : '');
   for (let attempt = 0; ; attempt++) {
     const r = await fetch(url, { headers: { 'user-agent': 'wallhaven-shuffle (Projectivy Booru plugin helper)' } });
