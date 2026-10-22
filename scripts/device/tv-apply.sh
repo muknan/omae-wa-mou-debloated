@@ -40,6 +40,13 @@ UNWHITELIST_NETFLIX=1
 # 0 = leave Android's default. See docs/09.
 WIFI_IPV6_ROUTER_FIX=1
 
+# 1 = holding a volume button keeps changing the volume. Android doesn't repeat held keys while an accessibility
+# service filters key events (Projectivy's does, for its Home button), so holding VOLUME moves it one step only.
+# tv-volhold.sh listens to the remote (read-only: no button is intercepted) and steps the volume about 8 times a
+# second while a volume button is held. It checks the firmware's audio service first and stays off if it doesn't
+# match. 0 = off. See docs/09.
+VOLUME_HOLD_REPEAT=1
+
 # Helper apps whose permanent notifications get hidden (they'd show up as a badge on the home screen).
 # They're snoozed for 30 days, re-done every run and checked every minute by tv-daily.sh (apps re-post them when
 # they restart, which undoes the snooze); the apps themselves keep working normally.
@@ -164,6 +171,20 @@ if { [ "$DAILY_REFRESH" = "1" ] || [ -n "$QUIET_APPS" ]; } && [ -f /data/local/t
         setsid nohup sh /data/local/tmp/tv-daily.sh </dev/null >/dev/null 2>&1 &
         if [ "$DAILY_REFRESH" = "1" ]; then log "started background helper (daily refresh from ${DAILY_REFRESH_HOUR}:00)"; else log "started background helper"; fi
     fi
+fi
+
+# Hold-to-repeat for the volume buttons (tv-volhold.sh): start it if it isn't running (and this firmware wasn't
+# found unsupported); switched off, stop it.
+if [ "$VOLUME_HOLD_REPEAT" = "1" ] && [ -f /data/local/tmp/tv-volhold.sh ]; then
+    vp=$(cat /data/local/tmp/tv-volhold.pid 2>/dev/null)
+    if ! grep -q tv-volhold /proc/"$vp"/cmdline 2>/dev/null &&
+        [ "$(cat /data/local/tmp/tv-volhold.unsupported 2>/dev/null)" != "$(getprop ro.build.fingerprint)" ]; then
+        setsid nohup sh /data/local/tmp/tv-volhold.sh </dev/null >/dev/null 2>&1 &
+        log "started volume hold-to-repeat helper"
+    fi
+elif [ "$VOLUME_HOLD_REPEAT" != "1" ]; then
+    pkill -f 'tv-volhol[d].sh' 2>/dev/null && log "stopped volume hold-to-repeat helper"
+    rm -f /data/local/tmp/tv-volhold.pid /data/local/tmp/tv-volhold.held
 fi
 
 # Hide helper apps' permanent notifications (after Expert Mode starts, since Key Mapper posts when it connects).

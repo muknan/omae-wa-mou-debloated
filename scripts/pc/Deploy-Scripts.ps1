@@ -26,6 +26,7 @@ if ($CleanStaging) {
 
 if ($Remove) {
     & $adb -s $Device shell 'kill $(cat /data/local/tmp/tv-daily.pid 2>/dev/null) 2>/dev/null; rm -f /data/local/tmp/tv-daily.sh /data/local/tmp/tv-daily.pid /data/local/tmp/tv-daily.last'
+    & $adb -s $Device shell 'pkill -f tv-volhol[d].sh; rm -f /data/local/tmp/tv-volhold.sh /data/local/tmp/tv-volhold.pid /data/local/tmp/tv-volhold.held /data/local/tmp/tv-volhold.unsupported'
     & $adb -s $Device shell "rm -f /data/local/tmp/tv-apply.sh /data/local/tmp/tv-refresh.sh /data/local/tmp/tv-apply.log /data/local/tmp/tv-apply.boot; rm -rf /sdcard/Download/tvagent"
     & $adb -s $Device shell 'for k in ip_reachability_ignore_incompleted_ipv6_default_router_version ip_reachability_ignore_incompleted_ipv6_dns_server_version; do device_config delete connectivity $k; done'
     # Back to stock animation speed (1.0). The background limits clear themselves at the next restart.
@@ -35,10 +36,10 @@ if ($Remove) {
     return
 }
 
-foreach ($f in "tv-apply.sh", "tv-refresh.sh", "tv-daily.sh") {
+foreach ($f in "tv-apply.sh", "tv-refresh.sh", "tv-daily.sh", "tv-volhold.sh") {
     & $adb -s $Device push (Join-Path $root "device\$f") "/data/local/tmp/$f" | Out-Null
 }
-& $adb -s $Device shell "chmod 755 /data/local/tmp/tv-apply.sh /data/local/tmp/tv-refresh.sh /data/local/tmp/tv-daily.sh; sh /data/local/tmp/tv-apply.sh; tail -n 4 /data/local/tmp/tv-apply.log"
+& $adb -s $Device shell "chmod 755 /data/local/tmp/tv-apply.sh /data/local/tmp/tv-refresh.sh /data/local/tmp/tv-daily.sh /data/local/tmp/tv-volhold.sh; sh /data/local/tmp/tv-apply.sh; tail -n 4 /data/local/tmp/tv-apply.log"
 
 if ($Termux) {
     & $adb -s $Device shell "mkdir -p /sdcard/Download/tvagent"

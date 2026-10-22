@@ -35,6 +35,15 @@ while true; do
     # shellcheck source=/dev/null
     [ -f $DIR/tv-apply.conf ] && . $DIR/tv-apply.conf
     [ -f $DIR/tv-refresh.sh ] || DAILY_REFRESH=0
+    # Keep the volume hold-to-repeat helper running (it can end, e.g. if killed to free memory).
+    if [ "${VOLUME_HOLD_REPEAT:-1}" = "1" ] && [ -f $DIR/tv-volhold.sh ]; then
+        vp=$(cat $DIR/tv-volhold.pid 2>/dev/null)
+        if ! grep -q tv-volhold /proc/"$vp"/cmdline 2>/dev/null &&
+            [ "$(cat $DIR/tv-volhold.unsupported 2>/dev/null)" != "$(getprop ro.build.fingerprint)" ]; then
+            setsid nohup sh $DIR/tv-volhold.sh </dev/null >/dev/null 2>&1 &
+            echo "$(date '+%F %T') restarted volume hold-to-repeat helper" >> $LOG
+        fi
+    fi
     if [ "$DAILY_REFRESH" != "1" ] && [ -z "$QUIET_APPS" ]; then
         echo "$(date '+%F %T') background helper stopped (switched off or removed)" >> $LOG
         rm -f $DIR/tv-daily.pid

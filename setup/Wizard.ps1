@@ -325,7 +325,7 @@ function Get-BackgroundGroups {
 
 function New-ConfText($c) {
     $l = @('# Written by the omae-wa-mou-debloated setup wizard. Re-run the wizard to change it.')
-    foreach ($k in 'ANIM_SCALE', 'INCLUDE_USER_APPS', 'PREINSTALLED_APPS', 'STOP_ONLY', 'EXTRA_PROTECT', 'XIAOMI_ANIM_KEY', 'UNWHITELIST_NETFLIX', 'START_KEYMAPPER_EXPERT_MODE', 'QUIET_APPS', 'DAILY_REFRESH', 'DAILY_REFRESH_HOUR', 'WIFI_IPV6_ROUTER_FIX') {
+    foreach ($k in 'ANIM_SCALE', 'INCLUDE_USER_APPS', 'PREINSTALLED_APPS', 'STOP_ONLY', 'EXTRA_PROTECT', 'XIAOMI_ANIM_KEY', 'UNWHITELIST_NETFLIX', 'START_KEYMAPPER_EXPERT_MODE', 'QUIET_APPS', 'DAILY_REFRESH', 'DAILY_REFRESH_HOUR', 'WIFI_IPV6_ROUTER_FIX', 'VOLUME_HOLD_REPEAT') {
         if ($null -eq $c.$k) { continue }
         $l += ('{0}="{1}"' -f $k, $c.$k)
     }
@@ -338,9 +338,9 @@ function Publish-Agent {
     Write-Text $f (New-ConfText $c)
     $hadOwn = Sh1 '[ -f /data/local/tmp/tv-apply.sh ] && [ ! -f /data/local/tmp/tv-apply.conf ] && echo yes'
     if ($hadOwn -eq 'yes') { [void](Sh 'cp /data/local/tmp/tv-apply.sh /data/local/tmp/tv-apply.sh.bak'); Info 'Kept a copy of the existing tv-apply.sh as tv-apply.sh.bak' }
-    foreach ($s in 'tv-apply.sh', 'tv-refresh.sh', 'tv-daily.sh') { Send-File ([IO.Path]::Combine($script:Root, 'scripts', 'device', $s)) "/data/local/tmp/$s" }
+    foreach ($s in 'tv-apply.sh', 'tv-refresh.sh', 'tv-daily.sh', 'tv-volhold.sh') { Send-File ([IO.Path]::Combine($script:Root, 'scripts', 'device', $s)) "/data/local/tmp/$s" }
     Send-File $f /data/local/tmp/tv-apply.conf
-    [void](Sh 'chmod 755 /data/local/tmp/tv-apply.sh /data/local/tmp/tv-refresh.sh /data/local/tmp/tv-daily.sh; chmod 644 /data/local/tmp/tv-apply.conf')
+    [void](Sh 'chmod 755 /data/local/tmp/tv-apply.sh /data/local/tmp/tv-refresh.sh /data/local/tmp/tv-daily.sh /data/local/tmp/tv-volhold.sh; chmod 644 /data/local/tmp/tv-apply.conf')
     $out = Sh 'sh /data/local/tmp/tv-apply.sh; tail -n 40 /data/local/tmp/tv-apply.log'
     return $out
 }
@@ -393,6 +393,7 @@ function Step-Background {
         DAILY_REFRESH               = $(if ($daily) { '1' } else { '0' })
         DAILY_REFRESH_HOUR          = "$([int]$dailyHour)"
         WIFI_IPV6_ROUTER_FIX        = '1'
+        VOLUME_HOLD_REPEAT          = '1'
     }
     $script:State.conf = $c; Save-State
     Add-Change @{ type = 'deploy'; anim = "$anim"; stopOnly = $c.STOP_ONLY; protect = $c.EXTRA_PROTECT; preinstalled = $c.PREINSTALLED_APPS }
@@ -838,6 +839,7 @@ function Invoke-Undo {
         Ok 'animation speed restored'
         [void](Sh "for k in `$(cmd notification snoozed 2>/dev/null | grep -oE '^[^ ]+' | grep -E 'keymapper|adbautoenable'); do cmd notification unsnooze `$k; done")
         [void](Sh 'kill $(cat /data/local/tmp/tv-daily.pid 2>/dev/null) 2>/dev/null; rm -f /data/local/tmp/tv-daily.sh /data/local/tmp/tv-daily.pid /data/local/tmp/tv-daily.last')
+        [void](Sh 'pkill -f tv-volhol[d].sh; rm -f /data/local/tmp/tv-volhold.sh /data/local/tmp/tv-volhold.pid /data/local/tmp/tv-volhold.held /data/local/tmp/tv-volhold.unsupported')
         [void](Sh 'for k in ip_reachability_ignore_incompleted_ipv6_default_router_version ip_reachability_ignore_incompleted_ipv6_dns_server_version; do device_config delete connectivity $k; done')
         [void](Sh 'rm -f /data/local/tmp/tv-apply.sh /data/local/tmp/tv-refresh.sh /data/local/tmp/tv-apply.conf /data/local/tmp/tv-apply.log /data/local/tmp/tv-apply.boot; [ -f /data/local/tmp/tv-apply.sh.bak ] && mv /data/local/tmp/tv-apply.sh.bak /data/local/tmp/tv-apply.sh')
         Ok 'scripts removed from the TV'
@@ -872,6 +874,7 @@ function Show-Status {
         'echo expert=$(ps -A -o NAME | grep -cx keymapper_sysbridge); ' +
         'p=$(cat $d/tv-daily.pid 2>/dev/null); echo helper=$(grep -c tv-daily /proc/$p/cmdline 2>/dev/null || echo 0); ' +
         'echo daily=$(cat $d/tv-daily.last 2>/dev/null); ' +
+        'q=$(cat $d/tv-volhold.pid 2>/dev/null); echo volhold=$(grep -c tv-volhold /proc/$q/cmdline 2>/dev/null || echo 0)$([ -f $d/tv-volhold.unsupported ] && echo u); ' +
         'echo notifs=$(cmd notification list 2>/dev/null | grep -cE ''\|(io.github.sds100.keymapper|com.tpn.adbautoenable)\|''); ' +
         'echo dns=$(settings get global private_dns_mode) $(settings get global private_dns_specifier); ' +
         'echo drops=$(dumpsys wifi 2>/dev/null | grep -c CMD_IP_REACHABILITY_LOST); ' +
@@ -885,6 +888,7 @@ function Show-Status {
     if ($hasKm) { Info ("{0,-32} {1}" -f 'Key Mapper Expert Mode', (& $mark ($h.expert -eq '1'))) }
     Info ("{0,-32} {1}" -f 'Background helper (tv-daily)', $(if ($h.helper -eq '1') { "ok, last daily refresh: $(if ($h.daily) { $h.daily } else { 'not yet' })" } else { 'not running' }))
     Info ("{0,-32} {1}" -f 'Helper notifications visible', $(if ($h.notifs -eq '0') { 'none' } else { "$($h.notifs) (hidden within a minute)" }))
+    Info ("{0,-32} {1}" -f 'Volume hold-to-repeat', $(switch -Regex ($h.volhold) { 'u' { 'not supported on this firmware' } '^1' { 'on' } default { 'not running' } }))
     Info ("{0,-32} {1}" -f 'Private DNS', $h.dns)
     $drops = [int]$h.drops
     Info ("{0,-32} {1}" -f 'Wi-Fi IPv6 router fix', $(if ($h.v6fix -eq '1') { 'on' } else { 'off' }))

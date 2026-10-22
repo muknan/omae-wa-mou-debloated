@@ -27,6 +27,28 @@ and cached apps are cleared. You never have to remember to press it.
 - See what it did: `adb shell tail /data/local/tmp/tv-apply.log` shows a `daily refresh` line each day.
 - Stop it now: `adb shell 'kill $(cat /data/local/tmp/tv-daily.pid)'`. Undo everything removes it too.
 
+## Holding the volume buttons
+
+On a TV where an app filters key presses through Android's accessibility service, holding VOLUME changes the volume
+by one step only. Projectivy does that filtering, for its Home button handling. Android normally generates the
+"still held" repeats itself, but not while that filter is on. `scripts/device/tv-volhold.sh` brings hold-to-change
+back without touching Projectivy:
+
+- **It only listens.** It reads the remote's button events with `getevent` and intercepts nothing, so every
+  button, Power included, works exactly as before. A short press is still one step.
+- **While you hold.** After 0.4 s it steps the volume about 8 times a second, with the volume bar showing, until
+  you let go, and at most 60 steps per hold.
+- **How it steps.** The steps go straight to Android's audio service, not as extra key presses. Xiaomi's
+  volume-down handling tracks the held key itself, and extra presses confuse it: it can end up muting.
+- **Firmware check.** The audio service's method numbers depend on the firmware. At start the helper checks them
+  with two read-only calls, and stays off if they don't match. It then writes `tv-volhold.unsupported`, which
+  stops the boot helper and `tv-daily.sh` from retrying on that firmware.
+- **Who runs it.** `tv-apply.sh` starts it at boot, and `tv-daily.sh` restarts it within a minute if it ever
+  stops. It also listens again by itself when the remote reconnects.
+- **Switching it off.** Set `VOLUME_HOLD_REPEAT="0"` in `tv-apply.conf`. To stop it right now:
+  `adb shell "pkill -f 'tv-volhol[d].sh'"` (the `[d]` keeps the command from matching itself). Undo everything
+  removes it too.
+
 ## Ad and tracker blocking for the whole TV (Private DNS)
 
 Android's Private DNS can point at [AdGuard DNS](https://adguard-dns.io/en/public-dns.html), which answers ad and
