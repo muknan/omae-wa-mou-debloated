@@ -42,7 +42,7 @@ WIFI_IPV6_ROUTER_FIX=1
 
 # 1 = holding a volume button keeps changing the volume. Android doesn't repeat held keys while an accessibility
 # service filters key events (Projectivy's does, for its Home button), so holding VOLUME moves it one step only.
-# tv-volhold.sh listens to the remote (read-only: no button is intercepted) and steps the volume about 8 times a
+# tv-volhold.sh listens to the remote (read-only: no button is intercepted) and steps the volume about 12 times a
 # second while a volume button is held. It checks the firmware's audio service first and stays off if it doesn't
 # match. 0 = off. See docs/09.
 VOLUME_HOLD_REPEAT=1

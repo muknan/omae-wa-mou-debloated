@@ -19,8 +19,8 @@ DIR=/data/local/tmp
 LOG=$DIR/tv-apply.log
 HELD=$DIR/tv-volhold.held   # names the hold in progress; the repeat loop runs only while it names its own hold
 HOLD_DELAY=0.4      # seconds before repeating starts (Android's own key repeat waits 0.4 s too)
-REPEAT_GAP=0.05     # pause between steps; each step itself takes ~0.07 s, so about 8 steps a second
-MAX_REPEATS=60
+REPEAT_GAP=0.01     # pause between steps; each step itself takes ~0.07 s, so about 12 steps a second
+MAX_REPEATS=100     # a whole 0-100 sweep in one hold (~8 s)
 # IAudioService method numbers on this firmware (Android 14): adjustStreamVolume, getStreamVolume, getStreamMaxVolume
 ADJUST=10; GET=24; GETMAX=26
 
