@@ -126,7 +126,7 @@ namespace WallhavenShuffle
 
         // Puts a window into the desktop's wallpaper layer: above the wallpaper, below the icons. Returns false if the
         // desktop isn't laid out as expected.
-        public static bool IntoWallpaperLayer(IntPtr hwnd, Rectangle bounds)
+        public static bool IntoWallpaperLayer(IntPtr hwnd, Rectangle bounds, IntPtr below)
         {
             IntPtr progman = FindWindow("Progman", null), parent = IntPtr.Zero, after = IntPtr.Zero, r;
             if (progman == IntPtr.Zero) return false;
@@ -147,6 +147,7 @@ namespace WallhavenShuffle
             int style = GetWindowLong(hwnd, -16);
             SetWindowLong(hwnd, -16, (style & ~unchecked((int)0x80000000)) | 0x40000000); // WS_CHILD instead of WS_POPUP
             SetParent(hwnd, parent);
+            if (below != IntPtr.Zero) after = below; // right under that one
             return SetWindowPos(hwnd, after, bounds.X, bounds.Y, bounds.Width, bounds.Height, 0x0010 | 0x0040); // no activate, show
         }
 
@@ -244,9 +245,10 @@ namespace WallhavenShuffle
 
     // ==================================================================================================== fade
 
-    // Windows changes the wallpaper in one frame. For a cross-fade, this shows a picture of the current wallpaper in
-    // the desktop's wallpaper layer (under the icons, so they stay put), the new wallpaper is set underneath, and then
-    // the picture fades out.
+    // Windows changes the wallpaper in one frame, and Explorer then redraws the desktop from black, top to bottom,
+    // which shows on big pictures. So the cross-fade happens in pictures of our own in the desktop's wallpaper layer
+    // (under the icons, so they stay put): the old wallpaper over the new one, fading out. Only then is the real
+    // wallpaper set, hidden under the new picture, and once Explorer has finished drawing it the picture goes away.
     class Fader : Form
     {
         Bitmap frame;
@@ -268,12 +270,12 @@ namespace WallhavenShuffle
         protected override bool ShowWithoutActivation { get { return true; } }
         protected override void OnPaint(PaintEventArgs e) { if (frame != null) e.Graphics.DrawImageUnscaled(frame, 0, 0); }
 
-        // The wallpaper as it looks now, across all monitors (Windows keeps the current picture as TranscodedWallpaper).
-        // Runs on a worker thread. Null if there's nothing to fade from.
-        public static Bitmap Snapshot(string position, out Rectangle desktop)
+        public static string Transcoded { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), @"Microsoft\Windows\Themes\TranscodedWallpaper"); } }
+
+        // A picture laid out across all monitors the way the desktop shows it ("Fill", "Fit"...). For the current
+        // wallpaper, pass Transcoded (Windows' copy of it). Runs on a worker thread. Null if the file is missing.
+        public static Bitmap Render(string file, string position, Rectangle desktop)
         {
-            desktop = SystemInformation.VirtualScreen;
-            string file = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), @"Microsoft\Windows\Themes\TranscodedWallpaper");
             if (!File.Exists(file)) return null;
             Color back = Color.Black;
             using (var k = Registry.CurrentUser.OpenSubKey(@"Control Panel\Colors"))
@@ -306,23 +308,25 @@ namespace WallhavenShuffle
             return bmp;
         }
 
-        static Fader running;
+        static readonly List<Fader> live = new List<Fader>();
 
-        // Shows the picture over the wallpaper (UI thread) and returns once it is on screen. Null if that isn't
-        // possible; the change is then instant.
-        public static Fader Begin(Bitmap frame, Rectangle desktop)
+        // A transition still running when the next one starts: end it now.
+        public static void EndAll() { foreach (var f in live.ToArray()) if (!f.IsDisposed) f.Dispose(); live.Clear(); }
+
+        // Shows a picture in the wallpaper layer (UI thread), on top or right under `below`, and returns once it is on
+        // screen. Null if that isn't possible; the change is then instant.
+        public static Fader Begin(Bitmap frame, Rectangle desktop, Fader below)
         {
-            if (running != null && !running.IsDisposed) running.Dispose(); // a fade still running: finish it now
             var f = new Fader(frame);
             IntPtr h = f.Handle;
             Native.SetLayeredWindowAttributes(h, 0, 0, 2); // LWA_ALPHA, invisible until painted
-            if (!Native.IntoWallpaperLayer(h, new Rectangle(0, 0, desktop.Width, desktop.Height))) { f.Dispose(); return null; }
-            f.Update();                                     // paint the whole picture first...
+            if (!Native.IntoWallpaperLayer(h, new Rectangle(0, 0, desktop.Width, desktop.Height), below == null ? IntPtr.Zero : below.Handle)) { f.Dispose(); return null; }
+            f.Update();                                      // paint the whole picture first...
             Native.DwmFlush();
             Native.SetLayeredWindowAttributes(h, 0, 255, 2); // ...then show it in one frame
-            Native.DwmFlush(); Native.DwmFlush();             // and make sure it is on screen before the wallpaper changes
-            running = f;
-            var guard = new System.Windows.Forms.Timer { Interval = 8000 }; // never left behind, whatever happens
+            Native.DwmFlush(); Native.DwmFlush();             // and make sure it is on screen before going on
+            live.Add(f);
+            var guard = new System.Windows.Forms.Timer { Interval = 15000 }; // never left behind, whatever happens
             guard.Tick += delegate { guard.Dispose(); if (!f.IsDisposed) f.Dispose(); };
             guard.Start();
             return f;
@@ -338,7 +342,7 @@ namespace WallhavenShuffle
                 if (IsDisposed) return;
                 double t = Math.Min(1, (DateTime.Now - start).TotalMilliseconds / ms), eased = t * t * (3 - 2 * t);
                 Native.SetLayeredWindowAttributes(Handle, 0, (byte)Math.Round(255 * (1 - eased)), 2);
-                if (t >= 1) Dispose();
+                if (t >= 1) { live.Remove(this); Dispose(); }
             };
             timer.Start();
         }
@@ -941,23 +945,39 @@ namespace WallhavenShuffle
                 try
                 {
                     string file = Fetch(w);
+                    Fader top = null;
                     if (fade)
                     {
-                        Rectangle desktop = Rectangle.Empty;
-                        Bitmap frame = null;
-                        try { frame = Fader.Snapshot(position, out desktop); } catch (Exception ex) { Log("fade skipped: " + ex.Message); }
-                        if (frame != null) Invoke(new Action(delegate { fader = Fader.Begin(frame, desktop); if (fader == null) frame.Dispose(); }));
+                        Rectangle desktop = SystemInformation.VirtualScreen;
+                        Bitmap before = null, after = null;
+                        try { before = Fader.Render(Fader.Transcoded, position, desktop); after = Fader.Render(file, position, desktop); }
+                        catch (Exception ex) { Log("fade skipped: " + ex.Message); }
+                        if (before != null && after != null)
+                            Invoke(new Action(delegate
+                            {
+                                Fader.EndAll();
+                                top = Fader.Begin(before, desktop, null);           // the old wallpaper, on top
+                                if (top != null) fader = Fader.Begin(after, desktop, top); // the new one, under it
+                                if (top != null && fader == null) { top.Dispose(); top = null; }
+                                if (top == null) { before.Dispose(); after.Dispose(); }
+                            }));
+                        else { if (before != null) before.Dispose(); if (after != null) after.Dispose(); }
+                        if (top != null)
+                        {
+                            BeginInvoke(new Action(delegate { top.FadeOut(900); })); // old -> new
+                            Thread.Sleep(950);
+                        }
                     }
-                    var transcoded = new FileInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), @"Microsoft\Windows\Themes\TranscodedWallpaper"));
-                    DateTime before = transcoded.Exists ? transcoded.LastWriteTimeUtc : DateTime.MinValue;
-                    Native.SetWallpaper(file, position);
+                    var transcoded = new FileInfo(Fader.Transcoded);
+                    DateTime stamp = transcoded.Exists ? transcoded.LastWriteTimeUtc : DateTime.MinValue;
+                    Native.SetWallpaper(file, position);                          // hidden under the new picture
                     if (fader != null)
                     {
-                        // Wait until Explorer has taken the new picture (it rewrites TranscodedWallpaper), then a moment to draw it.
-                        for (int i = 0; i < 40; i++) { transcoded.Refresh(); if (transcoded.Exists && transcoded.LastWriteTimeUtc != before) break; Thread.Sleep(50); }
-                        Thread.Sleep(150);
+                        // Explorer rewrites TranscodedWallpaper when it takes the picture; give it time to draw it too.
+                        for (int i = 0; i < 60; i++) { transcoded.Refresh(); if (transcoded.Exists && transcoded.LastWriteTimeUtc != stamp) break; Thread.Sleep(50); }
+                        Thread.Sleep(1200);
                         var f = fader; fader = null;
-                        BeginInvoke(new Action(delegate { f.FadeOut(800); }));
+                        BeginInvoke(new Action(delegate { f.FadeOut(250); }));     // same picture underneath: invisible
                         how = "cross-fade";
                     }
                 }
