@@ -33,7 +33,7 @@ often Wi-Fi reconnected since boot (many reconnects point at the router, see the
 | A music app or VPN stops when you leave it | Re-run step 2 and move it to "stopped at startup, may run after you open it". |
 | An app you use is put to sleep too often | Re-run step 2 and move it to "left alone". |
 | A notification badge on the home screen | Usually Key Mapper's permanent notifications. The background helper hides them within a minute; if one stays, the helper isn't running: press the refresh button once, or re-run step 2. |
-| Wi-Fi drops for a moment every few minutes | Usually the router's IPv6, not the TV: see [Wi-Fi that keeps dropping](09-extras.md#wi-fi-that-keeps-dropping). |
+| Wi-Fi goes off and on every few minutes | Usually the router's IPv6. The boot helper works around it (`WIFI_IPV6_ROUTER_FIX`); see [Wi-Fi that keeps dropping](09-extras.md#wi-fi-that-keeps-dropping). |
 | Remote button does nothing | Expert Mode isn't running. Restart the TV (the boot helper starts it) or see [05](05-key-mapper.md). |
 | Home button opens the stock launcher | Projectivy needs its accessibility helper on and the stock launcher **enabled**. Re-run step 5. |
 | "Accessibility service" toast from Projectivy | Another accessibility app (Key Mapper) restarted briefly. Both reconnect on their own. |

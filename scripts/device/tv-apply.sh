@@ -33,6 +33,13 @@ XIAOMI_ANIM_KEY=1
 # 1 = remove Netflix's power-management exemption (some firmwares whitelist it). 0 = leave it.
 UNWHITELIST_NETFLIX=1
 
+# 1 = keep Wi-Fi connected when the router's IPv6 gateway stops answering. Many home routers announce IPv6 but
+# don't reply at their own address; Android then resets the whole connection every few minutes ("Wi-Fi goes off
+# and on"). With this, Android ignores that dead IPv6 gateway as long as IPv4 still works, which is what the
+# network module's own ip_reachability_ignore_incompleted_* switches are for (Android 14+; harmless elsewhere).
+# 0 = leave Android's default. See docs/09.
+WIFI_IPV6_ROUTER_FIX=1
+
 # Helper apps whose permanent notifications get hidden (they'd show up as a badge on the home screen).
 # They're snoozed for 30 days, re-done every run and checked every minute by tv-daily.sh (apps re-post them when
 # they restart, which undoes the snooze); the apps themselves keep working normally.
@@ -90,6 +97,11 @@ for k in window_animation_scale transition_animation_scale animator_duration_sca
 done
 [ "$XIAOMI_ANIM_KEY" = "1" ] && settings put global mitv_fast_cur_anim_scale "$ANIM_SCALE"
 [ "$UNWHITELIST_NETFLIX" = "1" ] && cmd deviceidle sys-whitelist -com.netflix.ninja >/dev/null 2>&1
+if [ "$WIFI_IPV6_ROUTER_FIX" = "1" ] && [ "${SDK:-0}" -ge 29 ]; then
+    for k in ip_reachability_ignore_incompleted_ipv6_default_router_version ip_reachability_ignore_incompleted_ipv6_dns_server_version; do
+        [ "$(device_config get connectivity $k 2>/dev/null)" = "1" ] || { device_config put connectivity $k 1 >/dev/null 2>&1 && log "Wi-Fi IPv6 router fix: set $k"; }
+    done
+fi
 
 # "restricted" standby bucket exists from Android 11; older versions get the strictest one they have.
 BUCKET=restricted; [ "${SDK:-0}" -lt 30 ] && BUCKET=rare

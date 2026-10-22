@@ -84,18 +84,30 @@ adb shell "logcat -d | grep -m3 'NUD_FAILED'"
 ```
 
 Several `IP_REACHABILITY_LOST` events, with `NUD_FAILED` for `fe80::...`, mean the **router's IPv6 is half-broken**:
-it announces itself as the IPv6 gateway but doesn't answer there. Android 14 checks, decides the network is gone and
-resets the connection (about a second each time). The test TV did this every 4-9 minutes on an ISP router.
+it announces itself as the IPv6 gateway (the TV even gets an IPv6 address) but doesn't answer at its own address.
+Android checks the gateway, gets no reply for ~18 s, decides IPv6 is lost and resets the whole connection, about a
+second each time. The test TV did this every 4-9 minutes on a locked ISP router.
 
-There's no fix on the TV without root (`cmd wifi set-ipreach-disconnect disabled` and the
-`ip_reachability_*` device_config flags were tried; neither stops it). Fix it on the router, which helps every
-device in the house:
+**The TV-side fix (on by default):** Android's network module has switches for exactly this:
+`ip_reachability_ignore_incompleted_ipv6_default_router_version` (and `..._dns_server_version`). With them on, a
+dead IPv6 gateway is dropped from the checks as long as IPv4 still works, instead of resetting the connection. The
+boot helper sets them at every boot and refresh (`WIFI_IPV6_ROUTER_FIX="1"` in `tv-apply.conf`). By hand:
 
-1. Restart the router and update its firmware. If that doesn't help:
-2. Router admin page > **IPv6** (sometimes under *WAN* or *LAN*) > **disable**, or set the LAN side to *IPv4 only*.
-   Nothing you watch needs IPv6; everything falls back to IPv4.
-3. If the TV is on a Wi-Fi extender or mesh node (often a network name ending in `+`, `_EXT` or `_RPT`), try
-   the main router's network or an Ethernet cable.
+```powershell
+adb shell device_config put connectivity ip_reachability_ignore_incompleted_ipv6_default_router_version 1
+adb shell device_config put connectivity ip_reachability_ignore_incompleted_ipv6_dns_server_version 1
+```
+
+It takes effect from the next reconnect. After that, the log shows `remove incomplete IPv6 neighbor fe80::...`
+instead of a reset (`adb shell "logcat -d | grep 'remove incomplete'"`), and the wizard's status shows whether the fix is on.
+Undo: `adb shell device_config delete connectivity <name>` for both, or set `WIFI_IPV6_ROUTER_FIX="0"`.
+
+(Found by reading the TV's own network module: these switches only skip an IPv6 gateway that fails while IPv4 is
+fine. `cmd wifi set-ipreach-disconnect disabled` does not help with this.)
+
+If you can change router settings, switching its IPv6 off (or updating its firmware) fixes it for every device in
+the house. A TV on a Wi-Fi extender or mesh node (network names ending in `+`, `_EXT` or `_RPT`) can also try the
+main router's network or an Ethernet cable.
 
 ## Give the TV a fixed IP address
 
