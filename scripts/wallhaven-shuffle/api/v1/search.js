@@ -1,8 +1,8 @@
 // Wallhaven shuffle - feeds Projectivy's Booru wallpaper plugin a Wallhaven toplist (default: top of the last
-// 3 months, 4K) 24 wallpapers at a time, walking through the whole list in a shuffled order.
+// 3 months, 4K) a set at a time (SET_SIZE, default 24), walking through the whole list in a shuffled order.
 //
-// The plugin asks "<its Booru URL>/api/v1/search?q=...&sorting=random" about once an hour and shows the 24
-// wallpapers it gets back. Wallhaven itself can't return a random 24 from a toplist, so this does:
+// The plugin asks "<its Booru URL>/api/v1/search?q=...&sorting=random" about once an hour and shows the wallpapers
+// it gets back. Wallhaven itself can't return a random set from a toplist, so this does:
 //   - read the whole toplist from /api/list (CDN-cached, so this answers in well under a second),
 //   - shuffle it with a seed that changes after every full pass,
 //   - return the set that belongs to the current 55-minute window: set 1, 2, 3 ... until every wallpaper has been
@@ -62,7 +62,7 @@ export default async function handler(req, res) {
     const now = Date.now();
     const { set, pass, index, sets, nextChange } = pickSet(items, now, listQuery(p));
     const secondsLeft = Math.max(30, Math.floor((nextChange - now) / 1000));
-    console.log(`set ${index + 1}/${sets} pass ${pass} pool ${items.length} for ${agent(req)}`);
+    console.log(`set ${index + 1}/${sets} (${set.length}) pass ${pass} pool ${items.length} for ${agent(req)} asking ${String(req.url).slice(0, 160)}`);
     res.setHeader('cache-control', `public, max-age=0, s-maxage=${secondsLeft}`);
     res.status(200).json({
       data: set,
