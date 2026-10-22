@@ -10,6 +10,13 @@ A small tray app that changes the desktop wallpaper every few minutes from a wal
   in Settings > Accessibility > Visual effects.
 - Wallpapers stay in their original quality. The app downloads the original file, and sets `JPEGImportQuality` to
   100, because otherwise Windows re-encodes every wallpaper as a JPEG at quality 85 (visible banding in dark scenes).
+- Downloaded originals are kept, so each wallpaper downloads once. When the list changes, new wallpapers download as
+  their turn comes. Files of wallpapers that left the list are deleted, but only after a *complete* list confirms it.
+  If the cache reaches its limit (`CacheLimitGB`, 10 GB by default), wallpapers already shown this round go first.
+  Set `CacheDir` in Advanced settings to keep the cache on another drive; it applies after a restart and the files
+  move over.
+- "Show on the lock screen too" puts each wallpaper on the Windows lock screen as well, through Windows' own lock
+  screen API. It replaces Windows Spotlight on the lock screen while it's on.
 - It waits while a game, a full-screen video or a presentation is running, and while the PC is locked. It can also
   wait while on battery.
 - It follows Windows' light or dark theme and your accent colour.
