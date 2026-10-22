@@ -5,7 +5,7 @@
 // Each can also come from the request (?range=&res=&atleast=&ratios=&maxw=&fav=&cats=&purity=), which wins.
 
 export const PER_SET = 24;
-export const MAX_PAGES = 100; // 2400 wallpapers (6 months of 4K is ~1600); keeps a long range (1y) bounded
+export const MAX_PAGES = 200; // 4800 wallpapers (a year of 4K, 16:9 + 16:10, is ~4600); keeps a long range bounded
 // CDN caching: a good answer stays fresh for 6 hours, then is served stale (instantly) for up to a week while a
 // new one is fetched in the background.
 export const CACHE_GOOD = 'public, max-age=0, s-maxage=21600, stale-while-revalidate=604800';
@@ -80,26 +80,40 @@ function seededRandom(seedText) {
   };
 }
 
-function shuffled(items, seedText) {
-  const out = items.slice();
-  const rand = seededRandom(seedText);
-  for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(rand() * (i + 1));
-    [out[i], out[j]] = [out[j], out[i]];
-  }
-  return out;
+// Each wallpaper's place in a pass comes from a hash of its own id (and the pass), not from shuffling the array:
+// when the list changes (new uploads reach the favourites minimum, old ones leave the range) everything else keeps
+// its place, so the sets handed out before and after the change still line up.
+function orderFor(items, pass, seedText) {
+  return items.map((w) => [seededRandom(`${pass}|${seedText}|${w.id}`)(), w]).sort((a, b) => a[0] - b[0]).map((x) => x[1]);
 }
 
-// The set for the time window (SLOT_MINUTES) `now` falls in. Each pass shuffles the list with a new seed and hands
-// out sets 1..N, one per window, so every wallpaper is shown once per pass; then the next pass reshuffles.
+// Sets split the pass evenly (310 wallpapers = 13 sets of 23-24), so none needs topping up from elsewhere.
+const segment = (order, index, sets) => order.slice(Math.floor(index * order.length / sets), Math.floor((index + 1) * order.length / sets));
+const ids = (list) => new Set(list.map((w) => w.id));
+
+// A pass's order, with the wallpapers from the previous pass's last set moved out of its first half (to just before
+// the middle), so the first sets of a pass never repeat the set right before them. Only the first half changes, so a
+// pass's last set is always the plain tail of its order: no chain back through earlier passes.
+function passOrder(items, pass, sets, seedText) {
+  const order = orderFor(items, pass, seedText);
+  const last = ids(segment(orderFor(items, pass - 1, seedText), sets - 1, sets));
+  const head = order.slice(0, Math.floor(order.length / 2));
+  return head.filter((w) => !last.has(w.id)).concat(head.filter((w) => last.has(w.id)), order.slice(head.length));
+}
+
+function setAt(items, slot, seedText) {
+  const sets = Math.ceil(items.length / PER_SET);
+  const pass = Math.floor(slot / sets), index = ((slot % sets) + sets) % sets;
+  return { pass, index, sets, set: segment(passOrder(items, pass, sets, seedText), index, sets) };
+}
+
+// The set for the time window (SLOT_MINUTES) `now` falls in. Each pass orders the list anew and hands out sets
+// 1..N, one per window, so every wallpaper is shown once per pass, and a set never repeats one from the set before
+// it. If the list changed in between (which can shift a set by a wallpaper or two), anything the previous set
+// showed is left out of this one.
 export function pickSet(items, now, seedText) {
   const slotMs = SLOT_MINUTES * 60 * 1000;
   const slot = Math.floor(now / slotMs);
-  const sets = Math.ceil(items.length / PER_SET);
-  const pass = Math.floor(slot / sets);
-  const index = slot % sets;
-  const order = shuffled(items, `${pass}|${seedText}`);
-  let set = order.slice(index * PER_SET, (index + 1) * PER_SET);
-  if (set.length < PER_SET && order.length > PER_SET) set = set.concat(order.slice(0, PER_SET - set.length)); // last set: top up
-  return { set, pass, index, sets, nextChange: (slot + 1) * slotMs };
+  const cur = setAt(items, slot, seedText), before = ids(setAt(items, slot - 1, seedText).set);
+  return { set: cur.set.filter((w) => !before.has(w.id)), pass: cur.pass, index: cur.index, sets: cur.sets, nextChange: (slot + 1) * slotMs };
 }

@@ -8,6 +8,8 @@ A small tray app that changes the desktop wallpaper every few minutes from a wal
 - It shows every wallpaper once, in random order, before repeating. The next one is downloaded ahead of time.
 - Each change uses Windows' own smooth cross-fade, the one the built-in slideshow uses, when **Animation effects** is on
   in Settings > Accessibility > Visual effects.
+- Wallpapers stay in their original quality. The app downloads the original file, and sets `JPEGImportQuality` to
+  100, because otherwise Windows re-encodes every wallpaper as a JPEG at quality 85 (visible banding in dark scenes).
 - It waits while a game, a full-screen video or a presentation is running, and while the PC is locked. It can also
   wait while on battery.
 - It follows Windows' light or dark theme and your accent colour.

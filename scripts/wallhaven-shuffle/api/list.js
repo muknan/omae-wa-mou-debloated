@@ -1,9 +1,10 @@
 // /api/list?range=6M&atleast=3840x2160&ratios=16x9,16x10&cats=110&purity=100&fav=50&maxw=3840 - the toplist as one
 // JSON array, put together from the CDN-cached /api/page answers and filtered (favourites, width). Cached pages come
 // back in milliseconds; a page Wallhaven has to be asked for costs one request, paced at ~1.3 s. The toplist runs
-// roughly from most to least favourited, so with a favourites minimum it stops after two pages in a row with none
-// left that qualify. Pages that fail (rate limit) are skipped: the list is then marked incomplete and cached for
-// 2 minutes only, so the next call fills the gaps. A complete list is cached for 6 hours.
+// roughly from most to least favourited, so with a favourites minimum it stops after four pages in a row with none
+// left that qualify (stragglers still turn up after shorter gaps). Pages that fail (rate limit) are skipped: the
+// list is then marked incomplete and cached for 2 minutes only, so the next call fills the gaps. A complete list is
+// cached for 6 hours.
 import { CACHE_GOOD, MAX_PAGES, PER_SET, listParams, pageQuery, passes, selfUrl, sleep } from '../lib/core.js';
 
 export const config = { maxDuration: 300 };
@@ -24,7 +25,7 @@ export default async function handler(req, res) {
     let missing = 0, read = 1, belowRun = 0;
     const anyQualify = (data) => data.some((w) => (w.favorites || 0) >= p.fav);
     for (let n = 2; n <= pages; n++) {
-      if (p.fav && belowRun >= 2) break; // the rest of the toplist is below the favourites minimum
+      if (p.fav && belowRun >= 4) break; // the rest of the toplist is below the favourites minimum
       if (Date.now() - started > 240e3) { missing += pages - n + 1; break; } // stay inside the 5-minute limit
       const page = await getPage(n);
       read++;

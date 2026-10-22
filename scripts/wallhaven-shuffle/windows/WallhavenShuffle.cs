@@ -517,6 +517,14 @@ namespace WallhavenShuffle
                 settings.Save();
             }
             if (!settings.StartupDone) { SetStartup(true); settings.StartupDone = true; settings.Save(); } // on by default
+            // Windows re-encodes every wallpaper as a JPEG at quality 85 (a 5 MB original ends up around 1 MB, with
+            // banding in dark gradients) unless JPEGImportQuality says otherwise. 100 keeps the original's quality.
+            using (var k = Registry.CurrentUser.OpenSubKey(@"Control Panel\Desktop", true))
+                if (k != null && !(k.GetValue("JPEGImportQuality") is int && (int)k.GetValue("JPEGImportQuality") == 100))
+                {
+                    k.SetValue("JPEGImportQuality", 100, RegistryValueKind.DWord);
+                    Log("asked Windows to keep wallpapers at full quality (JPEGImportQuality=100)");
+                }
 
             tray.Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
             tray.ContextMenuStrip = BuildMenu();
