@@ -6,15 +6,16 @@ A small tray app that changes the desktop wallpaper every few minutes from a wal
 ![icon](icon-preview.png)
 
 - It shows every wallpaper once, in random order, before repeating. The next one is downloaded ahead of time.
-- It changes with Windows' own cross-fade, the same one the built-in slideshow uses. This needs **Animation effects**
-  on, under Settings > Accessibility > Visual effects. If the fade can't be used, it changes instantly.
+- Each change cross-fades (Windows itself switches in one frame): for a moment it shows a picture of the old wallpaper
+  in the desktop's wallpaper layer, under the icons, sets the new one underneath, and fades the picture out. This
+  follows **Animation effects** in Settings > Accessibility > Visual effects.
 - It waits while a game, a full-screen video or a presentation is running, and while the PC is locked. It can also
   wait while on battery.
 - It follows Windows' light or dark theme and your accent colour.
 
 **Use it**
 - **Double-click** the tray icon for the next wallpaper.
-- **Right-click** it for the everyday actions and **Open Wallhaven Shuffle**: a Windows 11 style flyout with the
+- **Right-click** it for the everyday actions and **Open Wallhaven Shuffle**: an acrylic Windows 11 style flyout with the
   wallpaper, the controls ♡ ⏮ ⏯ ⏭ ⋯, and five settings that apply right away. Click anywhere else or press Esc to
   close it.
 - Hotkeys:

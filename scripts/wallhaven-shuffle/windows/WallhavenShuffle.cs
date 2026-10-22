@@ -63,13 +63,26 @@ namespace WallhavenShuffle
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int RegisterWindowMessage(string name);
         [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr FindWindow(string cls, string title);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string cls, string title);
         [DllImport("user32.dll")] public static extern bool RegisterHotKey(IntPtr hWnd, int id, uint modifiers, uint vk);
         [DllImport("user32.dll")] public static extern bool UnregisterHotKey(IntPtr hWnd, int id);
         [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
         [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         public static extern bool SystemParametersInfo(uint action, uint param, string value, uint flags);
+        [DllImport("user32.dll")] static extern bool SystemParametersInfo(uint action, uint param, ref bool value, uint flags);
+        [DllImport("user32.dll")] static extern IntPtr SetParent(IntPtr child, IntPtr parent);
+        [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr hWnd, int index);
+        [DllImport("user32.dll")] static extern int SetWindowLong(IntPtr hWnd, int index, int value);
+        [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
+        [DllImport("user32.dll")] public static extern bool SetLayeredWindowAttributes(IntPtr hWnd, uint key, byte alpha, uint flags);
+        [DllImport("user32.dll")] static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam, uint flags, uint timeout, out IntPtr result);
+        delegate bool EnumProc(IntPtr hWnd, IntPtr lParam);
+        [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc proc, IntPtr lParam);
         [DllImport("shell32.dll")] static extern int SHQueryUserNotificationState(out int state);
         [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
+        [StructLayout(LayoutKind.Sequential)] struct MARGINS { public int Left, Right, Top, Bottom; }
+        [DllImport("dwmapi.dll")] static extern int DwmExtendFrameIntoClientArea(IntPtr hwnd, ref MARGINS margins);
+        [DllImport("dwmapi.dll")] public static extern int DwmFlush(); // waits for the next composed frame
 
         // A game, a full-screen video or a presentation is running (the same check Windows uses for "do not disturb").
         public static bool FullScreenAppRunning()
@@ -77,6 +90,14 @@ namespace WallhavenShuffle
             int state;
             if (SHQueryUserNotificationState(out state) != 0) return false;
             return state == 2 || state == 3 || state == 4 || state == 7; // busy, D3D full screen, presentation, store app
+        }
+
+        // "Animation effects" in Settings > Accessibility > Visual effects.
+        public static bool AnimationsOn()
+        {
+            bool on = true;
+            SystemParametersInfo(0x1042, 0, ref on, 0); // SPI_GETCLIENTAREAANIMATION
+            return on;
         }
 
         // Windows 11 flyout chrome: rounded corners and a thin border drawn by Windows.
@@ -88,10 +109,77 @@ namespace WallhavenShuffle
             DwmSetWindowAttribute(hwnd, 34, ref color, 4);  // DWMWA_BORDER_COLOR
         }
 
+        // The acrylic (blurred, tinted) backdrop flyouts use, behind the whole window. False where it isn't available.
+        public static bool Acrylic(IntPtr hwnd)
+        {
+            int type = 3; // DWMSBT_TRANSIENTWINDOW
+            if (DwmSetWindowAttribute(hwnd, 38, ref type, 4) != 0) return false;
+            var m = new MARGINS { Left = -1, Right = -1, Top = -1, Bottom = -1 };
+            return DwmExtendFrameIntoClientArea(hwnd, ref m) == 0;
+        }
+
         public static void RoundCorners(IntPtr hwnd)
         {
             int round = 2;
             DwmSetWindowAttribute(hwnd, 33, ref round, 4);
+        }
+
+        // Puts a window into the desktop's wallpaper layer: above the wallpaper, below the icons. Returns false if the
+        // desktop isn't laid out as expected.
+        public static bool IntoWallpaperLayer(IntPtr hwnd, Rectangle bounds)
+        {
+            IntPtr progman = FindWindow("Progman", null), parent = IntPtr.Zero, after = IntPtr.Zero, r;
+            if (progman == IntPtr.Zero) return false;
+            SendMessageTimeout(progman, 0x052C, IntPtr.Zero, IntPtr.Zero, 0, 1000, out r); // makes sure the layer exists
+            IntPtr defView = FindWindowEx(progman, IntPtr.Zero, "SHELLDLL_DefView", null);
+            if (defView != IntPtr.Zero) { parent = progman; after = defView; }   // Windows 11 24H2 and later
+            else
+            {
+                // Earlier: the icons are in a WorkerW, and the wallpaper is drawn by the WorkerW right behind it.
+                EnumWindows((h, l) =>
+                {
+                    if (FindWindowEx(h, IntPtr.Zero, "SHELLDLL_DefView", null) == IntPtr.Zero) return true;
+                    parent = FindWindowEx(IntPtr.Zero, h, "WorkerW", null);
+                    return false;
+                }, IntPtr.Zero);
+                if (parent == IntPtr.Zero) return false;
+            }
+            int style = GetWindowLong(hwnd, -16);
+            SetWindowLong(hwnd, -16, (style & ~unchecked((int)0x80000000)) | 0x40000000); // WS_CHILD instead of WS_POPUP
+            SetParent(hwnd, parent);
+            return SetWindowPos(hwnd, after, bounds.X, bounds.Y, bounds.Width, bounds.Height, 0x0010 | 0x0040); // no activate, show
+        }
+
+        // ---- copying a bitmap to a window with its alpha channel (GDI drawing would wipe it)
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct BITMAPINFOHEADER { public int Size, Width, Height; public short Planes, BitCount; public int Compression, SizeImage, XPels, YPels, ClrUsed, ClrImportant; }
+        [DllImport("gdi32.dll")] static extern IntPtr CreateCompatibleDC(IntPtr hdc);
+        [DllImport("gdi32.dll")] static extern bool DeleteDC(IntPtr hdc);
+        [DllImport("gdi32.dll")] static extern IntPtr SelectObject(IntPtr hdc, IntPtr obj);
+        [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr obj);
+        [DllImport("gdi32.dll")] static extern bool BitBlt(IntPtr dst, int x, int y, int w, int h, IntPtr src, int sx, int sy, uint rop);
+        [DllImport("gdi32.dll")] static extern IntPtr CreateDIBSection(IntPtr hdc, ref BITMAPINFOHEADER bmi, uint usage, out IntPtr bits, IntPtr section, uint offset);
+        [DllImport("kernel32.dll", EntryPoint = "RtlMoveMemory")] static extern void CopyMemory(IntPtr dst, IntPtr src, IntPtr count);
+
+        // bmp must be 32 bpp premultiplied ARGB, the size of the area to paint.
+        public static void BlitWithAlpha(Graphics target, Bitmap bmp)
+        {
+            int w = bmp.Width, h = bmp.Height;
+            var bi = new BITMAPINFOHEADER { Size = Marshal.SizeOf(typeof(BITMAPINFOHEADER)), Width = w, Height = -h, Planes = 1, BitCount = 32 };
+            IntPtr hdc = target.GetHdc();
+            try
+            {
+                IntPtr bits, mem = CreateCompatibleDC(hdc), dib = CreateDIBSection(hdc, ref bi, 0, out bits, IntPtr.Zero, 0);
+                var data = bmp.LockBits(new Rectangle(0, 0, w, h), System.Drawing.Imaging.ImageLockMode.ReadOnly, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+                try { CopyMemory(bits, data.Scan0, new IntPtr(w * h * 4)); } finally { bmp.UnlockBits(data); }
+                IntPtr old = SelectObject(mem, dib);
+                BitBlt(hdc, 0, 0, w, h, mem, 0, 0, 0x00CC0020); // SRCCOPY
+                SelectObject(mem, old);
+                DeleteObject(dib);
+                DeleteDC(mem);
+            }
+            finally { target.ReleaseHdc(hdc); }
         }
 
         // ---- the desktop wallpaper
@@ -112,10 +200,9 @@ namespace WallhavenShuffle
         [StructLayout(LayoutKind.Sequential)] struct RECT { public int Left, Top, Right, Bottom; }
         [ComImport, Guid("C2CF3110-460E-4fc1-B9D0-8A1C0C9CC4BD")] class DesktopWallpaper { }
 
-        // Sets the wallpaper on every monitor. Through Explorer's IDesktopWallpaper, which cross-fades from the old
-        // picture like Windows' own slideshow (when "Animation effects" is on in Settings > Accessibility > Visual
-        // effects); falls back to SystemParametersInfo, which switches instantly. Returns which one was used.
-        public static string SetWallpaper(string file, string position)
+        // Sets the wallpaper on every monitor, through Explorer's IDesktopWallpaper, or SystemParametersInfo if that
+        // fails. Either one switches instantly; the cross-fade is done by Fader.
+        public static void SetWallpaper(string file, string position)
         {
             string style = "10", tile = "0"; int pos = 4; // Fill
             switch (position)
@@ -143,7 +230,7 @@ namespace WallhavenShuffle
             t.SetApartmentState(ApartmentState.STA); // COM from Explorer's shell: an STA thread of its own
             t.IsBackground = true;
             t.Start();
-            if (t.Join(20000) && error == null) return "fade";
+            if (t.Join(20000) && error == null) return;
 
             using (var k = Registry.CurrentUser.OpenSubKey(@"Control Panel\Desktop", true))
             {
@@ -152,25 +239,147 @@ namespace WallhavenShuffle
             }
             if (!SystemParametersInfo(0x0014, 0, file, 0x01 | 0x02)) // SPI_SETDESKWALLPAPER, update ini + broadcast
                 throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
-            return "instant (" + (error == null ? "timeout" : error.Message) + ")";
+        }
+    }
+
+    // ==================================================================================================== fade
+
+    // Windows changes the wallpaper in one frame. For a cross-fade, this shows a picture of the current wallpaper in
+    // the desktop's wallpaper layer (under the icons, so they stay put), the new wallpaper is set underneath, and then
+    // the picture fades out.
+    class Fader : Form
+    {
+        Bitmap frame;
+        System.Windows.Forms.Timer timer;
+
+        Fader(Bitmap frame)
+        {
+            this.frame = frame;
+            FormBorderStyle = FormBorderStyle.None;
+            ShowInTaskbar = false;
+            StartPosition = FormStartPosition.Manual;
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.Opaque, true);
+        }
+
+        protected override CreateParams CreateParams
+        {
+            get { var cp = base.CreateParams; cp.ExStyle |= 0x80000 | 0x20 | 0x08000000 | 0x80; return cp; } // layered, click-through, no activate, tool window
+        }
+        protected override bool ShowWithoutActivation { get { return true; } }
+        protected override void OnPaint(PaintEventArgs e) { if (frame != null) e.Graphics.DrawImageUnscaled(frame, 0, 0); }
+
+        // The wallpaper as it looks now, across all monitors (Windows keeps the current picture as TranscodedWallpaper).
+        // Runs on a worker thread. Null if there's nothing to fade from.
+        public static Bitmap Snapshot(string position, out Rectangle desktop)
+        {
+            desktop = SystemInformation.VirtualScreen;
+            string file = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), @"Microsoft\Windows\Themes\TranscodedWallpaper");
+            if (!File.Exists(file)) return null;
+            Color back = Color.Black;
+            using (var k = Registry.CurrentUser.OpenSubKey(@"Control Panel\Colors"))
+            {
+                var rgb = k == null ? null : Convert.ToString(k.GetValue("Background", "0 0 0")).Split(' ');
+                int r, g, b;
+                if (rgb != null && rgb.Length == 3 && int.TryParse(rgb[0], out r) && int.TryParse(rgb[1], out g) && int.TryParse(rgb[2], out b)) back = Color.FromArgb(r, g, b);
+            }
+            var bmp = new Bitmap(desktop.Width, desktop.Height, System.Drawing.Imaging.PixelFormat.Format32bppRgb);
+            using (var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            using (var src = Image.FromStream(fs, false, false))
+            using (var g = Graphics.FromImage(bmp))
+            {
+                g.Clear(back);
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                var areas = position == "Span" ? new[] { desktop } : Screen.AllScreens.Select(s => s.Bounds).ToArray();
+                foreach (var a in areas)
+                {
+                    var r = new Rectangle(a.X - desktop.X, a.Y - desktop.Y, a.Width, a.Height);
+                    double sx = r.Width / (double)src.Width, sy = r.Height / (double)src.Height;
+                    double scale = position == "Fit" ? Math.Min(sx, sy) : position == "Center" || position == "Tile" ? 1 : Math.Max(sx, sy);
+                    RectangleF dst = position == "Stretch" ? (RectangleF)r :
+                        new RectangleF((float)(r.X + (r.Width - src.Width * scale) / 2), (float)(r.Y + (r.Height - src.Height * scale) / 2), (float)(src.Width * scale), (float)(src.Height * scale));
+                    g.SetClip(r);
+                    g.DrawImage(src, dst);
+                    g.ResetClip();
+                }
+            }
+            return bmp;
+        }
+
+        static Fader running;
+
+        // Shows the picture over the wallpaper (UI thread) and returns once it is on screen. Null if that isn't
+        // possible; the change is then instant.
+        public static Fader Begin(Bitmap frame, Rectangle desktop)
+        {
+            if (running != null && !running.IsDisposed) running.Dispose(); // a fade still running: finish it now
+            var f = new Fader(frame);
+            IntPtr h = f.Handle;
+            Native.SetLayeredWindowAttributes(h, 0, 0, 2); // LWA_ALPHA, invisible until painted
+            if (!Native.IntoWallpaperLayer(h, new Rectangle(0, 0, desktop.Width, desktop.Height))) { f.Dispose(); return null; }
+            f.Update();                                     // paint the whole picture first...
+            Native.DwmFlush();
+            Native.SetLayeredWindowAttributes(h, 0, 255, 2); // ...then show it in one frame
+            Native.DwmFlush(); Native.DwmFlush();             // and make sure it is on screen before the wallpaper changes
+            running = f;
+            var guard = new System.Windows.Forms.Timer { Interval = 8000 }; // never left behind, whatever happens
+            guard.Tick += delegate { guard.Dispose(); if (!f.IsDisposed) f.Dispose(); };
+            guard.Start();
+            return f;
+        }
+
+        public void FadeOut(int ms)
+        {
+            if (IsDisposed) return;
+            var start = DateTime.Now;
+            timer = new System.Windows.Forms.Timer { Interval = 10 };
+            timer.Tick += delegate
+            {
+                if (IsDisposed) return;
+                double t = Math.Min(1, (DateTime.Now - start).TotalMilliseconds / ms), eased = t * t * (3 - 2 * t);
+                Native.SetLayeredWindowAttributes(Handle, 0, (byte)Math.Round(255 * (1 - eased)), 2);
+                if (t >= 1) Dispose();
+            };
+            timer.Start();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                if (timer != null) { timer.Dispose(); timer = null; }
+                if (frame != null) { frame.Dispose(); frame = null; }
+            }
+            base.Dispose(disposing);
         }
     }
 
     // ==================================================================================================== theme
 
     // Colours, fonts and drawing helpers, following Windows 11's light and dark themes and the user's accent colour.
+    // The flyout is acrylic on Windows 11: its surfaces are the translucent layers WinUI uses (white or black at a few
+    // percent) over the blur. Without acrylic the same layers sit on a solid background.
     static class Theme
     {
-        public static bool Dark;
+        public static bool Dark, Glass;
         public static float Scale = 1f;
-        public static Color Accent, OnAccent, Bg, Card, CardBorder, Field, FieldBorder, Text, TextSecondary, TextDisabled, Hover, Pressed, Divider, Menu, FlyoutBorder;
+        public static Color Accent, OnAccent, Bg, Menu, FlyoutBorder, Card, CardBorder, Field, FieldHover, FieldPressed, FieldBorder,
+            Text, TextSecondary, TextDisabled, Hover, Pressed, Divider, ToggleOff;
         static string bodyFamily, displayFamily, iconFamily;
 
         public static void Load()
         {
             using (var g = Graphics.FromHwnd(IntPtr.Zero)) Scale = g.DpiX / 96f;
+            bool transparency = true;
             using (var k = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"))
+            {
                 Dark = k != null && Convert.ToInt32(k.GetValue("AppsUseLightTheme", 1)) == 0;
+                transparency = k == null || Convert.ToInt32(k.GetValue("EnableTransparency", 1)) != 0;
+            }
+            int build = 0;
+            using (var k = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion"))
+                if (k != null) int.TryParse(Convert.ToString(k.GetValue("CurrentBuildNumber", "0")), out build);
+            Glass = transparency && build >= 22621;
             Accent = Color.FromArgb(0, 103, 192);
             using (var k = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\DWM"))
                 if (k != null && k.GetValue("AccentColor") != null)
@@ -181,21 +390,22 @@ namespace WallhavenShuffle
             // Windows uses a lighter shade of the accent in dark mode and a darker one in light mode.
             Accent = Dark ? Mix(Accent, Color.White, 0.45) : Mix(Accent, Color.Black, 0.1);
             OnAccent = Luma(Accent) > 0.6 ? Color.Black : Color.White;
+            Color w = Color.White, b = Color.Black;
             if (Dark)
             {
-                Bg = Color.FromArgb(32, 32, 32); Card = Color.FromArgb(43, 43, 43); CardBorder = Color.FromArgb(29, 29, 29);
-                Field = Color.FromArgb(55, 55, 55); FieldBorder = Color.FromArgb(70, 70, 70);
-                Text = Color.White; TextSecondary = Color.FromArgb(200, 200, 200); TextDisabled = Color.FromArgb(120, 120, 120);
-                Hover = Color.FromArgb(58, 58, 58); Pressed = Color.FromArgb(50, 50, 50); Divider = Color.FromArgb(56, 56, 56);
-                Menu = Color.FromArgb(44, 44, 44); FlyoutBorder = Color.FromArgb(62, 62, 62);
+                Bg = Color.FromArgb(32, 32, 32); Menu = Color.FromArgb(44, 44, 44); FlyoutBorder = Color.FromArgb(70, 70, 70);
+                Card = A(13, w); CardBorder = A(26, b); Divider = A(21, w);
+                Field = A(15, w); FieldHover = A(21, w); FieldPressed = A(8, w); FieldBorder = A(20, w);
+                Hover = A(15, w); Pressed = A(10, w); ToggleOff = A(25, b);
+                Text = w; TextSecondary = A(197, w); TextDisabled = A(93, w);
             }
             else
             {
-                Bg = Color.FromArgb(243, 243, 243); Card = Color.FromArgb(251, 251, 251); CardBorder = Color.FromArgb(229, 229, 229);
-                Field = Color.White; FieldBorder = Color.FromArgb(214, 214, 214);
-                Text = Color.FromArgb(26, 26, 26); TextSecondary = Color.FromArgb(96, 96, 96); TextDisabled = Color.FromArgb(160, 160, 160);
-                Hover = Color.FromArgb(234, 234, 234); Pressed = Color.FromArgb(225, 225, 225); Divider = Color.FromArgb(229, 229, 229);
-                Menu = Color.FromArgb(249, 249, 249); FlyoutBorder = Color.FromArgb(214, 214, 214);
+                Bg = Color.FromArgb(243, 243, 243); Menu = Color.FromArgb(249, 249, 249); FlyoutBorder = Color.FromArgb(214, 214, 214);
+                Card = A(179, w); CardBorder = A(15, b); Divider = A(15, b);
+                Field = A(179, w); FieldHover = A(128, Color.FromArgb(249, 249, 249)); FieldPressed = A(77, Color.FromArgb(249, 249, 249)); FieldBorder = A(15, b);
+                Hover = A(10, b); Pressed = A(6, b); ToggleOff = A(6, b);
+                Text = A(228, b); TextSecondary = A(158, b); TextDisabled = A(92, b);
             }
             if (bodyFamily != null) return;
             var families = new HashSet<string>(new InstalledFontCollection().Families.Select(f => f.Name));
@@ -204,42 +414,10 @@ namespace WallhavenShuffle
             iconFamily = families.Contains("Segoe Fluent Icons") ? "Segoe Fluent Icons" : "Segoe MDL2 Assets";
         }
 
+        static Color A(int alpha, Color c) { return Color.FromArgb(alpha, c); }
+
         public static Font Body(float size) { return new Font(bodyFamily, size); }
         public static Font Strong(float size) { return new Font(displayFamily, size, FontStyle.Bold); }
-        public static Font Icons(float size) { return new Font(iconFamily, size); }
-
-        // GDI centres the whole line box (with room for accents and descenders), which sits Segoe UI Variable's
-        // capitals a pixel or two high. This measures, once per font, how far to move text down so that the
-        // capitals sit exactly in the middle, and draws single-line text that way.
-        static readonly Dictionary<string, int> nudges = new Dictionary<string, int>();
-        public static int Nudge(Font f)
-        {
-            string key = f.Name + "|" + f.SizeInPoints + "|" + f.Style;
-            int n;
-            if (nudges.TryGetValue(key, out n)) return n;
-            int h = f.Height * 3, w = f.Height * 3;
-            using (var bmp = new Bitmap(w, h))
-            {
-                using (var g = Graphics.FromImage(bmp))
-                {
-                    g.Clear(Color.White);
-                    TextRenderer.DrawText(g, "H", f, new Rectangle(0, 0, w, h), Color.Black, TextFormatFlags.VerticalCenter | TextFormatFlags.HorizontalCenter | TextFormatFlags.SingleLine);
-                }
-                int top = -1, bottom = -1;
-                for (int y = 0; y < h; y++)
-                    for (int x = 0; x < w; x++)
-                        if (bmp.GetPixel(x, y).R < 128) { if (top < 0) top = y; bottom = y; break; }
-                n = top < 0 ? 0 : (int)Math.Round(h / 2.0 - (top + bottom + 1) / 2.0);
-            }
-            nudges[key] = n;
-            return n;
-        }
-
-        public static void DrawText(Graphics g, string text, Font f, Rectangle r, Color color, TextFormatFlags align)
-        {
-            r.Offset(0, Nudge(f));
-            TextRenderer.DrawText(g, text, f, r, color, align | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
-        }
 
         public static Color Mix(Color a, Color b, double t)
         {
@@ -260,18 +438,86 @@ namespace WallhavenShuffle
             return p;
         }
 
-        // A Segoe Fluent Icons glyph as a small bitmap (for menu items).
-        public static Bitmap Glyph(string glyph, int px, Color color)
+        // ---- text: GDI+ (keeps the alpha channel), one line, centred on the capitals
+
+        static StringFormat Format(StringAlignment h)
         {
-            var bmp = new Bitmap(px, px);
-            using (var g = Graphics.FromImage(bmp))
-            using (var f = new Font(iconFamily, px * 0.75f, GraphicsUnit.Pixel))
+            var f = new StringFormat(StringFormat.GenericTypographic) { Alignment = h, LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter };
+            f.FormatFlags |= StringFormatFlags.NoWrap;
+            return f;
+        }
+
+        public static void DrawText(Graphics g, string text, Font f, RectangleF r, Color color, StringAlignment h)
+        {
+            r.Offset(0, Nudge(f, g.DpiY));
+            using (var b = new SolidBrush(color)) using (var sf = Format(h)) g.DrawString(text, f, b, r, sf);
+        }
+
+        public static SizeF Measure(Graphics g, string text, Font f)
+        {
+            using (var sf = Format(StringAlignment.Near)) return g.MeasureString(text, f, PointF.Empty, sf);
+        }
+
+        // A line of text is centred on its line box, which has room for accents above and descenders below, so the
+        // capitals sit a little high. This measures, once per font, how far down to move it so they sit in the middle.
+        static readonly Dictionary<string, float> nudges = new Dictionary<string, float>();
+        static float Nudge(Font f, float dpi)
+        {
+            string key = f.Name + "|" + f.SizeInPoints + "|" + f.Style + "|" + dpi;
+            float n;
+            if (nudges.TryGetValue(key, out n)) return n;
+            int h = (int)Math.Ceiling(f.SizeInPoints * dpi / 72 * 3);
+            using (var bmp = new Bitmap(h, h, System.Drawing.Imaging.PixelFormat.Format32bppPArgb))
+            {
+                bmp.SetResolution(dpi, dpi);
+                using (var g = Graphics.FromImage(bmp))
+                using (var b = new SolidBrush(Color.Black))
+                using (var sf = Format(StringAlignment.Center))
+                {
+                    g.Clear(Color.Transparent);
+                    g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+                    g.DrawString("H", f, b, new RectangleF(0, 0, h, h), sf);
+                }
+                int top = -1, bottom = -1;
+                for (int y = 0; y < h; y++)
+                    for (int x = 0; x < h; x++)
+                        if (bmp.GetPixel(x, y).A > 100) { if (top < 0) top = y; bottom = y; break; }
+                n = top < 0 ? 0 : (float)Math.Round(h / 2.0 - (top + bottom + 1) / 2.0);
+            }
+            nudges[key] = n;
+            return n;
+        }
+
+        // ---- icons: Segoe Fluent Icons glyphs, centred on their actual outline (not every glyph is centred in its box)
+
+        public static float Px(Graphics g, float points) { return points * g.DpiY / 72f; }
+
+        public static void DrawGlyph(Graphics g, string glyph, float emPx, RectangleF r, Color color)
+        {
+            using (var path = new GraphicsPath())
+            using (var family = new FontFamily(iconFamily))
+            using (var sf = new StringFormat(StringFormat.GenericTypographic))
             using (var b = new SolidBrush(color))
             {
-                g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
-                var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
-                g.DrawString(glyph, f, b, new RectangleF(0, 0, px, px), sf);
+                path.AddString(glyph, family, 0, emPx, PointF.Empty, sf);
+                var bb = path.GetBounds();
+                using (var m = new Matrix())
+                {
+                    m.Translate((float)Math.Round(r.X + (r.Width - bb.Width) / 2 - bb.X), (float)Math.Round(r.Y + (r.Height - bb.Height) / 2 - bb.Y));
+                    path.Transform(m);
+                }
+                var smoothing = g.SmoothingMode;
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                g.FillPath(b, path);
+                g.SmoothingMode = smoothing;
             }
+        }
+
+        // A glyph as a small bitmap (for menu items).
+        public static Bitmap Glyph(string glyph, int px, Color color)
+        {
+            var bmp = new Bitmap(px, px, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+            using (var g = Graphics.FromImage(bmp)) DrawGlyph(g, glyph, px * 0.8f, new RectangleF(0, 0, px, px), color);
             return bmp;
         }
     }
@@ -427,6 +673,7 @@ namespace WallhavenShuffle
             UpdateTooltip();
             Log("started");
             if (string.IsNullOrEmpty(settings.ListUrl)) BeginInvoke(new Action(ShowMainWindow)); // first run: needs a source
+            else BeginInvoke(new Action(delegate { window = new MainWindow(this); window.CreateControl(); })); // ready ahead of time
         }
 
         string ListCache { get { return Path.Combine(Settings.Dir, "list.json"); } }
@@ -486,15 +733,9 @@ namespace WallhavenShuffle
 
         public void ShowMainWindow()
         {
-            if (window == null || window.IsDisposed)
-            {
-                window = new MainWindow(this);
-                window.Show();
-                Log("window opened");
-            }
-            if (window.WindowState == FormWindowState.Minimized) window.WindowState = FormWindowState.Normal;
-            window.Activate();
-            Native.SetForegroundWindow(window.Handle);
+            if (window == null || window.IsDisposed) window = new MainWindow(this);
+            window.Open();
+            Log("window opened");
         }
 
         ToolStripMenuItem pauseItem, favouriteItem;
@@ -692,11 +933,36 @@ namespace WallhavenShuffle
             busy = true;
             Changed();
             string position = settings.Position;
+            bool fade = Native.AnimationsOn(); // the cross-fade follows Windows' "Animation effects" setting
             ThreadPool.QueueUserWorkItem(delegate
             {
-                string file = null, error = null, how = null;
-                try { file = Fetch(w); how = Native.SetWallpaper(file, position); }
+                string error = null, how = "instant";
+                Fader fader = null;
+                try
+                {
+                    string file = Fetch(w);
+                    if (fade)
+                    {
+                        Rectangle desktop = Rectangle.Empty;
+                        Bitmap frame = null;
+                        try { frame = Fader.Snapshot(position, out desktop); } catch (Exception ex) { Log("fade skipped: " + ex.Message); }
+                        if (frame != null) Invoke(new Action(delegate { fader = Fader.Begin(frame, desktop); if (fader == null) frame.Dispose(); }));
+                    }
+                    var transcoded = new FileInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), @"Microsoft\Windows\Themes\TranscodedWallpaper"));
+                    DateTime before = transcoded.Exists ? transcoded.LastWriteTimeUtc : DateTime.MinValue;
+                    Native.SetWallpaper(file, position);
+                    if (fader != null)
+                    {
+                        // Wait until Explorer has taken the new picture (it rewrites TranscodedWallpaper), then a moment to draw it.
+                        for (int i = 0; i < 40; i++) { transcoded.Refresh(); if (transcoded.Exists && transcoded.LastWriteTimeUtc != before) break; Thread.Sleep(50); }
+                        Thread.Sleep(150);
+                        var f = fader; fader = null;
+                        BeginInvoke(new Action(delegate { f.FadeOut(800); }));
+                        how = "cross-fade";
+                    }
+                }
                 catch (Exception ex) { error = ex.Message; }
+                if (fader != null) { var f = fader; BeginInvoke(new Action(delegate { f.Dispose(); })); }
                 BeginInvoke(new Action(delegate
                 {
                     busy = false;
@@ -909,8 +1175,10 @@ namespace WallhavenShuffle
 
     // ==================================================================================================== main window
 
-    // The one window, kept calm: the wallpaper, one row of controls, and five settings that apply instantly.
-    // Less common things live in the "⋯" menu. Laid out in 96-DPI pixels and scaled once (fonts are in points).
+    // The flyout, kept calm: the wallpaper, one row of controls, and five settings that apply instantly. Less common
+    // things live in the "⋯" menu. Acrylic on Windows 11, with rounded corners, border and shadow from Windows itself
+    // (a captioned window whose caption is removed, so Windows still treats it as a real window, animations included).
+    // It hides when you click elsewhere. Not in the taskbar or Alt+Tab (it is owned by a hidden window). Laid out in 96-DPI pixels and scaled once (fonts are in points).
     class MainWindow : Form
     {
         static readonly int[] Intervals = { 30, 60, 120, 180, 300, 600, 900, 1800, 3600, 7200, 21600, 43200, 86400 };
@@ -930,6 +1198,7 @@ namespace WallhavenShuffle
         readonly Toggle pauseGames = new Toggle(), pauseBattery = new Toggle(), startup = new Toggle();
         readonly ToolTip tips = new ToolTip();
         readonly FluentMenu moreMenu = new FluentMenu();
+        readonly Size size;
         ToolStripMenuItem hideItem, openItem;
         string shownFile;
         bool loading;
@@ -941,7 +1210,8 @@ namespace WallhavenShuffle
             Text = "Wallhaven Shuffle";
             Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
             Font = Theme.Body(10f);
-            FormBorderStyle = FormBorderStyle.None;  // a flyout like Quick Settings: no title bar, closes when you click away
+            FormBorderStyle = FormBorderStyle.FixedSingle;
+            ControlBox = false; MaximizeBox = false; MinimizeBox = false;
             StartPosition = FormStartPosition.Manual;
             ShowInTaskbar = false;
             TopMost = true;
@@ -965,9 +1235,9 @@ namespace WallhavenShuffle
 
             Controls.AddRange(new Control[] { preview, status, card });
             Controls.AddRange(transport);
-            ClientSize = new Size(W, y);
             Scale(new SizeF(Theme.Scale, Theme.Scale));
-            ClientSize = new Size((int)(W * Theme.Scale), (int)(y * Theme.Scale));
+            size = new Size((int)Math.Round(W * Theme.Scale), (int)Math.Round(y * Theme.Scale));
+            Size = size;
 
             // The "⋯" menu: the less common actions.
             hideItem = moreMenu.Add("Never show this one", Glyphs.Hide, delegate { app.Block(); });
@@ -1023,24 +1293,40 @@ namespace WallhavenShuffle
             loading = false;
         }
 
-        // Opens just above the notification area, like a flyout.
-        protected override void OnLoad(EventArgs e)
+        protected override void WndProc(ref Message m)
         {
-            base.OnLoad(e);
-            var area = Screen.PrimaryScreen.WorkingArea;
-            int m = (int)(12 * Theme.Scale);
-            Location = new Point(area.Right - Width - m, Math.Max(area.Top, area.Bottom - Height - m));
-        }
-
-        protected override CreateParams CreateParams
-        {
-            get { var cp = base.CreateParams; cp.ClassStyle |= 0x20000; return cp; } // CS_DROPSHADOW, as menus and flyouts have
+            if (m.Msg == 0x0083 && m.WParam != IntPtr.Zero) { m.Result = IntPtr.Zero; return; } // WM_NCCALCSIZE: no caption or borders
+            if (m.Msg == 0x0084) { m.Result = new IntPtr(1); return; }                            // WM_NCHITTEST: all client area
+            base.WndProc(ref m);
         }
 
         protected override void OnHandleCreated(EventArgs e)
         {
             base.OnHandleCreated(e);
             Native.StyleFlyout(Handle, Theme.Dark, Theme.FlyoutBorder);
+            if (Theme.Glass && !Native.Acrylic(Handle)) { Theme.Glass = false; ApplyTheme(); }
+            Native.SetWindowPos(Handle, IntPtr.Zero, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020); // apply the frame change
+            Size = size;
+        }
+
+        // ---- opening and closing: Windows' own window animation (smooth, done by the compositor; follows the
+        // "Animation effects" setting). The flyout is created once and then shown and hidden, so it opens painted.
+
+        public void Open()
+        {
+            var area = Screen.PrimaryScreen.WorkingArea;
+            int m = (int)(12 * Theme.Scale);
+            Location = new Point(area.Right - Width - m, Math.Max(area.Top, area.Bottom - Height - m));
+            UpdateView(false);
+            if (!Visible) Show();
+            Activate();
+            Native.SetForegroundWindow(Handle);
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            if (e.CloseReason == CloseReason.UserClosing) { e.Cancel = true; Hide(); return; } // closing = hiding
+            base.OnFormClosing(e);
         }
 
         // Clicking anywhere else closes it (but not while one of its own menus is open).
@@ -1049,14 +1335,15 @@ namespace WallhavenShuffle
             base.OnDeactivate(e);
             BeginInvoke(new Action(delegate
             {
-                if (IsDisposed || ActiveForm == this || moreMenu.Visible || every.MenuOpen || fit.MenuOpen) return;
-                Close();
+                if (IsDisposed || !Visible || ActiveForm == this || moreMenu.Visible || every.MenuOpen || fit.MenuOpen) return;
+                Hide();
             }));
         }
 
         public void ApplyTheme()
         {
-            BackColor = Theme.Bg; ForeColor = Theme.Text;
+            BackColor = Theme.Glass ? Color.Black : Theme.Bg; // black client = see-through to the acrylic
+            ForeColor = Theme.Text;
             if (IsHandleCreated) Native.StyleFlyout(Handle, Theme.Dark, Theme.FlyoutBorder);
             foreach (Control c in AllControls(this)) c.Invalidate();
             Invalidate();
@@ -1104,19 +1391,55 @@ namespace WallhavenShuffle
 
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
-            if (keyData == Keys.Escape) { Close(); return true; }
+            if (keyData == Keys.Escape) { Hide(); return true; }
             return base.ProcessCmdKey(ref msg, keyData);
         }
     }
 
     // ==================================================================================================== controls
 
-    abstract class FluentControl : Control
+    // Every control on the flyout draws into a 32-bit bitmap with alpha and copies it to the window as is, so the
+    // acrylic shows through its translucent layers (GDI drawing would wipe the alpha).
+    abstract class GlassControl : Control
+    {
+        protected GlassControl()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.ResizeRedraw | ControlStyles.Opaque, true);
+            SetStyle(ControlStyles.OptimizedDoubleBuffer, false);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            if (Width <= 0 || Height <= 0) return;
+            using (var bmp = new Bitmap(Width, Height, System.Drawing.Imaging.PixelFormat.Format32bppPArgb))
+            {
+                bmp.SetResolution(e.Graphics.DpiX, e.Graphics.DpiY);
+                using (var g = Graphics.FromImage(bmp))
+                {
+                    g.Clear(Theme.Glass ? Color.Transparent : Theme.Bg);
+                    var surface = Surface; // filled edge to edge, without anti-aliasing (that would leave a faint outline)
+                    if (surface.A > 0) using (var b = new SolidBrush(surface)) g.FillRectangle(b, 0, 0, Width, Height);
+                    g.SmoothingMode = SmoothingMode.AntiAlias;
+                    g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                    Render(g);
+                }
+                Native.BlitWithAlpha(e.Graphics, bmp);
+            }
+        }
+
+        // The layer this control sits on: the card's for controls in a settings row, otherwise none.
+        protected virtual Color Surface { get { return Parent is Row ? Theme.Card : Color.Transparent; } }
+        protected abstract void Render(Graphics g);
+        protected static float K { get { return Theme.Scale; } }
+    }
+
+    abstract class FluentControl : GlassControl
     {
         protected bool hover, down;
         protected FluentControl()
         {
-            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw | ControlStyles.Selectable, true);
+            SetStyle(ControlStyles.Selectable, true);
             Cursor = Cursors.Hand;
             TabStop = true;
         }
@@ -1128,59 +1451,50 @@ namespace WallhavenShuffle
         protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
         protected override void OnEnabledChanged(EventArgs e) { Invalidate(); base.OnEnabledChanged(e); }
         protected override void OnKeyDown(KeyEventArgs e) { if (e.KeyCode == Keys.Space || e.KeyCode == Keys.Enter) OnClick(EventArgs.Empty); base.OnKeyDown(e); }
-        protected static float K { get { return Theme.Scale; } }
-        protected Color Surface { get { return Parent != null && (Parent is Row || Parent.Parent is Row) ? Theme.Card : Theme.Bg; } }
 
         protected void FocusRing(Graphics g, RectangleF r, float radius)
         {
             if (!Focused || !ShowFocusCues) return;
-            using (var p = new Pen(Theme.Text, 1.5f * K)) using (var path = Theme.Rounded(RectangleF.Inflate(r, -1, -1), radius)) g.DrawPath(p, path);
+            using (var p = new Pen(Theme.Text, 1.5f * K)) using (var path = Theme.Rounded(RectangleF.Inflate(r, -0.75f * K, -0.75f * K), radius)) g.DrawPath(p, path);
         }
     }
 
     // One line of secondary text, centred.
-    class TextLine : Control
+    class TextLine : GlassControl
     {
-        public TextLine() { SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true); }
         protected override void OnTextChanged(EventArgs e) { Invalidate(); base.OnTextChanged(e); }
-        protected override void OnPaint(PaintEventArgs e)
-        {
-            e.Graphics.Clear(Theme.Bg);
-            Theme.DrawText(e.Graphics, Text, Font, ClientRectangle, Theme.TextSecondary, TextFormatFlags.HorizontalCenter);
-        }
+        protected override void Render(Graphics g) { Theme.DrawText(g, Text, Font, ClientRectangle, Theme.TextSecondary, StringAlignment.Center); }
     }
 
     // The current wallpaper, rounded like a Windows 11 card, with resolution and favourites in a small pill.
-    // Keeps a downscaled copy only (a 4K bitmap is 33 MB).
-    class Preview : Control
+    // Keeps only a copy the size of the box (a 4K bitmap is 33 MB).
+    class Preview : GlassControl
     {
         Bitmap thumb;
         string overlay;
         public string Overlay { get { return overlay; } set { if (overlay == value) return; overlay = value; Invalidate(); } }
 
-        public Preview()
-        {
-            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-            Cursor = Cursors.Hand;
-        }
+        public Preview() { Cursor = Cursors.Hand; }
 
         public void SetImage(string file)
         {
             var old = thumb; thumb = null;
             if (old != null) old.Dispose();
-            if (file != null)
+            if (file != null && Width > 0 && Height > 0)
             {
                 try
                 {
                     using (var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
                     using (var src = Image.FromStream(fs, false, false))
                     {
-                        int w = (int)(432 * 1.5 * Theme.Scale), h = Math.Max(1, (int)(w * src.Height / (double)src.Width));
-                        thumb = new Bitmap(w, h);
+                        thumb = new Bitmap(Width, Height, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
                         using (var g = Graphics.FromImage(thumb))
                         {
                             g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                            g.DrawImage(src, 0, 0, w, h);
+                            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                            double scale = Math.Max(Width / (double)src.Width, Height / (double)src.Height); // "Fill", centred
+                            float w = (float)(src.Width * scale), h = (float)(src.Height * scale);
+                            g.DrawImage(src, (Width - w) / 2, (Height - h) / 2, w, h);
                         }
                     }
                 }
@@ -1189,55 +1503,38 @@ namespace WallhavenShuffle
             Invalidate();
         }
 
-        protected override void OnPaint(PaintEventArgs e)
+        protected override void Render(Graphics g)
         {
-            var g = e.Graphics;
-            float k = Theme.Scale;
-            g.Clear(Theme.Bg);
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-            var r = new RectangleF(0, 0, Width - 1, Height - 1);
-            using (var path = Theme.Rounded(r, 8 * k))
+            float k = K;
+            using (var path = Theme.Rounded(new RectangleF(0, 0, Width, Height), 8 * k))
             {
-                g.SetClip(path);
-                if (thumb != null)
-                {
-                    double scale = Math.Max(Width / (double)thumb.Width, Height / (double)thumb.Height); // "Fill", centred
-                    float w = (float)(thumb.Width * scale), h = (float)(thumb.Height * scale);
-                    g.DrawImage(thumb, (Width - w) / 2, (Height - h) / 2, w, h);
-                }
+                if (thumb != null) using (var tb = new TextureBrush(thumb, WrapMode.Clamp)) g.FillPath(tb, path);
                 else
                 {
-                    using (var b = new LinearGradientBrush(ClientRectangle, Theme.Mix(Theme.Accent, Theme.Bg, 0.55), Theme.Mix(Theme.Accent, Theme.Bg, 0.85), 120f))
-                        g.FillRectangle(b, ClientRectangle);
-                    Theme.DrawText(g, "Your wallpaper will show up here", Font, ClientRectangle, Theme.TextSecondary, TextFormatFlags.HorizontalCenter);
+                    using (var b = new LinearGradientBrush(ClientRectangle, Color.FromArgb(70, Theme.Accent), Color.FromArgb(20, Theme.Accent), 120f)) g.FillPath(b, path);
+                    Theme.DrawText(g, "Your wallpaper will show up here", Font, ClientRectangle, Theme.TextSecondary, StringAlignment.Center);
                 }
                 if (overlay != null)
                     using (var f = Theme.Strong(9f))
                     {
-                        Size ts = TextRenderer.MeasureText(g, overlay, f, Size.Empty, TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
-                        var pill = new Rectangle((int)(12 * k), (int)(Height - 12 * k - 28 * k), (int)(ts.Width + 24 * k), (int)(28 * k));
-                        using (var pp = Theme.Rounded(pill, pill.Height / 2f))
-                        using (var b = new SolidBrush(Color.FromArgb(150, 0, 0, 0)))
-                            g.FillPath(b, pp);
-                        Theme.DrawText(g, overlay, f, pill, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPadding);
+                        var ts = Theme.Measure(g, overlay, f);
+                        float h = (float)Math.Round(28 * k), w = (float)Math.Round(ts.Width + 24 * k);
+                        var pill = new RectangleF((float)Math.Round(12 * k), (float)Math.Round(Height - 12 * k - h), w, h);
+                        using (var pp = Theme.Rounded(pill, h / 2)) using (var b = new SolidBrush(Color.FromArgb(150, 0, 0, 0))) g.FillPath(b, pp);
+                        Theme.DrawText(g, overlay, f, pill, Color.White, StringAlignment.Center);
                     }
-                g.ResetClip();
-                using (var pen = new Pen(Color.FromArgb(Theme.Dark ? 30 : 24, Theme.Dark ? Color.White : Color.Black))) g.DrawPath(pen, path);
             }
+            using (var edge = Theme.Rounded(new RectangleF(0.5f, 0.5f, Width - 1, Height - 1), 8 * k - 0.5f))
+            using (var pen = new Pen(Color.FromArgb(Theme.Dark ? 24 : 20, Theme.Dark ? Color.White : Color.Black)))
+                g.DrawPath(pen, edge);
         }
     }
 
     // A rounded card of setting rows with thin dividers (Windows 11 Settings style).
-    class Card : Panel
+    class Card : GlassControl
     {
         const int RowHeight = 56, Pad = 4;
         readonly List<Row> rows = new List<Row>();
-
-        public Card()
-        {
-            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-        }
 
         public void AddRow(string title, Control control)
         {
@@ -1247,12 +1544,9 @@ namespace WallhavenShuffle
             Height = Pad * 2 + rows.Count * RowHeight;
         }
 
-        protected override void OnPaint(PaintEventArgs e)
+        protected override void Render(Graphics g)
         {
-            var g = e.Graphics;
-            g.Clear(Theme.Bg);
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            using (var path = Theme.Rounded(new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f), 8 * Theme.Scale))
+            using (var path = Theme.Rounded(new RectangleF(0.5f, 0.5f, Width - 1, Height - 1), 8 * K))
             using (var fill = new SolidBrush(Theme.Card))
             using (var pen = new Pen(Theme.CardBorder))
             {
@@ -1262,36 +1556,32 @@ namespace WallhavenShuffle
         }
     }
 
-    // One setting: the label on the left, its control on the right.
-    class Row : Control
+    // One setting: its name on the left, its control on the right.
+    class Row : GlassControl
     {
         readonly bool divider;
         readonly Control control;
 
         public Row(string title, Control control, bool divider)
         {
-            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
             Text = title; this.divider = divider; this.control = control;
             Controls.Add(control);
         }
 
+        protected override Color Surface { get { return Theme.Card; } }
+
         protected override void OnLayout(LayoutEventArgs e)
         {
             base.OnLayout(e);
-            float k = Theme.Scale;
             bool toggle = control is Toggle;
-            int w = (int)((toggle ? 92 : 172) * k), h = (int)((toggle ? 32 : 34) * k);
-            control.Bounds = new Rectangle(Width - w - (int)(16 * k), (Height - h) / 2, w, h);
+            int w = (int)Math.Round((toggle ? 92 : 172) * K), h = (int)Math.Round((toggle ? 32 : 34) * K);
+            control.Bounds = new Rectangle(Width - w - (int)Math.Round(16 * K), (Height - h) / 2, w, h);
         }
 
-        protected override void OnPaint(PaintEventArgs e)
+        protected override void Render(Graphics g)
         {
-            var g = e.Graphics;
-            float k = Theme.Scale;
-            g.Clear(Theme.Card);
-            var text = new Rectangle((int)(20 * k), 0, control.Left - (int)(32 * k), Height);
-            Theme.DrawText(g, Text, Font, text, Theme.Text, TextFormatFlags.Left);
-            if (divider) using (var pen = new Pen(Theme.Divider)) g.DrawLine(pen, 0, 0, Width, 0);
+            Theme.DrawText(g, Text, Font, new RectangleF(20 * K, 0, control.Left - 32 * K, Height), Theme.Text, StringAlignment.Near);
+            if (divider) using (var pen = new Pen(Theme.Divider)) g.DrawLine(pen, 0, 0.5f, Width, 0.5f);
         }
     }
 
@@ -1304,25 +1594,22 @@ namespace WallhavenShuffle
 
         protected override void OnClick(EventArgs e) { Focus(); Checked = !Checked; base.OnClick(e); }
 
-        protected override void OnPaint(PaintEventArgs e)
+        protected override void Render(Graphics g)
         {
-            var g = e.Graphics;
-            g.Clear(Theme.Card);
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            float w = 40 * K, h = 20 * K;
-            var r = new RectangleF(Width - w - 4 * K, (Height - h) / 2, w, h);
-            Theme.DrawText(g, on ? "On" : "Off", Font, new Rectangle(0, 0, (int)(r.X - 10 * K), Height), Theme.Text, TextFormatFlags.Right);
+            float w = (float)Math.Round(40 * K), h = (float)Math.Round(20 * K);
+            var r = new RectangleF(Width - w - (float)Math.Round(4 * K), (float)Math.Round((Height - h) / 2), w, h);
+            Theme.DrawText(g, on ? "On" : "Off", Font, new RectangleF(0, 0, r.X - 12 * K, Height), Theme.Text, StringAlignment.Far);
             using (var path = Theme.Rounded(r, h / 2))
             {
-                if (on) using (var b = new SolidBrush(hover ? Theme.Mix(Theme.Accent, Theme.Text, 0.1) : Theme.Accent)) g.FillPath(b, path);
+                if (on) using (var b = new SolidBrush(hover ? Theme.Mix(Theme.Accent, Color.White, 0.1) : Theme.Accent)) g.FillPath(b, path);
                 else
                 {
-                    using (var b = new SolidBrush(hover ? Theme.Hover : Theme.Field)) g.FillPath(b, path);
-                    using (var p = new Pen(Theme.TextSecondary, 1f * K)) g.DrawPath(p, path);
+                    using (var b = new SolidBrush(hover ? Theme.FieldHover : Theme.ToggleOff)) g.FillPath(b, path);
+                    using (var p = new Pen(Theme.TextSecondary, 1f * K)) using (var inner = Theme.Rounded(RectangleF.Inflate(r, -0.5f * K, -0.5f * K), h / 2 - 0.5f * K)) g.DrawPath(p, inner);
                 }
             }
-            float d = (down ? 14 : hover ? 13 : 12) * K;
-            float x = on ? r.Right - d - 4 * K : r.X + 4 * K;
+            float d = (float)Math.Round((down ? 14 : hover ? 13 : 12) * K);
+            float x = on ? r.Right - d - (r.Height - d) / 2 : r.X + (r.Height - d) / 2;
             using (var b = new SolidBrush(on ? Theme.OnAccent : Theme.TextSecondary)) g.FillEllipse(b, x, r.Y + (r.Height - d) / 2, d, d);
             FocusRing(g, RectangleF.Inflate(r, 3 * K, 3 * K), h / 2 + 3 * K);
         }
@@ -1352,38 +1639,35 @@ namespace WallhavenShuffle
             for (int i = 0; i < Items.Count; i++)
             {
                 int n = i;
-                var item = new ToolStripMenuItem(Items[i].Key) { Checked = i == index, Padding = new Padding(4, 6, 4, 6) };
+                var item = new ToolStripMenuItem(Items[i].Key) { Checked = i == index, Padding = new Padding(4, 7, 4, 7) };
                 item.Click += delegate { if (index == n) return; index = n; Invalidate(); if (Changed != null) Changed(this, EventArgs.Empty); };
                 menu.Items.Add(item);
             }
             menu.Closed += delegate { MenuOpen = false; BeginInvoke(new Action(menu.Dispose)); };
-            MenuOpen = true;
             menu.MinimumSize = new Size(Width, 0);
+            MenuOpen = true;
             menu.Show(this, new Point(0, Height + (int)(4 * K)));
         }
 
-        protected override void OnPaint(PaintEventArgs e)
+        protected override void Render(Graphics g)
         {
-            var g = e.Graphics;
-            g.Clear(Theme.Card);
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
+            var r = new RectangleF(0.5f, 0.5f, Width - 1, Height - 1);
             using (var path = Theme.Rounded(r, 4 * K))
-            using (var fill = new SolidBrush(down ? Theme.Pressed : hover ? Theme.Hover : Theme.Field))
+            using (var fill = new SolidBrush(down ? Theme.FieldPressed : hover ? Theme.FieldHover : Theme.Field))
             using (var pen = new Pen(Theme.FieldBorder))
             {
                 g.FillPath(fill, path);
                 g.DrawPath(pen, path);
             }
             string text = index >= 0 ? Items[index].Key : "";
-            Theme.DrawText(g, text, Font, new Rectangle((int)(12 * K), 0, Width - (int)(40 * K), Height), Theme.Text, TextFormatFlags.Left);
-            using (var f = Theme.Icons(8f))
-                TextRenderer.DrawText(g, Glyphs.Chevron, f, new Rectangle(Width - (int)(32 * K), 0, (int)(20 * K), Height), Theme.TextSecondary, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+            float chevron = (float)Math.Round(36 * K);
+            Theme.DrawText(g, text, Font, new RectangleF(12 * K, 0, Width - 12 * K - chevron, Height), Theme.Text, StringAlignment.Near);
+            Theme.DrawGlyph(g, Glyphs.Chevron, Theme.Px(g, 8f), new RectangleF(Width - chevron, 0, chevron - 6 * K, Height), Theme.TextSecondary);
             FocusRing(g, r, 4 * K);
         }
     }
 
-    // A round icon button (a Segoe Fluent Icons glyph). Primary = filled with the accent colour.
+    // A round icon button. Primary = filled with the accent colour.
     class RoundButton : FluentControl
     {
         string glyph;
@@ -1393,24 +1677,20 @@ namespace WallhavenShuffle
 
         public RoundButton(string glyph, int size, string tip) { this.glyph = glyph; Tip = tip; Size = new Size(size, size); }
 
-        protected override void OnPaint(PaintEventArgs e)
+        protected override void Render(Graphics g)
         {
-            var g = e.Graphics;
-            g.Clear(Theme.Bg);
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
+            var r = new RectangleF(0, 0, Width, Height);
             Color fill, fg;
-            if (Primary) { fill = down ? Theme.Mix(Theme.Accent, Theme.Bg, 0.2) : hover ? Theme.Mix(Theme.Accent, Theme.Text, 0.12) : Theme.Accent; fg = Theme.OnAccent; }
-            else { fill = down ? Theme.Pressed : hover ? Theme.Hover : Theme.Bg; fg = Active ? Theme.Accent : Theme.Text; }
-            if (!Enabled) { fill = Theme.Bg; fg = Theme.TextDisabled; }
-            using (var b = new SolidBrush(fill)) g.FillEllipse(b, r);
-            using (var f = Theme.Icons(Primary ? 14f : 12f))
-                TextRenderer.DrawText(g, glyph, f, ClientRectangle, fg, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
-            if (Focused && ShowFocusCues) using (var p = new Pen(Theme.Text, 1.5f * K)) g.DrawEllipse(p, RectangleF.Inflate(r, -1, -1));
+            if (Primary) { fill = down ? Theme.Mix(Theme.Accent, Color.Black, 0.12) : hover ? Theme.Mix(Theme.Accent, Color.White, 0.12) : Theme.Accent; fg = Theme.OnAccent; }
+            else { fill = down ? Theme.Pressed : hover ? Theme.Hover : Color.Transparent; fg = Active ? Theme.Accent : Theme.Text; }
+            if (!Enabled) { fill = Color.Transparent; fg = Theme.TextDisabled; }
+            if (fill.A > 0) using (var b = new SolidBrush(fill)) g.FillEllipse(b, r);
+            Theme.DrawGlyph(g, glyph, Theme.Px(g, Primary ? 14f : 12f), r, fg);
+            if (Focused && ShowFocusCues) using (var p = new Pen(Theme.Text, 1.5f * K)) g.DrawEllipse(p, RectangleF.Inflate(r, -0.75f * K, -0.75f * K));
         }
     }
 
-    // A menu in the Windows 11 style, with Segoe Fluent Icons glyphs (kept in each item's Tag).
+    // A menu in the Windows 11 style, with icon glyphs (kept in each item's Tag).
     class FluentMenu : ContextMenuStrip
     {
         public FluentMenu()
@@ -1442,13 +1722,13 @@ namespace WallhavenShuffle
         }
 
         protected override void OnHandleCreated(EventArgs e) { base.OnHandleCreated(e); Native.RoundCorners(Handle); }
-        protected override void OnOpening(System.ComponentModel.CancelEventArgs e) { base.OnOpening(e); if (Items.Count > 0 && Items[0].Image == null && ShowImageMargin) RefreshGlyphs(); }
+        protected override void OnOpening(System.ComponentModel.CancelEventArgs e) { base.OnOpening(e); if (ShowImageMargin && Items.Count > 0 && Items[0].Image == null) RefreshGlyphs(); }
     }
 
     // ==================================================================================================== menus
 
-    // Windows 11 style menus: theme colours, rounded highlight, roomy rows. The rounded window corners and the
-    // border come from Windows itself (DWMWA_WINDOW_CORNER_PREFERENCE).
+    // Windows 11 style menus: theme colours, rounded highlight, roomy rows, text centred on the row. The rounded
+    // corners and the border come from Windows itself (DWMWA_WINDOW_CORNER_PREFERENCE).
     class FluentMenuRenderer : ToolStripProfessionalRenderer
     {
         public FluentMenuRenderer() : base(new FluentColors()) { RoundedEdges = false; }
@@ -1467,12 +1747,18 @@ namespace WallhavenShuffle
                 g.FillPath(b, path);
         }
 
-        // Text centred on the whole row (the default lays it out a little high).
         protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
         {
+            e.Graphics.TextRenderingHint = TextRenderingHint.ClearTypeGridFit; // the menu is opaque: ClearType is fine
             var color = e.Item.Enabled ? Theme.Text : Theme.TextDisabled;
-            var r = new Rectangle(e.TextRectangle.X, 0, e.Item.Width - e.TextRectangle.X, e.Item.Height);
-            Theme.DrawText(e.Graphics, e.Text, e.TextFont, r, color, TextFormatFlags.Left);
+            Theme.DrawText(e.Graphics, e.Text, e.TextFont, new RectangleF(e.TextRectangle.X, 0, e.Item.Width - e.TextRectangle.X, e.Item.Height), color, StringAlignment.Near);
+        }
+
+        protected override void OnRenderItemImage(ToolStripItemImageRenderEventArgs e)
+        {
+            if (e.Image == null) return;
+            var r = e.ImageRectangle; // centred on the row, like the text
+            e.Graphics.DrawImage(e.Image, r.X, (e.Item.Height - e.Image.Height) / 2, e.Image.Width, e.Image.Height);
         }
 
         protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e)
@@ -1486,11 +1772,12 @@ namespace WallhavenShuffle
             var g = e.Graphics;
             float k = Theme.Scale;
             var r = e.ImageRectangle;
-            if (e.Item.Image != null) { g.DrawImage(e.Item.Image, r); return; } // the glyph shows the state (accent when on)
+            if (e.Item.Image != null) { g.DrawImage(e.Item.Image, r); return; }
             // The selected choice: a small accent pill, as in Windows 11 lists.
             g.SmoothingMode = SmoothingMode.AntiAlias;
+            float h = (float)Math.Round(16 * k);
             using (var b = new SolidBrush(Theme.Accent))
-            using (var path = Theme.Rounded(new RectangleF(r.X - 2 * k, r.Y + r.Height / 2f - 8 * k, 3 * k, 16 * k), 1.5f * k))
+            using (var path = Theme.Rounded(new RectangleF(r.X - 2 * k, (e.Item.Height - h) / 2, 3 * k, h), 1.5f * k))
                 g.FillPath(b, path);
         }
 
@@ -1498,18 +1785,18 @@ namespace WallhavenShuffle
 
         class FluentColors : ProfessionalColorTable
         {
-            public override Color MenuItemSelected { get { return Theme.Hover; } }
+            public override Color MenuItemSelected { get { return Theme.Menu; } }
             public override Color MenuItemBorder { get { return Color.Transparent; } }
             public override Color MenuBorder { get { return Theme.Menu; } }
             public override Color ToolStripDropDownBackground { get { return Theme.Menu; } }
             public override Color ImageMarginGradientBegin { get { return Theme.Menu; } }
             public override Color ImageMarginGradientMiddle { get { return Theme.Menu; } }
             public override Color ImageMarginGradientEnd { get { return Theme.Menu; } }
-            public override Color SeparatorDark { get { return Theme.Divider; } }
-            public override Color SeparatorLight { get { return Theme.Divider; } }
+            public override Color SeparatorDark { get { return Theme.Menu; } }
+            public override Color SeparatorLight { get { return Theme.Menu; } }
             public override Color CheckBackground { get { return Theme.Menu; } }
-            public override Color CheckSelectedBackground { get { return Theme.Hover; } }
-            public override Color CheckPressedBackground { get { return Theme.Hover; } }
+            public override Color CheckSelectedBackground { get { return Theme.Menu; } }
+            public override Color CheckPressedBackground { get { return Theme.Menu; } }
         }
     }
 }
