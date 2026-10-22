@@ -13,9 +13,10 @@ A small tray app that changes the desktop wallpaper every few minutes from a wal
 - It follows Windows' light or dark theme and your accent colour.
 
 **Use it**
-- Click the tray icon to open the window. It shows the wallpaper, the controls ♡ ⏮ ⏯ ⏭ ⋯, and five settings that
-  apply right away.
-- Right-click the tray icon for the everyday actions.
+- **Double-click** the tray icon for the next wallpaper.
+- **Right-click** it for the everyday actions and **Open Wallhaven Shuffle**: a Windows 11 style flyout with the
+  wallpaper, the controls ♡ ⏮ ⏯ ⏭ ⋯, and five settings that apply right away. Click anywhere else or press Esc to
+  close it.
 - Hotkeys:
 
   | Keys | Action |

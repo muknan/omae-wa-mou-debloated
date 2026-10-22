@@ -79,13 +79,13 @@ namespace WallhavenShuffle
             return state == 2 || state == 3 || state == 4 || state == 7; // busy, D3D full screen, presentation, store app
         }
 
-        // Windows 11 window chrome: dark/light title bar in the window's own colour, rounded corners.
-        public static void StyleWindow(IntPtr hwnd, bool dark, Color caption)
+        // Windows 11 flyout chrome: rounded corners and a thin border drawn by Windows.
+        public static void StyleFlyout(IntPtr hwnd, bool dark, Color border)
         {
-            int on = dark ? 1 : 0, round = 2, color = caption.R | (caption.G << 8) | (caption.B << 16);
+            int on = dark ? 1 : 0, round = 2, color = border.R | (border.G << 8) | (border.B << 16);
             DwmSetWindowAttribute(hwnd, 20, ref on, 4);     // DWMWA_USE_IMMERSIVE_DARK_MODE
             DwmSetWindowAttribute(hwnd, 33, ref round, 4);  // DWMWA_WINDOW_CORNER_PREFERENCE: round
-            DwmSetWindowAttribute(hwnd, 35, ref color, 4);  // DWMWA_CAPTION_COLOR
+            DwmSetWindowAttribute(hwnd, 34, ref color, 4);  // DWMWA_BORDER_COLOR
         }
 
         public static void RoundCorners(IntPtr hwnd)
@@ -163,7 +163,7 @@ namespace WallhavenShuffle
     {
         public static bool Dark;
         public static float Scale = 1f;
-        public static Color Accent, OnAccent, Bg, Card, CardBorder, Field, FieldBorder, Text, TextSecondary, TextDisabled, Hover, Pressed, Divider, Menu;
+        public static Color Accent, OnAccent, Bg, Card, CardBorder, Field, FieldBorder, Text, TextSecondary, TextDisabled, Hover, Pressed, Divider, Menu, FlyoutBorder;
         static string bodyFamily, displayFamily, iconFamily;
 
         public static void Load()
@@ -187,7 +187,7 @@ namespace WallhavenShuffle
                 Field = Color.FromArgb(55, 55, 55); FieldBorder = Color.FromArgb(70, 70, 70);
                 Text = Color.White; TextSecondary = Color.FromArgb(200, 200, 200); TextDisabled = Color.FromArgb(120, 120, 120);
                 Hover = Color.FromArgb(58, 58, 58); Pressed = Color.FromArgb(50, 50, 50); Divider = Color.FromArgb(56, 56, 56);
-                Menu = Color.FromArgb(44, 44, 44);
+                Menu = Color.FromArgb(44, 44, 44); FlyoutBorder = Color.FromArgb(62, 62, 62);
             }
             else
             {
@@ -195,7 +195,7 @@ namespace WallhavenShuffle
                 Field = Color.White; FieldBorder = Color.FromArgb(214, 214, 214);
                 Text = Color.FromArgb(26, 26, 26); TextSecondary = Color.FromArgb(96, 96, 96); TextDisabled = Color.FromArgb(160, 160, 160);
                 Hover = Color.FromArgb(234, 234, 234); Pressed = Color.FromArgb(225, 225, 225); Divider = Color.FromArgb(229, 229, 229);
-                Menu = Color.FromArgb(249, 249, 249);
+                Menu = Color.FromArgb(249, 249, 249); FlyoutBorder = Color.FromArgb(214, 214, 214);
             }
             if (bodyFamily != null) return;
             var families = new HashSet<string>(new InstalledFontCollection().Families.Select(f => f.Name));
@@ -207,6 +207,39 @@ namespace WallhavenShuffle
         public static Font Body(float size) { return new Font(bodyFamily, size); }
         public static Font Strong(float size) { return new Font(displayFamily, size, FontStyle.Bold); }
         public static Font Icons(float size) { return new Font(iconFamily, size); }
+
+        // GDI centres the whole line box (with room for accents and descenders), which sits Segoe UI Variable's
+        // capitals a pixel or two high. This measures, once per font, how far to move text down so that the
+        // capitals sit exactly in the middle, and draws single-line text that way.
+        static readonly Dictionary<string, int> nudges = new Dictionary<string, int>();
+        public static int Nudge(Font f)
+        {
+            string key = f.Name + "|" + f.SizeInPoints + "|" + f.Style;
+            int n;
+            if (nudges.TryGetValue(key, out n)) return n;
+            int h = f.Height * 3, w = f.Height * 3;
+            using (var bmp = new Bitmap(w, h))
+            {
+                using (var g = Graphics.FromImage(bmp))
+                {
+                    g.Clear(Color.White);
+                    TextRenderer.DrawText(g, "H", f, new Rectangle(0, 0, w, h), Color.Black, TextFormatFlags.VerticalCenter | TextFormatFlags.HorizontalCenter | TextFormatFlags.SingleLine);
+                }
+                int top = -1, bottom = -1;
+                for (int y = 0; y < h; y++)
+                    for (int x = 0; x < w; x++)
+                        if (bmp.GetPixel(x, y).R < 128) { if (top < 0) top = y; bottom = y; break; }
+                n = top < 0 ? 0 : (int)Math.Round(h / 2.0 - (top + bottom + 1) / 2.0);
+            }
+            nudges[key] = n;
+            return n;
+        }
+
+        public static void DrawText(Graphics g, string text, Font f, Rectangle r, Color color, TextFormatFlags align)
+        {
+            r.Offset(0, Nudge(f));
+            TextRenderer.DrawText(g, text, f, r, color, align | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+        }
 
         public static Color Mix(Color a, Color b, double t)
         {
@@ -314,7 +347,7 @@ namespace WallhavenShuffle
             try
             {
                 File.WriteAllLines(FilePath, new[] {
-                    "# Wallhaven Shuffle settings. Most are in the app (click the tray icon); ListUrl and MinFavorites only here.",
+                    "# Wallhaven Shuffle settings. Most are in the app (right-click the tray icon); ListUrl and MinFavorites only here.",
                     "# ListUrl: a wallhaven-shuffle /api/list address. Saved changes apply within a few seconds.",
                     "IntervalSeconds=" + IntervalSeconds, "Position=" + Position, "MinFavorites=" + MinFavorites,
                     "PauseFullScreen=" + (PauseFullScreen ? "1" : "0"), "PauseOnBattery=" + (PauseOnBattery ? "1" : "0"),
@@ -383,7 +416,7 @@ namespace WallhavenShuffle
 
             tray.Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
             tray.ContextMenuStrip = BuildMenu();
-            tray.MouseClick += (s, e) => { if (e.Button == MouseButtons.Left) ShowMainWindow(); };
+            tray.MouseDoubleClick += (s, e) => { if (e.Button == MouseButtons.Left) Next("double-click"); }; // the window: right-click menu
             tray.Visible = true;
 
             clock.Interval = 1000;
@@ -887,7 +920,7 @@ namespace WallhavenShuffle
         readonly TrayApp app;
         readonly Settings s;
         readonly Preview preview = new Preview();
-        readonly Label status = new Label { AutoSize = false, TextAlign = ContentAlignment.MiddleCenter };
+        readonly TextLine status = new TextLine();
         readonly RoundButton favBtn = new RoundButton(Glyphs.Heart, 40, "Save to favourites  (Ctrl+Alt+Shift+F)");
         readonly RoundButton prevBtn = new RoundButton(Glyphs.Previous, 44, "Previous  (Ctrl+Alt+Shift+←)");
         readonly RoundButton playBtn = new RoundButton(Glyphs.Pause, 56, "Pause  (Ctrl+Alt+Shift+P)") { Primary = true };
@@ -908,10 +941,10 @@ namespace WallhavenShuffle
             Text = "Wallhaven Shuffle";
             Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
             Font = Theme.Body(10f);
-            FormBorderStyle = FormBorderStyle.FixedSingle;
-            MaximizeBox = false; MinimizeBox = false;
+            FormBorderStyle = FormBorderStyle.None;  // a flyout like Quick Settings: no title bar, closes when you click away
             StartPosition = FormStartPosition.Manual;
-            ShowInTaskbar = true;
+            ShowInTaskbar = false;
+            TopMost = true;
 
             int y = Gutter, inner = W - 2 * Gutter;
             preview.Bounds = new Rectangle(Gutter, y, inner, inner * 9 / 16); y = preview.Bottom + 14;
@@ -999,17 +1032,32 @@ namespace WallhavenShuffle
             Location = new Point(area.Right - Width - m, Math.Max(area.Top, area.Bottom - Height - m));
         }
 
+        protected override CreateParams CreateParams
+        {
+            get { var cp = base.CreateParams; cp.ClassStyle |= 0x20000; return cp; } // CS_DROPSHADOW, as menus and flyouts have
+        }
+
         protected override void OnHandleCreated(EventArgs e)
         {
             base.OnHandleCreated(e);
-            Native.StyleWindow(Handle, Theme.Dark, Theme.Bg);
+            Native.StyleFlyout(Handle, Theme.Dark, Theme.FlyoutBorder);
+        }
+
+        // Clicking anywhere else closes it (but not while one of its own menus is open).
+        protected override void OnDeactivate(EventArgs e)
+        {
+            base.OnDeactivate(e);
+            BeginInvoke(new Action(delegate
+            {
+                if (IsDisposed || ActiveForm == this || moreMenu.Visible || every.MenuOpen || fit.MenuOpen) return;
+                Close();
+            }));
         }
 
         public void ApplyTheme()
         {
             BackColor = Theme.Bg; ForeColor = Theme.Text;
-            status.BackColor = Theme.Bg; status.ForeColor = Theme.TextSecondary;
-            if (IsHandleCreated) Native.StyleWindow(Handle, Theme.Dark, Theme.Bg);
+            if (IsHandleCreated) Native.StyleFlyout(Handle, Theme.Dark, Theme.FlyoutBorder);
             foreach (Control c in AllControls(this)) c.Invalidate();
             Invalidate();
         }
@@ -1090,6 +1138,18 @@ namespace WallhavenShuffle
         }
     }
 
+    // One line of secondary text, centred.
+    class TextLine : Control
+    {
+        public TextLine() { SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true); }
+        protected override void OnTextChanged(EventArgs e) { Invalidate(); base.OnTextChanged(e); }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.Clear(Theme.Bg);
+            Theme.DrawText(e.Graphics, Text, Font, ClientRectangle, Theme.TextSecondary, TextFormatFlags.HorizontalCenter);
+        }
+    }
+
     // The current wallpaper, rounded like a Windows 11 card, with resolution and favourites in a small pill.
     // Keeps a downscaled copy only (a 4K bitmap is 33 MB).
     class Preview : Control
@@ -1150,18 +1210,17 @@ namespace WallhavenShuffle
                 {
                     using (var b = new LinearGradientBrush(ClientRectangle, Theme.Mix(Theme.Accent, Theme.Bg, 0.55), Theme.Mix(Theme.Accent, Theme.Bg, 0.85), 120f))
                         g.FillRectangle(b, ClientRectangle);
-                    TextRenderer.DrawText(g, "Your wallpaper will show up here", Font, ClientRectangle, Theme.TextSecondary, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                    Theme.DrawText(g, "Your wallpaper will show up here", Font, ClientRectangle, Theme.TextSecondary, TextFormatFlags.HorizontalCenter);
                 }
                 if (overlay != null)
                     using (var f = Theme.Strong(9f))
                     {
-                        var flags = TextFormatFlags.NoPadding | TextFormatFlags.SingleLine;
-                        Size ts = TextRenderer.MeasureText(g, overlay, f, Size.Empty, flags);
-                        var pill = new RectangleF(12 * k, Height - 12 * k - ts.Height - 10 * k, ts.Width + 22 * k, ts.Height + 10 * k);
-                        using (var pp = Theme.Rounded(pill, pill.Height / 2))
+                        Size ts = TextRenderer.MeasureText(g, overlay, f, Size.Empty, TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
+                        var pill = new Rectangle((int)(12 * k), (int)(Height - 12 * k - 28 * k), (int)(ts.Width + 24 * k), (int)(28 * k));
+                        using (var pp = Theme.Rounded(pill, pill.Height / 2f))
                         using (var b = new SolidBrush(Color.FromArgb(150, 0, 0, 0)))
                             g.FillPath(b, pp);
-                        TextRenderer.DrawText(g, overlay, f, new Point((int)(pill.X + 11 * k), (int)(pill.Y + 5 * k)), Color.White, flags);
+                        Theme.DrawText(g, overlay, f, pill, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPadding);
                     }
                 g.ResetClip();
                 using (var pen = new Pen(Color.FromArgb(Theme.Dark ? 30 : 24, Theme.Dark ? Color.White : Color.Black))) g.DrawPath(pen, path);
@@ -1231,7 +1290,7 @@ namespace WallhavenShuffle
             float k = Theme.Scale;
             g.Clear(Theme.Card);
             var text = new Rectangle((int)(20 * k), 0, control.Left - (int)(32 * k), Height);
-            TextRenderer.DrawText(g, Text, Font, text, Theme.Text, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            Theme.DrawText(g, Text, Font, text, Theme.Text, TextFormatFlags.Left);
             if (divider) using (var pen = new Pen(Theme.Divider)) g.DrawLine(pen, 0, 0, Width, 0);
         }
     }
@@ -1252,7 +1311,7 @@ namespace WallhavenShuffle
             g.SmoothingMode = SmoothingMode.AntiAlias;
             float w = 40 * K, h = 20 * K;
             var r = new RectangleF(Width - w - 4 * K, (Height - h) / 2, w, h);
-            TextRenderer.DrawText(g, on ? "On" : "Off", Font, new Rectangle(0, 0, (int)(r.X - 10 * K), Height), Theme.Text, TextFormatFlags.Right | TextFormatFlags.VerticalCenter);
+            Theme.DrawText(g, on ? "On" : "Off", Font, new Rectangle(0, 0, (int)(r.X - 10 * K), Height), Theme.Text, TextFormatFlags.Right);
             using (var path = Theme.Rounded(r, h / 2))
             {
                 if (on) using (var b = new SolidBrush(hover ? Theme.Mix(Theme.Accent, Theme.Text, 0.1) : Theme.Accent)) g.FillPath(b, path);
@@ -1275,6 +1334,7 @@ namespace WallhavenShuffle
         public readonly List<KeyValuePair<string, object>> Items = new List<KeyValuePair<string, object>>();
         public event EventHandler Changed;
         int index = -1;
+        public bool MenuOpen;
         public object Value { get { return index >= 0 ? Items[index].Value : null; } }
 
         public void SelectValue(object value)
@@ -1296,7 +1356,8 @@ namespace WallhavenShuffle
                 item.Click += delegate { if (index == n) return; index = n; Invalidate(); if (Changed != null) Changed(this, EventArgs.Empty); };
                 menu.Items.Add(item);
             }
-            menu.Closed += delegate { BeginInvoke(new Action(menu.Dispose)); };
+            menu.Closed += delegate { MenuOpen = false; BeginInvoke(new Action(menu.Dispose)); };
+            MenuOpen = true;
             menu.MinimumSize = new Size(Width, 0);
             menu.Show(this, new Point(0, Height + (int)(4 * K)));
         }
@@ -1315,7 +1376,7 @@ namespace WallhavenShuffle
                 g.DrawPath(pen, path);
             }
             string text = index >= 0 ? Items[index].Key : "";
-            TextRenderer.DrawText(g, text, Font, new Rectangle((int)(12 * K), 0, Width - (int)(40 * K), Height), Theme.Text, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            Theme.DrawText(g, text, Font, new Rectangle((int)(12 * K), 0, Width - (int)(40 * K), Height), Theme.Text, TextFormatFlags.Left);
             using (var f = Theme.Icons(8f))
                 TextRenderer.DrawText(g, Glyphs.Chevron, f, new Rectangle(Width - (int)(32 * K), 0, (int)(20 * K), Height), Theme.TextSecondary, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
             FocusRing(g, r, 4 * K);
@@ -1406,11 +1467,12 @@ namespace WallhavenShuffle
                 g.FillPath(b, path);
         }
 
+        // Text centred on the whole row (the default lays it out a little high).
         protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
         {
-            bool shortcut = e.TextRectangle.X > e.Item.Width / 2; // the shortcut column, drawn dimmer
-            e.TextColor = !e.Item.Enabled ? Theme.TextDisabled : shortcut ? Theme.TextSecondary : Theme.Text;
-            base.OnRenderItemText(e);
+            var color = e.Item.Enabled ? Theme.Text : Theme.TextDisabled;
+            var r = new Rectangle(e.TextRectangle.X, 0, e.Item.Width - e.TextRectangle.X, e.Item.Height);
+            Theme.DrawText(e.Graphics, e.Text, e.TextFont, r, color, TextFormatFlags.Left);
         }
 
         protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e)
