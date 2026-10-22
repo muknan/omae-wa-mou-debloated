@@ -646,7 +646,7 @@ namespace WallhavenShuffle
             menu.Add("Next wallpaper", Glyphs.Next, delegate { Next("menu"); });
             menu.Add("Previous wallpaper", Glyphs.Previous, delegate { Previous(); });
             favouriteItem = menu.Add("Save to favourites", Glyphs.Heart, delegate { Favourite(); });
-            menu.Items.Add(new ToolStripSeparator());
+            menu.AddSeparator();
             menu.Add("Open Wallhaven Shuffle", Glyphs.Settings, delegate { ShowMainWindow(); });
             menu.Add("Exit", Glyphs.Power, delegate { Close(); });
             menu.Opening += delegate
@@ -1208,7 +1208,7 @@ namespace WallhavenShuffle
             hideItem = moreMenu.Add("Never show this one", Glyphs.Hide, delegate { app.Block(); });
             openItem = moreMenu.Add("Open on Wallhaven", Glyphs.Open, delegate { app.OpenOnWallhaven(); });
             moreMenu.Add("Open favourites folder", Glyphs.Folder, delegate { app.OpenFavourites(); });
-            moreMenu.Items.Add(new ToolStripSeparator());
+            moreMenu.AddSeparator();
             moreMenu.Add("Restore my original wallpaper", Glyphs.Restore, delegate { app.RestoreOriginal(); });
             moreMenu.Add("Advanced settings", Glyphs.Edit, delegate { app.EditAdvanced(); });
             moreMenu.Opening += delegate { hideItem.Enabled = openItem.Enabled = app.Current != null; moreMenu.RefreshGlyphs(); };
@@ -1606,7 +1606,7 @@ namespace WallhavenShuffle
             for (int i = 0; i < Items.Count; i++)
             {
                 int n = i;
-                var item = new ToolStripMenuItem(Items[i].Key) { Checked = i == index, Padding = new Padding(4, 7, 4, 7) };
+                var item = new ToolStripMenuItem(Items[i].Key) { Checked = i == index, Padding = FluentMenu.Px(8, 9, 28, 9) };
                 item.Click += delegate { if (index == n) return; index = n; Invalidate(); if (Changed != null) Changed(this, EventArgs.Empty); };
                 menu.Items.Add(item);
             }
@@ -1663,7 +1663,7 @@ namespace WallhavenShuffle
         public FluentMenu()
         {
             Renderer = new FluentMenuRenderer();
-            Padding = new Padding(4, 6, 4, 6);
+            Padding = Px(4, 6, 4, 6);  // ToolStrip spacing isn't scaled for high-DPI screens on its own
             Font = Theme.Body(10f);
             ShowImageMargin = true;
             ShowCheckMargin = false;
@@ -1671,9 +1671,17 @@ namespace WallhavenShuffle
 
         public ToolStripMenuItem Add(string text, string glyph, EventHandler click)
         {
-            var i = new ToolStripMenuItem(text, null, click) { Padding = new Padding(6, 7, 16, 7), Tag = glyph };
+            var i = new ToolStripMenuItem(text, null, click) { Padding = Px(8, 9, 28, 9), Tag = glyph };
             Items.Add(i);
             return i;
+        }
+
+        public void AddSeparator() { Items.Add(new ToolStripSeparator { AutoSize = false, Height = (int)Math.Round(13 * Theme.Scale) }); }
+
+        public static Padding Px(int left, int top, int right, int bottom)
+        {
+            Func<int, int> k = v => (int)Math.Round(v * Theme.Scale);
+            return new Padding(k(left), k(top), k(right), k(bottom));
         }
 
         public void RefreshGlyphs()
@@ -1709,7 +1717,8 @@ namespace WallhavenShuffle
             if (!e.Item.Selected || !e.Item.Enabled) return;
             var g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            using (var path = Theme.Rounded(new RectangleF(2, 1, e.Item.Width - 4, e.Item.Height - 2), 4 * Theme.Scale))
+            float k = Theme.Scale;
+            using (var path = Theme.Rounded(new RectangleF(0, k, e.Item.Width, e.Item.Height - 2 * k), 4 * k))
             using (var b = new SolidBrush(Theme.Hover))
                 g.FillPath(b, path);
         }
@@ -1718,20 +1727,30 @@ namespace WallhavenShuffle
         {
             e.Graphics.TextRenderingHint = TextRenderingHint.ClearTypeGridFit; // the menu is opaque: ClearType is fine
             var color = e.Item.Enabled ? Theme.Text : Theme.TextDisabled;
-            Theme.DrawText(e.Graphics, e.Text, e.TextFont, new RectangleF(e.TextRectangle.X, 0, e.Item.Width - e.TextRectangle.X, e.Item.Height), color, StringAlignment.Near);
+            float x = TextLeft(e.Item);
+            Theme.DrawText(e.Graphics, e.Text, e.TextFont, new RectangleF(x, 0, e.Item.Width - x, e.Item.Height), color, StringAlignment.Near);
         }
 
         protected override void OnRenderItemImage(ToolStripItemImageRenderEventArgs e)
         {
             if (e.Image == null) return;
-            var r = e.ImageRectangle; // centred on the row, like the text
-            e.Graphics.DrawImage(e.Image, r.X, (e.Item.Height - e.Image.Height) / 2, e.Image.Width, e.Image.Height);
+            // 12 px in from the row's edge, centred on the row like the text
+            e.Graphics.DrawImage(e.Image, (int)Math.Round(IconLeft * Theme.Scale), (e.Item.Height - e.Image.Height) / 2, e.Image.Width, e.Image.Height);
+        }
+
+        // Row layout (96-DPI pixels): icon 12 px in, 16 px wide, text 12 px after it; a list without icons
+        // (the dropdowns) has its selection marker at 8 px and its text at 22 px.
+        const int IconLeft = 12;
+        static float TextLeft(ToolStripItem item)
+        {
+            var menu = item.Owner as ToolStripDropDownMenu;
+            return (float)Math.Round((menu != null && menu.ShowImageMargin ? IconLeft + 16 + 12 : 22) * Theme.Scale);
         }
 
         protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e)
         {
             int y = e.Item.Height / 2;
-            using (var p = new Pen(Theme.Divider)) e.Graphics.DrawLine(p, 4, y, e.Item.Width - 4, y);
+            using (var p = new Pen(Theme.Divider)) e.Graphics.DrawLine(p, 0, y, e.Item.Width, y);
         }
 
         protected override void OnRenderItemCheck(ToolStripItemImageRenderEventArgs e)
@@ -1744,7 +1763,7 @@ namespace WallhavenShuffle
             g.SmoothingMode = SmoothingMode.AntiAlias;
             float h = (float)Math.Round(16 * k);
             using (var b = new SolidBrush(Theme.Accent))
-            using (var path = Theme.Rounded(new RectangleF(r.X - 2 * k, (e.Item.Height - h) / 2, 3 * k, h), 1.5f * k))
+            using (var path = Theme.Rounded(new RectangleF((float)Math.Round(8 * k), (e.Item.Height - h) / 2, 3 * k, h), 1.5f * k))
                 g.FillPath(b, path);
         }
 
