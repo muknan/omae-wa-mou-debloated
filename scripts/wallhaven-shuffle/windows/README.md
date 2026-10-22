@@ -41,7 +41,7 @@ powershell -ExecutionPolicy Bypass -File build.ps1      # -> bin\WallhavenShuffl
 ```
 1. Copy `bin\WallhavenShuffle.exe` to a folder you own, for example `%USERPROFILE%\WallhavenShuffle`, and run it.
 2. Set `ListUrl` in Advanced settings, for example:
-   `https://<your-project>.vercel.app/api/list?range=6M&atleast=3840x2160&ratios=16x9,16x10&cats=110&purity=100&fav=50&maxw=0`
+   `https://<your-project>.vercel.app/api/list?range=1y&atleast=3840x2160&ratios=16x9,16x10&cats=110&purity=100&fav=50&maxw=0`
    (`maxw=0`: a PC handles 5K/8K fine).
 3. "Start with Windows" is switched on at the first run.
 

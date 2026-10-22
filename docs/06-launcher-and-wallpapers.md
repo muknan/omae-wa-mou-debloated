@@ -85,11 +85,20 @@ environment variables:
 | `MIN_FAVORITES` | `0` | skip wallpapers with fewer favourites (the toplist is every upload, ranked) |
 
 The toplist is really every upload in the range, ranked, so the bottom half is weak (median ~16 favourites).
-A good balance, measured for General + Anime, SFW: **`TOP_RANGE=6M`, `ATLEAST=3840x2160`, `RATIOS=16x9,16x10`,
-`MIN_FAVORITES=50`, `MAX_WIDTH=3840`**: about 300 wallpapers for the TV, a full pass every ~12 hours. With a
-favourites minimum the list stops reading once two pages in a row have none left that qualify. Why these ratios:
-16:9 fills a TV and 16:10 fills most laptops. With "Fill", either one crops only a sliver on the other kind of
-screen. 21:9, 4:3 and 5:4 lose a quarter or more of the picture.
+Measured for General + Anime, SFW, 4K and up, 16:9 + 16:10, with at least 50 favourites:
+
+| Range | Laptop (any width) | TV (up to 3840 wide) | TV full rotation |
+|---|---|---|---|
+| `6M` | 562 | 309 | ~12 h |
+| `1y` | 1,180 | 668 | ~26 h |
+
+**`TOP_RANGE=1y`, `ATLEAST=3840x2160`, `RATIOS=16x9,16x10`, `MIN_FAVORITES=50`, `MAX_WIDTH=3840`** gives the most
+variety at that quality bar. With a favourites minimum, the list stops reading once four pages in a row have none
+left that qualify. The first build of a 1-year list reads about 100 pages, so it takes a few minutes; after that it
+is cached. Each hourly set of 23-24 never repeats the set before it. The one exception is right after the list
+refreshes, when the next set can repeat 1-4. Why these ratios: 16:9 fills a TV and 16:10 fills most laptops. With
+"Fill", either one crops only a sliver on the other kind of screen. 21:9, 4:3 and 5:4 lose a quarter or more of
+the picture.
 
 Every setting can also go in the address, which wins over the variables:
 `/api/v1/search?atleast=3840x2160&ratios=16x9,16x10&fav=50&maxw=3840` (the same works for `/api/list`).
