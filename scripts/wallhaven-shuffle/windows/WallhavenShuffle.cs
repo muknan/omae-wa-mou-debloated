@@ -479,7 +479,7 @@ namespace WallhavenShuffle
         {
             try
             {
-                File.WriteAllLines(FilePath, new[] {
+                TrayApp.WriteFileSafely(FilePath, string.Join(Environment.NewLine, new[] {
                     "# Wallhaven Shuffle settings. Most are in the app (right-click the tray icon); ListUrl and MinFavorites only here.",
                     "# ListUrl: a wallhaven-shuffle /api/list address. Saved changes apply within a few seconds.",
                     "IntervalSeconds=" + IntervalSeconds, "Position=" + Position, "MinFavorites=" + MinFavorites,
@@ -487,7 +487,7 @@ namespace WallhavenShuffle
                     "Paused=" + (Paused ? "1" : "0"), "StartupDone=" + (StartupDone ? "1" : "0"), "ListUrl=" + ListUrl,
                     "OriginalWallpaper=" + OriginalWallpaper, "OriginalStyle=" + OriginalStyle, "OriginalTile=" + OriginalTile,
                     "# Downloaded originals are kept here (empty = a cache folder next to the app), up to CacheLimitGB.",
-                    "CacheDir=" + CacheDir, "CacheLimitGB=" + CacheLimitGB, "LockScreen=" + (LockScreen ? "1" : "0") });
+                    "CacheDir=" + CacheDir, "CacheLimitGB=" + CacheLimitGB, "LockScreen=" + (LockScreen ? "1" : "0") }) + Environment.NewLine);
                 Stamp = File.GetLastWriteTimeUtc(FilePath);
             }
             catch (IOException) { }
@@ -518,7 +518,10 @@ namespace WallhavenShuffle
         int historyPos = -1;                 // position in history while going back with "Previous"
         Wall current, prepared;
         DateTime nextChange = DateTime.Now.AddSeconds(3), nextListRefresh = DateTime.MinValue;
-        bool busy, locked;
+        bool busy, locked;                   // busy = a wallpaper change is under way
+        bool listBusy;                       // the list is being downloaded (doesn't hold up changes)
+        DateTime busySince, listBusySince;
+        int lockScreenBusy;                  // a lock screen update is under way (they run on the side)
         string lastError = "";
         MainWindow window;
 
@@ -549,7 +552,13 @@ namespace WallhavenShuffle
                 }
                 settings.Save();
             }
-            if (!settings.StartupDone) { SetStartup(true); settings.StartupDone = true; settings.Save(); } // on by default
+            if (!settings.StartupDone)
+            {
+                // On by default, but never taking over another copy's entry (a second copy elsewhere, e.g. a fresh
+                // build, would otherwise redirect "Start with Windows" to itself).
+                if (StartupEntry() == null || !File.Exists(StartupEntry())) SetStartup(true);
+                settings.StartupDone = true; settings.Save();
+            }
             // Windows re-encodes every wallpaper as a JPEG at quality 85 (a 5 MB original ends up around 1 MB, with
             // banding in dark gradients) unless JPEGImportQuality says otherwise. 100 keeps the original's quality.
             using (var k = Registry.CurrentUser.OpenSubKey(@"Control Panel\Desktop", true))
@@ -569,6 +578,7 @@ namespace WallhavenShuffle
             clock.Start();
             SystemEvents.SessionSwitch += OnSessionSwitch;
             SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
+            SystemEvents.PowerModeChanged += OnPowerModeChanged;
             UpdateTooltip();
             Log("started");
             if (string.IsNullOrEmpty(settings.ListUrl)) BeginInvoke(new Action(ShowMainWindow)); // first run: needs a source
@@ -586,7 +596,7 @@ namespace WallhavenShuffle
         public string Status()
         {
             if (string.IsNullOrEmpty(settings.ListUrl)) return "Add a source: ⋯ > Advanced settings";
-            if (walls.Count == 0) return string.IsNullOrEmpty(lastError) ? "Loading the wallpaper list…" : "Can't reach the source right now, retrying";
+            if (walls.Count == 0) return listBusy || string.IsNullOrEmpty(lastError) ? "Loading the wallpaper list…" : "Can't reach the source right now, retrying";
             if (settings.Paused) return "Paused";
             if (busy) return "Changing…";
             string hold = HoldReason();
@@ -668,8 +678,12 @@ namespace WallhavenShuffle
             UpdateTooltip();
             ReloadIfEdited();
             if (window != null && !window.IsDisposed && window.Visible) window.Tick();
-            if (busy || string.IsNullOrEmpty(settings.ListUrl)) return;
-            if (DateTime.Now >= nextListRefresh) { RefreshListAsync(); return; }
+            // Watchdog: every step has its own time limit, but nothing may keep the app stuck.
+            if (busy && DateTime.Now - busySince > TimeSpan.FromMinutes(2)) { busy = false; Log("a change took over 2 minutes; carrying on"); nextChange = DateTime.Now; }
+            if (listBusy && DateTime.Now - listBusySince > TimeSpan.FromMinutes(6)) { listBusy = false; Log("the list download took over 6 minutes; carrying on"); }
+            if (string.IsNullOrEmpty(settings.ListUrl)) return;
+            if (!listBusy && DateTime.Now >= nextListRefresh) RefreshListAsync();   // in the background; changes go on
+            if (busy || walls.Count == 0) return;
             if (settings.Paused || DateTime.Now < nextChange) return;
             if (HoldReason() != null) { nextChange = DateTime.Now.AddSeconds(15); return; } // try again shortly
             Next("timer");
@@ -717,7 +731,8 @@ namespace WallhavenShuffle
 
         void RefreshListAsync()
         {
-            busy = true;
+            if (listBusy || string.IsNullOrEmpty(settings.ListUrl)) return;
+            listBusy = true; listBusySince = DateTime.Now;
             nextListRefresh = DateTime.Now.AddHours(1);
             string url = settings.ListUrl;
             ThreadPool.QueueUserWorkItem(delegate
@@ -726,7 +741,7 @@ namespace WallhavenShuffle
                 try { json = Download(url); } catch (Exception ex) { error = ex.Message; }
                 BeginInvoke(new Action(delegate
                 {
-                    busy = false;
+                    listBusy = false;
                     if (json != null)
                     {
                         bool complete;
@@ -734,7 +749,7 @@ namespace WallhavenShuffle
                         if (list.Count > 0 && (complete || list.Count >= walls.Count))
                         {
                             walls = list; listComplete = complete; lastError = "";
-                            File.WriteAllText(ListCache, json);
+                            WriteFileSafely(ListCache, json);
                             Log("list: " + list.Count + " wallpapers" + (complete ? "" : " (partial)"));
                         }
                         else if (list.Count > 0)
@@ -751,7 +766,7 @@ namespace WallhavenShuffle
                     }
                     Changed();
                     bool due = current == null || !File.Exists(CachePath(current)) || DateTime.Now >= nextChange;
-                    if (walls.Count > 0 && due && !settings.Paused && HoldReason() == null) Next("start");
+                    if (walls.Count > 0 && due && !busy && !settings.Paused && HoldReason() == null) Next("start");
                 }));
             });
         }
@@ -817,6 +832,7 @@ namespace WallhavenShuffle
         public void Next(string why)
         {
             if (busy) return;
+            if (string.IsNullOrEmpty(settings.ListUrl)) { ShowMainWindow(); return; }   // nothing to show yet: say where to add a source
             Log("next (" + why + ")");
             if (historyPos >= 0 && historyPos < history.Count - 1)
             {
@@ -828,7 +844,7 @@ namespace WallhavenShuffle
             historyPos = -1;
             var next = prepared ?? PickNext();
             prepared = null;
-            if (next == null) { if (walls.Count == 0) RefreshListAsync(); return; }
+            if (next == null) { RefreshListAsync(); return; }
             ShowWall(next, true);
         }
 
@@ -844,22 +860,32 @@ namespace WallhavenShuffle
 
         void ShowWall(Wall w, bool isNew)
         {
-            busy = true;
+            busy = true; busySince = DateTime.Now;
             Changed();
             string position = settings.Position;
             bool fade = Native.AnimationsOn(); // Windows cross-fades when "Animation effects" is on
             bool lockScreen = settings.LockScreen;
+            // If this one can't be downloaded (offline, e.g. just after waking up), one already on disk is used instead.
+            // Unseen ones first; if every cached one was shown this round already, any of them (but not the current one).
+            string cur = current == null ? null : current.Id;
+            var spare = isNew ? Pool().Where(x => x.Id != w.Id && x.Id != cur && File.Exists(CachePath(x)))
+                .OrderBy(x => seen.Contains(x.Id) ? 1 : 0).ThenBy(x => rng.Next()).Take(5).ToList() : new List<Wall>();
             ThreadPool.QueueUserWorkItem(delegate
             {
-                string error = null, how = "instant";
+                string error = null, how = "", file = null;
+                Wall shown = w;
                 try
                 {
-                    string file = Fetch(w);
+                    try { file = Fetch(w); }
+                    catch (Exception ex)
+                    {
+                        shown = spare.FirstOrDefault(x => File.Exists(CachePath(x)));
+                        if (shown == null) throw;
+                        file = CachePath(shown);
+                        how = "offline (" + w.Id + ": " + ex.Message + "), from the cache: ";
+                    }
                     Native.SetWallpaper(file, position);
-                    if (fade) how = "fade";
-                    if (lockScreen)
-                        try { LockScreenPicture.Set(file); how += " + lock screen"; }
-                        catch (Exception ex) { how += " (lock screen failed: " + (ex.InnerException ?? ex).Message + ")"; }
+                    how += fade ? "fade" : "instant";
                 }
                 catch (Exception ex) { error = ex.Message; }
                 BeginInvoke(new Action(delegate
@@ -868,19 +894,35 @@ namespace WallhavenShuffle
                     nextChange = DateTime.Now.AddSeconds(error == null ? settings.IntervalSeconds : 30);
                     if (error != null) { lastError = error; Log("change failed (" + w.Id + "): " + error); Changed(); return; }
                     lastError = "";
-                    current = w;
-                    Log("wallpaper " + w.Id + " " + how + (isNew ? "" : " (from history)"));
+                    current = shown;
+                    Log("wallpaper " + shown.Id + " " + how + (isNew ? "" : " (from history)"));
                     if (isNew)
                     {
-                        seen.Add(w.Id); WriteList("seen.txt", seen);
-                        history.Add(w.Id);
+                        seen.Add(shown.Id); WriteList("seen.txt", seen);
+                        history.Add(shown.Id);
                         if (history.Count > 100) history.RemoveRange(0, history.Count - 100);
                         WriteList("history.txt", history);
                     }
+                    if (lockScreen) UpdateLockScreen(file);
                     Changed();
                     PrepareNext();
                 }));
             });
+        }
+
+        // The lock screen follows on the side: it can be slow (or hang, just after waking), and must never hold up a
+        // change. One update at a time; if one is still running, this picture is skipped (the next change catches up).
+        void UpdateLockScreen(string file)
+        {
+            if (Interlocked.CompareExchange(ref lockScreenBusy, 1, 0) != 0) return;
+            var t = new Thread(delegate ()
+            {
+                try { LockScreenPicture.Set(file); }
+                catch (Exception ex) { Log("lock screen failed: " + (ex.InnerException ?? ex).Message); }
+                finally { Interlocked.Exchange(ref lockScreenBusy, 0); }
+            });
+            t.IsBackground = true;
+            t.Start();
         }
 
         // Download the next one ahead of time, so the change itself is instant, then tidy the cache.
@@ -951,28 +993,30 @@ namespace WallhavenShuffle
         {
             settings.Save();
             if (!settings.LockScreen || current == null || !File.Exists(CachePath(current))) return;
-            string file = CachePath(current);
-            ThreadPool.QueueUserWorkItem(delegate
-            {
-                try { LockScreenPicture.Set(file); Log("lock screen: " + Path.GetFileName(file)); }
-                catch (Exception ex) { Log("lock screen failed: " + (ex.InnerException ?? ex).Message); }
-            });
+            UpdateLockScreen(CachePath(current));
         }
 
         string CachePath(Wall w) { return Path.Combine(cacheDir, w.Id + w.Extension); }
 
+        // The cached original, downloaded first if needed. The download runs outside the lock, into its own temporary
+        // file, so a slow or dead connection never holds up anything else (another download, the cache tidy-up).
         string Fetch(Wall w)
         {
             string path = CachePath(w);
-            lock (gate)
+            if (File.Exists(path) && new FileInfo(path).Length > 0) return path;
+            string tmp = path + "." + Guid.NewGuid().ToString("N").Substring(0, 8) + ".part";
+            try
             {
-                if (File.Exists(path) && new FileInfo(path).Length > 0) return path;
-                string tmp = path + ".part";
-                using (var wc = NewClient()) wc.DownloadFile(w.Image, tmp);
-                if (File.Exists(path)) File.Delete(path);
-                File.Move(tmp, path);
+                using (var wc = NewClient(30000, 60000)) wc.DownloadFile(w.Image, tmp);
+                lock (gate)
+                {
+                    if (File.Exists(path) && new FileInfo(path).Length > 0) return path;   // another download got there first
+                    if (File.Exists(path)) File.Delete(path);
+                    File.Move(tmp, path);
+                }
+                return path;
             }
-            return path;
+            finally { try { if (File.Exists(tmp)) File.Delete(tmp); } catch (IOException) { } }
         }
 
         // ------------------------------------------------------------------------- actions
@@ -1041,9 +1085,21 @@ namespace WallhavenShuffle
             Changed();
         }
 
+        // The program the "Start with Windows" entry starts, or null.
+        static string StartupEntry()
+        {
+            using (var k = Registry.CurrentUser.OpenSubKey(RunKey))
+            {
+                var v = k == null ? null : k.GetValue(AppName) as string;
+                return string.IsNullOrEmpty(v) ? null : v.Trim().Trim('"');
+            }
+        }
+
+        // On only if the entry starts this very copy.
         static bool StartsWithWindows()
         {
-            using (var k = Registry.CurrentUser.OpenSubKey(RunKey)) return k != null && k.GetValue(AppName) != null;
+            var e = StartupEntry();
+            return e != null && string.Equals(Path.GetFullPath(e), Path.GetFullPath(Application.ExecutablePath), StringComparison.OrdinalIgnoreCase);
         }
 
         public static void SetStartup(bool on)
@@ -1051,7 +1107,7 @@ namespace WallhavenShuffle
             using (var k = Registry.CurrentUser.CreateSubKey(RunKey))
             {
                 if (on) k.SetValue(AppName, "\"" + Application.ExecutablePath + "\"");
-                else if (k.GetValue(AppName) != null) k.DeleteValue(AppName);
+                else if (StartsWithWindows()) k.DeleteValue(AppName);   // only this copy's entry
             }
         }
 
@@ -1059,6 +1115,20 @@ namespace WallhavenShuffle
         {
             if (e.Reason == SessionSwitchReason.SessionLock) locked = true;
             else if (e.Reason == SessionSwitchReason.SessionUnlock) locked = false;
+        }
+
+        // After sleep the network takes a few seconds to come back: change a little later, and refresh the list then.
+        void OnPowerModeChanged(object sender, PowerModeChangedEventArgs e)
+        {
+            if (InvokeRequired) { BeginInvoke(new Action(delegate { OnPowerModeChanged(sender, e); })); return; }
+            if (e.Mode == PowerModes.Suspend) Log("going to sleep");
+            else if (e.Mode == PowerModes.Resume)
+            {
+                Log("woke up");
+                nextChange = DateTime.Now.AddSeconds(10);
+                if (nextListRefresh < DateTime.Now.AddSeconds(30)) nextListRefresh = DateTime.Now.AddSeconds(30);
+                Changed();
+            }
         }
 
         void OnUserPreferenceChanged(object sender, UserPreferenceChangedEventArgs e)
@@ -1073,6 +1143,7 @@ namespace WallhavenShuffle
         {
             SystemEvents.SessionSwitch -= OnSessionSwitch;
             SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
+            SystemEvents.PowerModeChanged -= OnPowerModeChanged;
             for (int i = 1; i <= 4; i++) Native.UnregisterHotKey(Handle, i);
             tray.Visible = false;
             tray.Dispose();
@@ -1082,27 +1153,31 @@ namespace WallhavenShuffle
 
         // ------------------------------------------------------------------------- helpers
 
-        class PatientClient : WebClient
+        // WebClient with time limits: connecting and waiting for the answer (timeout), and each read (readWrite).
+        class TimedClient : WebClient
         {
+            readonly int timeout, readWrite;
+            public TimedClient(int timeout, int readWrite) { this.timeout = timeout; this.readWrite = readWrite; }
             protected override WebRequest GetWebRequest(Uri address)
             {
                 var r = base.GetWebRequest(address);
-                r.Timeout = 300000;
+                r.Timeout = timeout;
                 var http = r as HttpWebRequest;
-                if (http != null) http.ReadWriteTimeout = 300000;
+                if (http != null) http.ReadWriteTimeout = readWrite;
                 return r;
             }
         }
 
-        static WebClient NewClient()
+        static WebClient NewClient(int timeout, int readWrite)
         {
-            var wc = new PatientClient();
+            var wc = new TimedClient(timeout, readWrite);
             wc.Headers[HttpRequestHeader.UserAgent] = "WallhavenShuffle-Windows/2.0";
             wc.Encoding = Encoding.UTF8;
             return wc;
         }
 
-        static string Download(string url) { using (var wc = NewClient()) return wc.DownloadString(url); }
+        // The list: the service may still be putting a cold list together (up to ~4 minutes), so this one waits longer.
+        static string Download(string url) { using (var wc = NewClient(300000, 300000)) return wc.DownloadString(url); }
 
         public static void Open(string target)
         {
@@ -1118,7 +1193,21 @@ namespace WallhavenShuffle
 
         static void WriteList(string name, IEnumerable<string> items)
         {
-            try { File.WriteAllLines(Path.Combine(Settings.Dir, name), items.ToArray()); } catch (IOException) { }
+            WriteFileSafely(Path.Combine(Settings.Dir, name), string.Join(Environment.NewLine, items) + Environment.NewLine);
+        }
+
+        // Writes a new file next to the old one and swaps it in, so a crash or a Windows restart mid-write can't leave
+        // a half-written (or empty) file behind.
+        public static void WriteFileSafely(string path, string text)
+        {
+            string tmp = path + ".new";
+            try
+            {
+                File.WriteAllText(tmp, text);
+                if (File.Exists(path)) File.Replace(tmp, path, null); else File.Move(tmp, path);
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
         }
 
         static readonly object logGate = new object();
@@ -1127,11 +1216,14 @@ namespace WallhavenShuffle
             lock (logGate)
                 try
                 {
+                    // Appended (a restart mid-write costs one line at most), trimmed to the last 300 lines now and then.
                     string p = Path.Combine(Settings.Dir, "log.txt");
-                    var lines = File.Exists(p) ? File.ReadAllLines(p).ToList() : new List<string>();
-                    lines.Add(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " " + msg);
-                    if (lines.Count > 300) lines.RemoveRange(0, lines.Count - 300);
-                    File.WriteAllLines(p, lines.ToArray());
+                    File.AppendAllText(p, DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " " + msg + Environment.NewLine);
+                    if (new FileInfo(p).Length > 64 * 1024)
+                    {
+                        var lines = File.ReadAllLines(p);
+                        WriteFileSafely(p, string.Join(Environment.NewLine, lines.Skip(Math.Max(0, lines.Length - 300))) + Environment.NewLine);
+                    }
                 }
                 catch (IOException) { }
         }

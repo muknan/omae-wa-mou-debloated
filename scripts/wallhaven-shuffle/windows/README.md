@@ -17,6 +17,9 @@ A small tray app that changes the desktop wallpaper every few minutes from a wal
   move over.
 - "Show on the lock screen too" puts each wallpaper on the Windows lock screen as well, through Windows' own lock
   screen API. It replaces Windows Spotlight on the lock screen while it's on.
+- It keeps going when the network doesn't. After sleep it waits a few seconds for Wi-Fi, and a wallpaper that
+  can't be downloaded is swapped for one already in the cache. The list refreshes in the background and never holds
+  up a change.
 - It waits while a game, a full-screen video or a presentation is running, and while the PC is locked. It can also
   wait while on battery.
 - It follows Windows' light or dark theme and your accent colour.
