@@ -1,9 +1,9 @@
 # wallhaven-shuffle
 
-A Wallhaven toplist for Projectivy's Booru wallpaper plugin, 24 wallpapers at a time, shuffled, walking through
+A Wallhaven toplist for Projectivy's Booru wallpaper plugin, a set at a time (`SET_SIZE`, default 24), shuffled, walking through
 the whole list. One dependency-free Vercel function.
 
-- `api/v1/search.js` answers the plugin (`<Booru URL>/api/v1/search?...`) with the current set of 24. It never
+- `api/v1/search.js` answers the plugin (`<Booru URL>/api/v1/search?...`) with the current set. It never
   calls Wallhaven itself.
 - `api/list.js` puts the whole toplist together from the cached pages.
 - `api/page.js` reads one page from Wallhaven; each page is cached by Vercel's CDN on its own.

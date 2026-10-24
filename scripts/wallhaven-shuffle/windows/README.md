@@ -5,7 +5,9 @@ A small tray app that changes the desktop wallpaper every few minutes from a wal
 
 ![icon](icon-preview.png)
 
-- It shows every wallpaper once, in random order, before repeating. The next one is downloaded ahead of time.
+- It shows every wallpaper once per round, in random order, and nothing comes back within 20 changes of itself
+  (also across rounds). The flyout shows where you are ("33 of 1,178"); Previous counts down, Next counts up. The
+  next one is downloaded ahead of time.
 - Each change uses Windows' own smooth cross-fade, the one the built-in slideshow uses, when **Animation effects** is on
   in Settings > Accessibility > Visual effects.
 - Wallpapers stay in their original quality. The app downloads the original file, and sets `JPEGImportQuality` to
@@ -14,7 +16,8 @@ A small tray app that changes the desktop wallpaper every few minutes from a wal
   their turn comes. Files of wallpapers that left the list are deleted, but only after a *complete* list confirms it.
   If the cache reaches its limit (`CacheLimitGB`, 10 GB by default), wallpapers already shown this round go first.
   Set `CacheDir` in Advanced settings to keep the cache on another drive; it applies after a restart and the files
-  move over.
+  move over. If that drive isn't there at start, the app uses the folder next to it until it is. The tidy-up only
+  ever touches its own files (named after the wallpaper id), never anything else in that folder.
 - "Show on the lock screen too" puts each wallpaper on the Windows lock screen as well, through Windows' own lock
   screen API. It replaces Windows Spotlight on the lock screen while it's on.
 - It keeps going when the network doesn't. After sleep it waits a few seconds for Wi-Fi, and a wallpaper that
@@ -27,8 +30,9 @@ A small tray app that changes the desktop wallpaper every few minutes from a wal
 **Use it**
 - **Double-click** the tray icon for the next wallpaper.
 - **Right-click** it for the everyday actions and **Open Wallhaven Shuffle**: an acrylic Windows 11 style flyout with the
-  wallpaper, the controls ♡ ⏮ ⏯ ⏭ ⋯, and five settings that apply right away. Click anywhere else or press Esc to
-  close it.
+  wallpaper, the controls ♡ ⏮ ⏯ ⏭ ⋯, and six settings that apply right away. In the flyout, ← and → also go back
+  and forward, and ↑/↓ change a focused dropdown. Click anywhere else or press Esc to close it.
+- Pressing Next or Previous again while a change is still fading is remembered: it happens right after (up to 5).
 - Hotkeys:
 
   | Keys | Action |
@@ -42,7 +46,9 @@ A small tray app that changes the desktop wallpaper every few minutes from a wal
 - In the **⋯** menu:
   - "Never show this one"
   - "Open on Wallhaven"
-  - "Restore my original wallpaper"
+  - "Show hidden wallpapers again", which undoes every "Never show this one"
+  - "Restore my original wallpaper" (a copy of it is kept next to the app at the first run, since Windows' own copy
+    is replaced with each new wallpaper)
   - **Advanced settings**, which opens `settings.ini` in Notepad. Changes apply a few seconds after you save.
 
 **Build and install**

@@ -15,7 +15,7 @@
 //   .../api/v1/search?atleast=3840x2160&ratios=16x9,16x10&maxw=3840&fav=50  -> any setting as a query parameter
 //   https://<your-app>.vercel.app/r/6M/2560x1440        -> top of the last 6 months, 1440p
 //   https://<your-app>.vercel.app/r/3M/3840x2160/20     -> ... only wallpapers with at least 20 favourites
-import { PER_SET, listParams, listQuery, pageQuery, passes, pickSet, selfUrl } from '../../lib/core.js';
+import { PER_SET, getJson, listParams, listQuery, pageQuery, passes, pickSet, selfUrl } from '../../lib/core.js';
 
 const LIST_WAIT_MS = 5000; // the plugin gives up after ~10 s
 
@@ -33,6 +33,7 @@ async function getList(req, p) {
     if (r && r.ok) {
       const j = await r.json();
       if (j.items?.length >= PER_SET) {
+        if (memory.size >= 16 && !memory.has(key)) memory.delete(memory.keys().next().value); // a few lists at most
         memory.set(key, { until: Date.now() + (j.complete ? 3600e3 : 120e3), items: j.items });
         return j.items;
       }
@@ -49,9 +50,9 @@ export default async function handler(req, res) {
   try {
     const all = await getList(req, p);
     if (!all) { // list not ready yet: the toplist's first page (cached by the CDN like every page)
-      const r = await withTimeout(fetch(selfUrl(req, '/api/page', `${pageQuery(p)}&n=1`)), 4000);
-      if (!r || !r.ok) throw new Error('the list is being built and Wallhaven is not answering right now');
-      const page1 = (await r.json()).data;
+      const r = await getJson(selfUrl(req, '/api/page', `${pageQuery(p)}&n=1`), 4000);
+      const page1 = r?.json?.data;
+      if (!Array.isArray(page1) || !page1.length) throw new Error('the list is being built and Wallhaven is not answering right now');
       const top = page1.filter(passes(p)).length >= 8 ? page1.filter(passes(p)) : page1;
       console.log(`list not ready, served the first page to ${agent(req)}`);
       res.setHeader('cache-control', 'no-store');

@@ -46,7 +46,9 @@ namespace WallhavenShuffle
                 catch (NotSupportedException) { ServicePointManager.SecurityProtocol |= (SecurityProtocolType)3072; }
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
+                Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
                 Application.ThreadException += (o, e) => TrayApp.Log("error: " + e.Exception);
+                AppDomain.CurrentDomain.UnhandledException += (o, e) => TrayApp.Log("crash: " + e.ExceptionObject);
                 Theme.Load();
                 Application.Run(new TrayApp());
                 GC.KeepAlive(mutex);
@@ -76,6 +78,17 @@ namespace WallhavenShuffle
         [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
         [StructLayout(LayoutKind.Sequential)] struct MARGINS { public int Left, Right, Top, Bottom; }
         [DllImport("dwmapi.dll")] static extern int DwmExtendFrameIntoClientArea(IntPtr hwnd, ref MARGINS margins);
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode)] static extern uint ExtractIconEx(string file, int index, IntPtr[] large, IntPtr[] small, uint count);
+
+        // The app's icon at the tray's size (24 px at 150 %), from the exe's own icon, which has that size: sharper
+        // than shrinking the 32 px one Icon.ExtractAssociatedIcon gives.
+        public static Icon SmallAppIcon()
+        {
+            var small = new IntPtr[1];
+            try { if (ExtractIconEx(Application.ExecutablePath, 0, null, small, 1) > 0 && small[0] != IntPtr.Zero) return Icon.FromHandle(small[0]); }
+            catch (Exception) { }
+            return Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+        }
 
         // A game, a full-screen video or a presentation is running (the same check Windows uses for "do not disturb").
         public static bool FullScreenAppRunning()
@@ -203,7 +216,7 @@ namespace WallhavenShuffle
             t.Start();
             if (t.Join(20000) && error == null) return;
 
-            using (var k = Registry.CurrentUser.OpenSubKey(@"Control Panel\Desktop", true))
+            using (var k = Registry.CurrentUser.CreateSubKey(@"Control Panel\Desktop"))
             {
                 k.SetValue("WallpaperStyle", style);
                 k.SetValue("TileWallpaper", tile);
@@ -242,6 +255,7 @@ namespace WallhavenShuffle
     static class Theme
     {
         public static bool Dark, Glass;
+        public static bool NoAcrylic;        // Windows refused the acrylic backdrop once: don't count on it again
         public static float Scale = 1f;
         public static Color Accent, OnAccent, Bg, Menu, FlyoutBorder, Card, CardBorder, Field, FieldHover, FieldPressed, FieldBorder,
             Text, TextSecondary, TextDisabled, Hover, Pressed, Divider, ToggleOff;
@@ -259,7 +273,7 @@ namespace WallhavenShuffle
             int build = 0;
             using (var k = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion"))
                 if (k != null) int.TryParse(Convert.ToString(k.GetValue("CurrentBuildNumber", "0")), out build);
-            Glass = transparency && build >= 22621;
+            Glass = transparency && build >= 22621 && !NoAcrylic;
             Accent = Color.FromArgb(0, 103, 192);
             using (var k = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\DWM"))
                 if (k != null && k.GetValue("AccentColor") != null)
@@ -407,16 +421,35 @@ namespace WallhavenShuffle
     {
         public const string Previous = "", Next = "", Pause = "", Play = "", Heart = "",
             HeartFill = "", Hide = "", Open = "", Settings = "", Folder = "", Power = "",
-            Chevron = "", More = "", Restore = "", Edit = "";
+            Chevron = "", More = "", Restore = "", Edit = "", View = "";
     }
 
     // ==================================================================================================== data
 
     class Wall
     {
-        public string Id, Page, Image, Resolution;
+        public string Id, Page, Image, Resolution, Extension;
         public int Favorites;
-        public string Extension { get { var e = Path.GetExtension(new Uri(Image).AbsolutePath); return string.IsNullOrEmpty(e) ? ".jpg" : e; } }
+
+        // Ids and extensions name the files in the cache, so only plain ones are taken (letters, digits, - and _).
+        static readonly System.Text.RegularExpressions.Regex SafeId = new System.Text.RegularExpressions.Regex(@"^[A-Za-z0-9_-]{1,40}$");
+        static readonly HashSet<string> ImageTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif" };
+
+        // A usable entry of the list, or null.
+        public static Wall Make(string id, string image, string page, string resolution, int favorites)
+        {
+            Uri uri;
+            if (id == null || !SafeId.IsMatch(id) || !Uri.TryCreate(image, UriKind.Absolute, out uri) || (uri.Scheme != "https" && uri.Scheme != "http")) return null;
+            string ext = Path.GetExtension(uri.AbsolutePath);
+            return new Wall { Id = id, Image = image, Page = page, Resolution = resolution ?? "", Favorites = favorites, Extension = ImageTypes.Contains(ext) ? ext.ToLowerInvariant() : ".jpg" };
+        }
+
+        // A file in the cache folder that this app put there (anything else in that folder is left alone).
+        public static bool IsCacheFile(string name)
+        {
+            string ext = Path.GetExtension(name);
+            return ImageTypes.Contains(ext) && SafeId.IsMatch(Path.GetFileNameWithoutExtension(name));
+        }
     }
 
     // key=value settings in settings.ini next to the exe. Everything (settings, cache, log) lives in the exe's folder:
@@ -443,12 +476,18 @@ namespace WallhavenShuffle
         public string CacheFolder { get { return string.IsNullOrEmpty(CacheDir) ? Path.Combine(Dir, "cache") : Environment.ExpandEnvironmentVariables(CacheDir); } }
         public DateTime Stamp;               // settings.ini's time when last read or written: edits in Notepad are picked up
 
+        public static readonly string[] Positions = { "Fill", "Fit", "Stretch", "Tile", "Center", "Span" };
+
         public static Settings Load()
         {
             var s = new Settings();
             if (!File.Exists(FilePath)) return s;
             s.Stamp = File.GetLastWriteTimeUtc(FilePath);
-            foreach (var line in File.ReadAllLines(FilePath))
+            string[] lines = null;
+            for (int attempt = 0; lines == null; attempt++)   // an editor may be saving it right now
+                try { lines = File.ReadAllLines(FilePath); }
+                catch (IOException) { if (attempt >= 4) throw; Thread.Sleep(150); }
+            foreach (var line in lines)
             {
                 int eq = line.IndexOf('=');
                 if (eq <= 0) continue;
@@ -457,7 +496,7 @@ namespace WallhavenShuffle
                 switch (k)
                 {
                     case "IntervalSeconds": if (int.TryParse(v, out n)) s.IntervalSeconds = Math.Max(10, n); break;
-                    case "Position": s.Position = v; break;
+                    case "Position": s.Position = Positions.FirstOrDefault(p => p.Equals(v, StringComparison.OrdinalIgnoreCase)) ?? "Fill"; break;
                     case "MinFavorites": if (int.TryParse(v, out n)) s.MinFavorites = Math.Max(0, n); break;
                     case "PauseFullScreen": s.PauseFullScreen = v == "1"; break;
                     case "PauseOnBattery": s.PauseOnBattery = v == "1"; break;
@@ -494,6 +533,88 @@ namespace WallhavenShuffle
         }
     }
 
+    // ==================================================================================================== rotation
+
+    // What comes next, and the way back. Each wallpaper in the pool is shown once per round, in random order. The
+    // round's order is kept (seen.txt), so the counter is a position: Previous counts down, Next counts up, and a new
+    // round starts (at 1) only when its first wallpaper is on screen. History (history.txt, the last 100, across
+    // rounds) is what Previous walks back through; Next walks forward through it again before new ones come.
+    // Plain logic, no files or UI, so it can be tested on its own.
+    class Rotation
+    {
+        public readonly List<string> Round = new List<string>();     // shown this round, in order
+        readonly HashSet<string> inRound = new HashSet<string>();
+        public readonly List<string> History = new List<string>();   // shown, newest last
+        public int Back = -1;                                         // going back: the History index on screen; -1 = at the newest
+        readonly Random rng;
+
+        public Rotation(IEnumerable<string> round, IEnumerable<string> history, int seed)
+        {
+            foreach (var id in round) if (inRound.Add(id)) Round.Add(id);
+            History.AddRange(history);
+            rng = seed == 0 ? new Random() : new Random(seed);
+        }
+
+        public bool InRound(string id) { return id != null && inRound.Contains(id); }
+
+        // The next new one: one not shown yet this round (when all were, the next round begins), and where possible
+        // not one of the last few shown, so the end of one round and the start of the next don't repeat. Changes
+        // nothing (it's also used to get the next one ready ahead of time).
+        public string PickNew(IList<string> pool, string current)
+        {
+            if (pool.Count == 0) return null;
+            var fresh = pool.Where(id => !inRound.Contains(id) && id != current).ToList();
+            if (fresh.Count == 0) fresh = pool.Where(id => id != current).ToList();   // a new round
+            if (fresh.Count == 0) fresh = pool.ToList();                              // a pool of one
+            int avoid = Math.Min(20, pool.Count / 2);
+            var recent = new HashSet<string>(History.Skip(Math.Max(0, History.Count - avoid)));
+            var notRecent = fresh.Where(id => !recent.Contains(id)).ToList();
+            if (notRecent.Count > 0) fresh = notRecent;
+            return fresh[rng.Next(fresh.Count)];
+        }
+
+        // A new one is on screen. True if it started a new round (every one in the pool had been shown).
+        public bool ShownNew(string id, ICollection<string> pool)
+        {
+            bool newRound = false;
+            if (inRound.Contains(id) && pool.All(inRound.Contains)) { Round.Clear(); inRound.Clear(); newRound = true; }
+            if (inRound.Add(id)) Round.Add(id);
+            History.Add(id);
+            if (History.Count > 100) History.RemoveRange(0, History.Count - 100);
+            Back = -1;
+            return newRound;
+        }
+
+        // Where Previous goes (a History index), or -1 at the oldest.
+        public int BackTarget() { int at = Back < 0 ? History.Count - 1 : Back; return at > 0 ? at - 1 : -1; }
+        // Where Next goes while going back (a History index), or -1 when not going back.
+        public int ForwardTarget() { return Back < 0 || Back + 1 >= History.Count ? -1 : Back + 1; }
+        // That History entry is on screen now (reaching the newest ends going back).
+        public void ShownFromHistory(int index) { Back = index >= History.Count - 1 ? -1 : index; }
+
+        // Position of id in this round (1 = first), counting only ones still in the pool; 0 if it isn't in this round.
+        public int Position(string id, ICollection<string> pool)
+        {
+            int i = id == null ? -1 : Round.IndexOf(id);
+            if (i < 0) return 0;
+            int n = 0;
+            for (int k = 0; k <= i; k++) if (pool.Contains(Round[k])) n++;
+            return n;
+        }
+
+        public int ShownThisRound(ICollection<string> pool) { return Round.Count(pool.Contains); }
+
+        // The counter for the one on screen: at the newest, how many were shown this round (also right when a spare
+        // from the cache repeated an earlier one); going back, that one's place in the round; 0 = from the last round.
+        public int Counter(string id, ICollection<string> pool)
+        {
+            if (!InRound(id)) return 0;
+            return Back < 0 ? ShownThisRound(pool) : Position(id, pool);
+        }
+
+        public bool CanGoBack { get { return BackTarget() >= 0; } }
+    }
+
     // ==================================================================================================== tray app
 
     class TrayApp : Form
@@ -513,16 +634,19 @@ namespace WallhavenShuffle
         readonly object gate = new object();
 
         List<Wall> walls = new List<Wall>();
-        HashSet<string> seen, blocked;
-        List<string> history;                // ids shown, newest last
-        int historyPos = -1;                 // position in history while going back with "Previous"
+        HashSet<string> blocked;
+        Rotation rot;                        // this round's order, history, going back and forth
         Wall current, prepared;
         DateTime nextChange = DateTime.Now.AddSeconds(3), nextListRefresh = DateTime.MinValue;
         bool busy, locked;                   // busy = a wallpaper change is under way
+        int change;                          // numbers each change; a late answer from an abandoned one is ignored
+        int queued;                          // Next (+1) / Previous (-1) pressed during a change: done right after it
         bool listBusy;                       // the list is being downloaded (doesn't hold up changes)
         DateTime busySince, listBusySince;
         int lockScreenBusy;                  // a lock screen update is under way (they run on the side)
-        string lastError = "";
+        string lastError = "";               // the last thing that went wrong, for the status line
+        bool changeFailed;                   // the last change didn't work (it's retried shortly)
+        readonly Dictionary<string, Task<string>> downloads = new Dictionary<string, Task<string>>();   // under way, by id
         MainWindow window;
 
         public event EventHandler StateChanged;  // the window listens: new wallpaper, pause, list loaded
@@ -534,24 +658,24 @@ namespace WallhavenShuffle
             FormBorderStyle = FormBorderStyle.None;
             CreateHandle(); // hidden forms get no handle on their own; hotkeys and BeginInvoke need one
             cacheDir = settings.CacheFolder;
-            MoveCache(Path.Combine(Settings.Dir, "cache"), cacheDir);
-            seen = new HashSet<string>(ReadList("seen.txt"));
-            blocked = new HashSet<string>(ReadList("blocked.txt"));
-            history = ReadList("history.txt").ToList();
-            walls = ParseWalls(File.Exists(ListCache) ? File.ReadAllText(ListCache) : "", out listComplete);
-            if (history.Count > 0) current = walls.FirstOrDefault(w => w.Id == history[history.Count - 1]);
-
-            if (string.IsNullOrEmpty(settings.OriginalWallpaper))
+            string defaultCache = Path.Combine(Settings.Dir, "cache");
+            try { MoveCache(defaultCache, cacheDir); }
+            catch (Exception ex)
             {
-                // Remember the wallpaper from before, for "Restore my original wallpaper".
-                using (var k = Registry.CurrentUser.OpenSubKey(@"Control Panel\Desktop"))
-                {
-                    settings.OriginalWallpaper = Convert.ToString(k.GetValue("WallPaper", ""));
-                    settings.OriginalStyle = Convert.ToString(k.GetValue("WallpaperStyle", "10"));
-                    settings.OriginalTile = Convert.ToString(k.GetValue("TileWallpaper", "0"));
-                }
-                settings.Save();
+                // The cache folder's drive isn't there (an external drive, a renamed folder): use the one next to the
+                // app for now, and leave everything as it is.
+                Log("cache folder " + cacheDir + " can't be used (" + ex.Message + "); using " + defaultCache + " this time");
+                cacheDir = defaultCache;
+                Directory.CreateDirectory(cacheDir);
             }
+            rot = new Rotation(ReadList("seen.txt"), ReadList("history.txt"), 0);
+            blocked = new HashSet<string>(ReadList("blocked.txt"));
+            string cachedList = "";
+            try { if (File.Exists(ListCache)) cachedList = File.ReadAllText(ListCache); } catch (IOException) { }
+            walls = ParseWalls(cachedList, out listComplete);
+            if (rot.History.Count > 0) current = walls.FirstOrDefault(w => w.Id == rot.History[rot.History.Count - 1]);
+
+            if (string.IsNullOrEmpty(settings.OriginalWallpaper)) RememberOriginal();
             if (!settings.StartupDone)
             {
                 // On by default, but never taking over another copy's entry (a second copy elsewhere, e.g. a fresh
@@ -568,7 +692,7 @@ namespace WallhavenShuffle
                     Log("asked Windows to keep wallpapers at full quality (JPEGImportQuality=100)");
                 }
 
-            tray.Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+            tray.Icon = Native.SmallAppIcon();
             tray.ContextMenuStrip = BuildMenu();
             tray.MouseDoubleClick += (s, e) => { if (e.Button == MouseButtons.Left) Next("double-click"); }; // the window: right-click menu
             tray.Visible = true;
@@ -592,6 +716,8 @@ namespace WallhavenShuffle
         public string CurrentFile { get { return current == null ? null : CachePath(current); } }
         public bool IsFavourite { get { return current != null && File.Exists(FavouritePath(current)); } }
         public bool StartsWithWindowsNow { get { return StartsWithWindows(); } }
+        public bool CanGoBack { get { return rot.CanGoBack; } }
+        public int HiddenCount { get { return blocked.Count; } }
 
         public string Status()
         {
@@ -603,14 +729,18 @@ namespace WallhavenShuffle
             if (hold != null) return "Waiting: " + hold;
             var left = nextChange - DateTime.Now;
             if (left < TimeSpan.Zero) left = TimeSpan.Zero;
-            return "Next in " + (left.TotalHours >= 1 ? left.ToString(@"h\:mm\:ss") : left.ToString(@"m\:ss"));
+            string when = left.TotalHours >= 1 ? left.ToString(@"h\:mm\:ss") : left.ToString(@"m\:ss");
+            return (changeFailed ? "Couldn't change, trying again in " : "Next in ") + when;
         }
 
+        // Where the one on screen is in this round: "12 of 1182".
         public string Stats()
         {
             if (walls.Count == 0) return "";
             var pool = Pool();
-            return string.Format("{0} of {1} this round", pool.Count(w => seen.Contains(w.Id)), pool.Count);
+            if (current == null) return pool.Count.ToString("N0") + " wallpapers";
+            int n = rot.Counter(current.Id, new HashSet<string>(pool.Select(w => w.Id)));
+            return n > 0 ? string.Format("{0:N0} of {1:N0}", n, pool.Count) : "from the last round";
         }
 
         void Changed() { UpdateTooltip(); if (StateChanged != null) StateChanged(this, EventArgs.Empty); }
@@ -623,10 +753,10 @@ namespace WallhavenShuffle
         {
             base.OnHandleCreated(e);
             const uint mods = 0x0001 | 0x0002 | 0x0004 | 0x4000; // Alt + Ctrl + Shift, no auto-repeat
-            Native.RegisterHotKey(Handle, 1, mods, 0x27); // Right: next
-            Native.RegisterHotKey(Handle, 2, mods, 0x25); // Left: previous
-            Native.RegisterHotKey(Handle, 3, mods, 0x46); // F: favourite
-            Native.RegisterHotKey(Handle, 4, mods, 0x50); // P: pause
+            var keys = new[] { 0x27u, 0x25u, 0x46u, 0x50u };   // Right: next, Left: previous, F: favourite, P: pause
+            var names = new[] { "→", "←", "F", "P" };
+            for (int i = 0; i < keys.Length; i++)
+                if (!Native.RegisterHotKey(Handle, i + 1, mods, keys[i])) Log("Ctrl+Alt+Shift+" + names[i] + " is taken by another app");
         }
 
         protected override void WndProc(ref Message m)
@@ -647,14 +777,14 @@ namespace WallhavenShuffle
             Log("window opened");
         }
 
-        ToolStripMenuItem pauseItem, favouriteItem;
+        ToolStripMenuItem pauseItem, favouriteItem, previousItem;
 
         ContextMenuStrip BuildMenu()
         {
             var menu = new FluentMenu();
             pauseItem = menu.Add("Pause", Glyphs.Pause, delegate { TogglePause(); });
             menu.Add("Next wallpaper", Glyphs.Next, delegate { Next("menu"); });
-            menu.Add("Previous wallpaper", Glyphs.Previous, delegate { Previous(); });
+            previousItem = menu.Add("Previous wallpaper", Glyphs.Previous, delegate { Previous(); });
             favouriteItem = menu.Add("Save to favourites", Glyphs.Heart, delegate { Favourite(); });
             menu.AddSeparator();
             menu.Add("Open Wallhaven Shuffle", Glyphs.Settings, delegate { ShowMainWindow(); });
@@ -666,6 +796,7 @@ namespace WallhavenShuffle
                 favouriteItem.Text = IsFavourite ? "Remove from favourites" : "Save to favourites";
                 favouriteItem.Tag = IsFavourite ? Glyphs.HeartFill : Glyphs.Heart;
                 favouriteItem.Enabled = current != null;
+                previousItem.Enabled = CanGoBack;
                 menu.RefreshGlyphs();
             };
             return menu;
@@ -679,7 +810,12 @@ namespace WallhavenShuffle
             ReloadIfEdited();
             if (window != null && !window.IsDisposed && window.Visible) window.Tick();
             // Watchdog: every step has its own time limit, but nothing may keep the app stuck.
-            if (busy && DateTime.Now - busySince > TimeSpan.FromMinutes(2)) { busy = false; Log("a change took over 2 minutes; carrying on"); nextChange = DateTime.Now; }
+            if (busy && DateTime.Now - busySince > TimeSpan.FromMinutes(2))
+            {
+                busy = false; change++; queued = 0;   // its answer, if it ever comes, is ignored
+                Log("a change took over 2 minutes; carrying on");
+                nextChange = DateTime.Now;
+            }
             if (listBusy && DateTime.Now - listBusySince > TimeSpan.FromMinutes(6)) { listBusy = false; Log("the list download took over 6 minutes; carrying on"); }
             if (string.IsNullOrEmpty(settings.ListUrl)) return;
             if (!listBusy && DateTime.Now >= nextListRefresh) RefreshListAsync();   // in the background; changes go on
@@ -692,10 +828,13 @@ namespace WallhavenShuffle
         // settings.ini was saved in an editor: take the new values.
         void ReloadIfEdited()
         {
-            DateTime stamp;
-            try { if (!File.Exists(Settings.FilePath) || (stamp = File.GetLastWriteTimeUtc(Settings.FilePath)) == settings.Stamp) return; }
-            catch (IOException) { return; }
-            var f = Settings.Load();
+            Settings f;
+            try
+            {
+                if (!File.Exists(Settings.FilePath) || File.GetLastWriteTimeUtc(Settings.FilePath) == settings.Stamp) return;
+                f = Settings.Load();
+            }
+            catch (Exception) { return; }   // still being saved: next second
             bool sourceChanged = f.ListUrl != settings.ListUrl, positionChanged = f.Position != settings.Position;
             settings.IntervalSeconds = f.IntervalSeconds; settings.Position = f.Position; settings.MinFavorites = f.MinFavorites;
             settings.PauseFullScreen = f.PauseFullScreen; settings.PauseOnBattery = f.PauseOnBattery; settings.Paused = f.Paused;
@@ -738,36 +877,37 @@ namespace WallhavenShuffle
             ThreadPool.QueueUserWorkItem(delegate
             {
                 string json = null, error = null;
-                try { json = Download(url); } catch (Exception ex) { error = ex.Message; }
-                BeginInvoke(new Action(delegate
+                try { json = DownloadList(url); } catch (Exception ex) { error = ex.Message; }
+                Post(delegate
                 {
                     listBusy = false;
-                    if (json != null)
+                    if (url != settings.ListUrl) { nextListRefresh = DateTime.MinValue; return; }   // the source changed meanwhile
+                    bool complete = true;
+                    var list = json == null ? new List<Wall>() : ParseWalls(json, out complete);
+                    if (list.Count > 0 && (complete || list.Count >= walls.Count))
                     {
-                        bool complete;
-                        var list = ParseWalls(json, out complete);
-                        if (list.Count > 0 && (complete || list.Count >= walls.Count))
-                        {
-                            walls = list; listComplete = complete; lastError = "";
-                            WriteFileSafely(ListCache, json);
-                            Log("list: " + list.Count + " wallpapers" + (complete ? "" : " (partial)"));
-                        }
-                        else if (list.Count > 0)
-                        {
-                            // The service is still filling in pages Wallhaven refused for a moment: keep the fuller list.
-                            Log("list partial (" + list.Count + "), keeping the last full one (" + walls.Count + ")");
-                            nextListRefresh = DateTime.Now.AddMinutes(5);
-                        }
+                        int before = walls.Count;
+                        walls = list; listComplete = complete; lastError = "";
+                        WriteFileSafely(ListCache, json);
+                        Log("list: " + list.Count + " wallpapers" + (complete ? "" : " (partial)") + (before > 0 && before != list.Count ? " (was " + before + ")" : ""));
+                    }
+                    else if (list.Count > 0)
+                    {
+                        // The service is still filling in pages Wallhaven refused for a moment: keep the fuller list.
+                        Log("list partial (" + list.Count + "), keeping the last full one (" + walls.Count + ")");
+                        nextListRefresh = DateTime.Now.AddMinutes(5);
                     }
                     else
                     {
-                        lastError = error; Log("list failed: " + error);
-                        nextListRefresh = DateTime.Now.AddMinutes(2);
+                        lastError = error ?? "the source sent no wallpapers";
+                        Log("list failed: " + lastError);
+                        nextListRefresh = DateTime.Now.AddMinutes(walls.Count == 0 ? 2 : 10);
                     }
                     Changed();
                     bool due = current == null || !File.Exists(CachePath(current)) || DateTime.Now >= nextChange;
                     if (walls.Count > 0 && due && !busy && !settings.Paused && HoldReason() == null) Next("start");
-                }));
+                    else if (!busy && prepared == null) PrepareNext();
+                });
             });
         }
 
@@ -787,17 +927,17 @@ namespace WallhavenShuffle
                 if (!root.TryGetValue("items", out arr)) root.TryGetValue("data", out arr);
                 var items = arr as object[];
                 if (items == null) return result;
+                var ids = new HashSet<string>();
                 foreach (var o in items)
                 {
                     var d = o as Dictionary<string, object>;
                     if (d == null || !d.ContainsKey("id") || !d.ContainsKey("path")) continue;
                     object fav, page, res;
                     d.TryGetValue("favorites", out fav); d.TryGetValue("url", out page); d.TryGetValue("resolution", out res);
-                    result.Add(new Wall
-                    {
-                        Id = Convert.ToString(d["id"]), Image = Convert.ToString(d["path"]),
-                        Page = Convert.ToString(page), Resolution = Convert.ToString(res), Favorites = fav == null ? 0 : Convert.ToInt32(fav)
-                    });
+                    int favorites = 0;
+                    try { if (fav != null) favorites = Convert.ToInt32(fav); } catch (Exception) { }   // one odd entry doesn't spoil the list
+                    var w = Wall.Make(Convert.ToString(d["id"]), Convert.ToString(d["path"]), Convert.ToString(page), Convert.ToString(res), favorites);
+                    if (w != null && ids.Add(w.Id)) result.Add(w);
                 }
             }
             catch (Exception) { result.Clear(); }
@@ -810,66 +950,69 @@ namespace WallhavenShuffle
             return pool.Count > 0 ? pool : walls.Where(w => !blocked.Contains(w.Id)).ToList();
         }
 
-        // A wallpaper not shown yet in this round; when all have been shown, a new round starts.
+        // The next new wallpaper (see Rotation.PickNew). Changes nothing.
         Wall PickNext()
         {
             var pool = Pool();
-            if (pool.Count == 0) return null;
-            string cur = current == null ? null : current.Id;
-            var fresh = pool.Where(w => !seen.Contains(w.Id) && w.Id != cur).ToList();
-            if (fresh.Count == 0)
-            {
-                seen.Clear(); WriteList("seen.txt", seen);
-                fresh = pool.Where(w => w.Id != cur).ToList();
-                if (fresh.Count == 0) fresh = pool;
-                Log("new round");
-            }
-            return fresh[rng.Next(fresh.Count)];
+            string id = rot.PickNew(pool.Select(w => w.Id).ToList(), current == null ? null : current.Id);
+            return id == null ? null : pool.First(w => w.Id == id);
         }
 
         // ------------------------------------------------------------------------- changing the wallpaper
 
+        // Presses during a change aren't lost: they're counted and done one after another once it's on screen
+        // (a few at most, so holding the hotkey down doesn't run away). The timer never queues.
+        bool Queue(int step)
+        {
+            if (!busy) return false;
+            queued = Math.Max(-5, Math.Min(5, queued + step));
+            return true;
+        }
+
         public void Next(string why)
         {
-            if (busy) return;
+            if (busy) { if (why != "timer") Queue(+1); return; }
             if (string.IsNullOrEmpty(settings.ListUrl)) { ShowMainWindow(); return; }   // nothing to show yet: say where to add a source
             Log("next (" + why + ")");
-            if (historyPos >= 0 && historyPos < history.Count - 1)
+            // Went back with Previous: walk forward again first (skipping any that have left the list).
+            for (int i = rot.ForwardTarget(); i >= 0 && i < rot.History.Count; i++)
             {
-                // Came back with "Previous": go forward through history again first.
-                historyPos++;
-                var w = walls.FirstOrDefault(x => x.Id == history[historyPos]);
-                if (w != null) { ShowWall(w, false); return; }
+                var w = walls.FirstOrDefault(x => x.Id == rot.History[i]);
+                if (w != null) { ShowWall(w, i); return; }
             }
-            historyPos = -1;
+            rot.Back = -1;
+            if (prepared != null && (blocked.Contains(prepared.Id) || (current != null && prepared.Id == current.Id))) prepared = null;
             var next = prepared ?? PickNext();
             prepared = null;
             if (next == null) { RefreshListAsync(); return; }
-            ShowWall(next, true);
+            ShowWall(next, -1);
         }
 
         public void Previous()
         {
-            if (busy || history.Count < 2) return;
-            if (historyPos < 0) historyPos = history.Count - 1;
-            if (historyPos == 0) return;
-            historyPos--;
-            var w = walls.FirstOrDefault(x => x.Id == history[historyPos]);
-            if (w != null) ShowWall(w, false);
+            if (Queue(-1)) return;
+            for (int i = rot.BackTarget(); i >= 0; i--)   // skipping any that have left the list
+            {
+                var w = walls.FirstOrDefault(x => x.Id == rot.History[i]);
+                if (w != null) { ShowWall(w, i); return; }
+            }
         }
 
-        void ShowWall(Wall w, bool isNew)
+        // Shows a new wallpaper (fromHistory -1) or the History entry at fromHistory. Where we are (round, history)
+        // only moves once it's on screen, so a failed change leaves the counter and the picture in step.
+        void ShowWall(Wall w, int fromHistory)
         {
+            bool isNew = fromHistory < 0;
             busy = true; busySince = DateTime.Now;
+            int id = ++change;
             Changed();
-            string position = settings.Position;
             bool fade = Native.AnimationsOn(); // Windows cross-fades when "Animation effects" is on
             bool lockScreen = settings.LockScreen;
             // If this one can't be downloaded (offline, e.g. just after waking up), one already on disk is used instead.
             // Unseen ones first; if every cached one was shown this round already, any of them (but not the current one).
             string cur = current == null ? null : current.Id;
             var spare = isNew ? Pool().Where(x => x.Id != w.Id && x.Id != cur && File.Exists(CachePath(x)))
-                .OrderBy(x => seen.Contains(x.Id) ? 1 : 0).ThenBy(x => rng.Next()).Take(5).ToList() : new List<Wall>();
+                .OrderBy(x => rot.InRound(x.Id) ? 1 : 0).ThenBy(x => rng.Next()).Take(5).ToList() : new List<Wall>();
             ThreadPool.QueueUserWorkItem(delegate
             {
                 string error = null, how = "", file = null;
@@ -884,30 +1027,42 @@ namespace WallhavenShuffle
                         file = CachePath(shown);
                         how = "offline (" + w.Id + ": " + ex.Message + "), from the cache: ";
                     }
-                    Native.SetWallpaper(file, position);
+                    if (id != change) return;   // abandoned meanwhile (watchdog, "Restore my original wallpaper")
+                    Native.SetWallpaper(file, settings.Position);   // read now: the fit may have been changed meanwhile
                     how += fade ? "fade" : "instant";
                 }
                 catch (Exception ex) { error = ex.Message; }
-                BeginInvoke(new Action(delegate
+                Post(delegate
                 {
+                    if (id != change) return;
                     busy = false;
                     nextChange = DateTime.Now.AddSeconds(error == null ? settings.IntervalSeconds : 30);
-                    if (error != null) { lastError = error; Log("change failed (" + w.Id + "): " + error); Changed(); return; }
+                    changeFailed = error != null;
+                    if (error != null) { lastError = error; queued = 0; Log("change failed (" + w.Id + "): " + error); Changed(); return; }
                     lastError = "";
                     current = shown;
-                    Log("wallpaper " + shown.Id + " " + how + (isNew ? "" : " (from history)"));
                     if (isNew)
                     {
-                        seen.Add(shown.Id); WriteList("seen.txt", seen);
-                        history.Add(shown.Id);
-                        if (history.Count > 100) history.RemoveRange(0, history.Count - 100);
-                        WriteList("history.txt", history);
+                        if (rot.ShownNew(shown.Id, new HashSet<string>(Pool().Select(x => x.Id)))) Log("new round");
+                        WriteList("seen.txt", rot.Round);
+                        WriteList("history.txt", rot.History);
                     }
+                    else rot.ShownFromHistory(fromHistory);
+                    Log("wallpaper " + shown.Id + " " + how + (isNew ? "" : " (from history)") + " - " + Stats());
                     if (lockScreen) UpdateLockScreen(file);
                     Changed();
-                    PrepareNext();
-                }));
+                    if (queued > 0) { queued--; Next("pressed again"); }
+                    else if (queued < 0) { queued++; Previous(); }
+                    if (!busy) PrepareNext();
+                });
             });
+        }
+
+        // Runs a on the UI thread (from a worker); nothing if the app is closing.
+        void Post(Action a)
+        {
+            try { if (IsHandleCreated && !IsDisposed) BeginInvoke(a); }
+            catch (InvalidOperationException) { }
         }
 
         // The lock screen follows on the side: it can be slow (or hang, just after waking), and must never hold up a
@@ -931,10 +1086,10 @@ namespace WallhavenShuffle
             var next = PickNext();
             if (next == null) return;
             prepared = next;
-            var protect = new HashSet<string>(history.Skip(Math.Max(0, history.Count - KeepCached))) { next.Id };
+            var protect = new HashSet<string>(rot.History.Skip(Math.Max(0, rot.History.Count - KeepCached))) { next.Id };
             if (current != null) protect.Add(current.Id);
             var inList = new HashSet<string>(walls.Select(w => w.Id));
-            var shown = new HashSet<string>(seen);
+            var shown = new HashSet<string>(rot.Round);
             bool complete = listComplete;
             long limit = (long)settings.CacheLimitGB << 30;
             ThreadPool.QueueUserWorkItem(delegate
@@ -959,6 +1114,7 @@ namespace WallhavenShuffle
                 {
                     string id = Path.GetFileNameWithoutExtension(f.Name);
                     if (f.Extension == ".part") { if (f.LastWriteTime < DateTime.Now.AddHours(-1)) TryDelete(f); continue; }
+                    if (!Wall.IsCacheFile(f.Name)) continue;   // not one of ours: never touched, not counted
                     if (!protect.Contains(id) && complete && inList.Count > 0 && !inList.Contains(id)) { TryDelete(f); gone++; continue; }
                     total += f.Length;
                     if (!protect.Contains(id)) keep.Add(f);
@@ -998,16 +1154,40 @@ namespace WallhavenShuffle
 
         string CachePath(Wall w) { return Path.Combine(cacheDir, w.Id + w.Extension); }
 
-        // The cached original, downloaded first if needed. The download runs outside the lock, into its own temporary
-        // file, so a slow or dead connection never holds up anything else (another download, the cache tidy-up).
+        // The cached original, downloaded first if needed. Asking for one that's already downloading (Next pressed
+        // while it's being got ready) waits for that download instead of starting a second one.
         string Fetch(Wall w)
         {
             string path = CachePath(w);
             if (File.Exists(path) && new FileInfo(path).Length > 0) return path;
+            Task<string> t;
+            lock (gate)
+                if (!downloads.TryGetValue(w.Id, out t))
+                {
+                    t = Task.Factory.StartNew(() => Download(w, path), TaskCreationOptions.LongRunning);
+                    downloads[w.Id] = t;
+                    t.ContinueWith(done => { lock (gate) downloads.Remove(w.Id); });
+                }
+            try { return t.Result; }
+            catch (AggregateException ex) { throw ex.InnerException; }
+        }
+
+        // The download runs outside the lock, into its own temporary file, so a slow or dead connection never holds
+        // up anything else (another download, the cache tidy-up). A cut-off download is thrown away, not used.
+        string Download(Wall w, string path)
+        {
             string tmp = path + "." + Guid.NewGuid().ToString("N").Substring(0, 8) + ".part";
             try
             {
-                using (var wc = NewClient(30000, 60000)) wc.DownloadFile(w.Image, tmp);
+                Directory.CreateDirectory(cacheDir);
+                using (var wc = NewClient(30000, 60000))
+                {
+                    wc.DownloadFile(w.Image, tmp);
+                    long expected;
+                    if (long.TryParse(wc.ResponseHeaders[HttpResponseHeader.ContentLength], out expected) && new FileInfo(tmp).Length != expected)
+                        throw new IOException("the download was cut off");
+                }
+                if (new FileInfo(tmp).Length == 0) throw new IOException("the download was empty");
                 lock (gate)
                 {
                     if (File.Exists(path) && new FileInfo(path).Length > 0) return path;   // another download got there first
@@ -1051,7 +1231,18 @@ namespace WallhavenShuffle
             blocked.Add(current.Id);
             WriteList("blocked.txt", blocked);
             Log("blocked " + current.Id);
+            rot.Back = -1;   // straight to a new one, even while going back
+            if (prepared != null && prepared.Id == current.Id) prepared = null;
             Next("hidden");
+        }
+
+        // Undoes every "Never show this one".
+        public void UnhideAll()
+        {
+            Log("unhid " + blocked.Count);
+            blocked.Clear();
+            WriteList("blocked.txt", blocked);
+            Changed();
         }
 
         public void OpenOnWallhaven() { if (current != null) Open(current.Page); }
@@ -1069,19 +1260,58 @@ namespace WallhavenShuffle
                 string file = CachePath(current), position = settings.Position;
                 ThreadPool.QueueUserWorkItem(delegate { try { Native.SetWallpaper(file, position); } catch (Exception ex) { Log("fit failed: " + ex.Message); } });
             }
+            if (!busy && walls.Count > 0) PrepareNext();   // the favourites minimum may have changed what's next
             Changed();
+        }
+
+        // Remember the wallpaper from before, for "Restore my original wallpaper". It's copied next to the app: the
+        // file Windows points to may be its own copy under AppData\...\Themes, which each new wallpaper replaces.
+        // "none" = a solid colour.
+        void RememberOriginal()
+        {
+            using (var k = Registry.CurrentUser.OpenSubKey(@"Control Panel\Desktop"))
+            {
+                if (k == null) return;
+                settings.OriginalWallpaper = Convert.ToString(k.GetValue("WallPaper", ""));
+                settings.OriginalStyle = Convert.ToString(k.GetValue("WallpaperStyle", "10"));
+                settings.OriginalTile = Convert.ToString(k.GetValue("TileWallpaper", "0"));
+            }
+            string file = settings.OriginalWallpaper;
+            try
+            {
+                if (file.Length > 0 && File.Exists(file))
+                {
+                    string ext = Path.GetExtension(file);
+                    string copy = Path.Combine(Settings.Dir, "original-wallpaper" + (string.IsNullOrEmpty(ext) ? ".jpg" : ext));
+                    File.Copy(file, copy, true);
+                    settings.OriginalWallpaper = copy;
+                    Log("kept a copy of the wallpaper from before (" + file + ")");
+                }
+            }
+            catch (Exception ex) { Log("couldn't copy the wallpaper from before: " + ex.Message); }
+            if (settings.OriginalWallpaper.Length == 0) settings.OriginalWallpaper = "none";
+            settings.Save();
         }
 
         public void RestoreOriginal()
         {
             settings.Paused = true;
             settings.Save();
+            change++; busy = false; queued = 0;  // a change still under way must not cover it up
             string file = settings.OriginalWallpaper;
             string position = settings.OriginalTile == "1" ? "Tile" : settings.OriginalStyle == "6" ? "Fit" : settings.OriginalStyle == "2" ? "Stretch" :
                 settings.OriginalStyle == "0" ? "Center" : settings.OriginalStyle == "22" ? "Span" : "Fill";
-            if (!string.IsNullOrEmpty(file) && File.Exists(file))
+            if (file == "none")
+            {
+                ThreadPool.QueueUserWorkItem(delegate { Native.SystemParametersInfo(0x0014, 0, "", 0x01 | 0x02); });   // no picture: the background colour
+                Log("restored the solid colour from before (paused)");
+            }
+            else if (!string.IsNullOrEmpty(file) && File.Exists(file))
+            {
                 ThreadPool.QueueUserWorkItem(delegate { try { Native.SetWallpaper(file, position); } catch (Exception ex) { Log("restore failed: " + ex.Message); } });
-            Log("restored the original wallpaper (paused)");
+                Log("restored the original wallpaper (paused)");
+            }
+            else Log("the wallpaper from before (" + file + ") isn't there any more; paused");
             Changed();
         }
 
@@ -1177,7 +1407,7 @@ namespace WallhavenShuffle
         }
 
         // The list: the service may still be putting a cold list together (up to ~4 minutes), so this one waits longer.
-        static string Download(string url) { using (var wc = NewClient(300000, 300000)) return wc.DownloadString(url); }
+        static string DownloadList(string url) { using (var wc = NewClient(300000, 300000)) return wc.DownloadString(url); }
 
         public static void Open(string target)
         {
@@ -1188,7 +1418,8 @@ namespace WallhavenShuffle
         static IEnumerable<string> ReadList(string name)
         {
             string p = Path.Combine(Settings.Dir, name);
-            return File.Exists(p) ? File.ReadAllLines(p).Where(l => l.Trim().Length > 0) : Enumerable.Empty<string>();
+            try { return File.Exists(p) ? File.ReadAllLines(p).Select(l => l.Trim()).Where(l => l.Length > 0).ToList() : new List<string>(); }
+            catch (IOException ex) { Log("couldn't read " + name + ": " + ex.Message); return new List<string>(); }
         }
 
         static void WriteList(string name, IEnumerable<string> items)
@@ -1204,7 +1435,8 @@ namespace WallhavenShuffle
             try
             {
                 File.WriteAllText(tmp, text);
-                if (File.Exists(path)) File.Replace(tmp, path, null); else File.Move(tmp, path);
+                try { if (File.Exists(path)) File.Replace(tmp, path, null); else File.Move(tmp, path); }
+                catch (IOException) { File.Copy(tmp, path, true); File.Delete(tmp); }   // e.g. a virus scanner had it open for a moment
             }
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
@@ -1238,7 +1470,6 @@ namespace WallhavenShuffle
     class MainWindow : Form
     {
         static readonly int[] Intervals = { 30, 60, 120, 180, 300, 600, 900, 1800, 3600, 7200, 21600, 43200, 86400 };
-        static readonly string[] Positions = { "Fill", "Fit", "Stretch", "Center", "Span" };
         const int W = 480, Gutter = 24;
 
         readonly TrayApp app;
@@ -1255,7 +1486,7 @@ namespace WallhavenShuffle
         readonly ToolTip tips = new ToolTip();
         readonly FluentMenu moreMenu = new FluentMenu();
         readonly Size size;
-        ToolStripMenuItem hideItem, openItem;
+        ToolStripMenuItem hideItem, openItem, unhideItem;
         string shownFile;
         bool loading;
 
@@ -1301,12 +1532,20 @@ namespace WallhavenShuffle
             openItem = moreMenu.Add("Open on Wallhaven", Glyphs.Open, delegate { app.OpenOnWallhaven(); });
             moreMenu.Add("Open favourites folder", Glyphs.Folder, delegate { app.OpenFavourites(); });
             moreMenu.AddSeparator();
+            unhideItem = moreMenu.Add("Show hidden wallpapers again", Glyphs.View, delegate { app.UnhideAll(); });
             moreMenu.Add("Restore my original wallpaper", Glyphs.Restore, delegate { app.RestoreOriginal(); });
             moreMenu.Add("Advanced settings", Glyphs.Edit, delegate { app.EditAdvanced(); });
-            moreMenu.Opening += delegate { hideItem.Enabled = openItem.Enabled = app.Current != null; moreMenu.RefreshGlyphs(); };
+            moreMenu.Opening += delegate
+            {
+                hideItem.Enabled = openItem.Enabled = app.Current != null;
+                int hidden = app.HiddenCount;
+                unhideItem.Enabled = hidden > 0;
+                unhideItem.Text = hidden > 0 ? "Show hidden wallpapers again (" + hidden + ")" : "Show hidden wallpapers again";
+                moreMenu.RefreshGlyphs();
+            };
 
             foreach (var i in Intervals) every.Items.Add(new KeyValuePair<string, object>(IntervalText(i), i));
-            foreach (var p in Positions) fit.Items.Add(new KeyValuePair<string, object>(p, p));
+            foreach (var p in Settings.Positions) fit.Items.Add(new KeyValuePair<string, object>(p, p));
             LoadValues();
 
             every.Changed += delegate { if (loading) return; s.IntervalSeconds = (int)every.Value; app.SettingsChanged(false, false); };
@@ -1324,10 +1563,11 @@ namespace WallhavenShuffle
             preview.Click += delegate { app.OpenOnWallhaven(); };
             foreach (var b in transport) tips.SetToolTip(b, b.Tip);
             tips.SetToolTip(preview, "Open on Wallhaven");
+            tips.SetToolTip(status, "Each wallpaper is shown once per round, in random order: this is where you are in it");
 
             app.StateChanged += OnStateChanged;
             ApplyTheme();
-            UpdateView(true);
+            UpdateView(true, false);   // the picture is loaded when it opens
         }
 
         static string IntervalText(int sec)
@@ -1363,7 +1603,7 @@ namespace WallhavenShuffle
         {
             base.OnHandleCreated(e);
             Native.StyleFlyout(Handle, Theme.Dark, Theme.FlyoutBorder);
-            if (Theme.Glass && !Native.Acrylic(Handle)) { Theme.Glass = false; ApplyTheme(); }
+            if (Theme.Glass && !Native.Acrylic(Handle)) { Theme.Glass = false; Theme.NoAcrylic = true; ApplyTheme(); }
             Native.SetWindowPos(Handle, IntPtr.Zero, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020); // apply the frame change
             Size = size;
         }
@@ -1376,7 +1616,7 @@ namespace WallhavenShuffle
             var area = Screen.PrimaryScreen.WorkingArea;
             int m = (int)(12 * Theme.Scale);
             Location = new Point(area.Right - Width - m, Math.Max(area.Top, area.Bottom - Height - m));
-            UpdateView(false);
+            UpdateView(false, true);
             if (!Visible) Show();
             Activate();
             Native.SetForegroundWindow(Handle);
@@ -1413,7 +1653,7 @@ namespace WallhavenShuffle
             foreach (Control c in root.Controls) { yield return c; foreach (var d in AllControls(c)) yield return d; }
         }
 
-        void OnStateChanged(object sender, EventArgs e) { if (!IsDisposed) UpdateView(false); }
+        void OnStateChanged(object sender, EventArgs e) { if (!IsDisposed) UpdateView(false, false); }
 
         public void Tick()
         {
@@ -1421,11 +1661,14 @@ namespace WallhavenShuffle
             status.Text = app.Status() + (stats.Length > 0 ? "  ·  " + stats : "");
         }
 
-        void UpdateView(bool force)
+        // picture: also load the preview if the wallpaper changed. Decoding a 4K picture takes a moment, so a hidden
+        // window doesn't (it's done when it opens).
+        void UpdateView(bool force, bool picture)
         {
             var w = app.Current;
-            preview.Overlay = w == null ? null : w.Resolution.Replace("x", " × ") + "     ♥ " + w.Favorites.ToString("N0");
+            preview.Overlay = w == null ? null : (w.Resolution.Length > 0 ? w.Resolution.Replace("x", " × ") + "     " : "") + "♥ " + w.Favorites.ToString("N0");
             playBtn.Glyph = s.Paused ? Glyphs.Play : Glyphs.Pause;
+            prevBtn.Enabled = app.CanGoBack;
             tips.SetToolTip(playBtn, s.Paused ? "Resume  (Ctrl+Alt+Shift+P)" : "Pause  (Ctrl+Alt+Shift+P)");
             favBtn.Glyph = app.IsFavourite ? Glyphs.HeartFill : Glyphs.Heart;
             favBtn.Active = app.IsFavourite;
@@ -1433,7 +1676,7 @@ namespace WallhavenShuffle
             favBtn.Enabled = w != null;
             Tick();
             string file = app.CurrentFile;
-            if (force || file != shownFile)
+            if ((picture || Visible) && (force || file != shownFile))
             {
                 shownFile = file;
                 preview.SetImage(file != null && File.Exists(file) ? file : null);
@@ -1450,7 +1693,12 @@ namespace WallhavenShuffle
 
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
-            if (keyData == Keys.Escape) { Hide(); return true; }
+            switch (keyData)
+            {
+                case Keys.Escape: Hide(); return true;
+                case Keys.Right: app.Next("window"); return true;   // the same keys as the hotkeys, without Ctrl+Alt+Shift
+                case Keys.Left: app.Previous(); return true;
+            }
             return base.ProcessCmdKey(ref msg, keyData);
         }
     }
@@ -1691,6 +1939,20 @@ namespace WallhavenShuffle
         }
 
         protected override void OnClick(EventArgs e) { Focus(); OpenMenu(); base.OnClick(e); }
+
+        // Up / Down step through the choices without opening the menu, as in Windows.
+        protected override bool IsInputKey(Keys key) { return key == Keys.Up || key == Keys.Down || base.IsInputKey(key); }
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            int to = e.KeyCode == Keys.Up ? index - 1 : e.KeyCode == Keys.Down ? index + 1 : -1;
+            if (to >= 0 && to < Items.Count && to != index)
+            {
+                index = to; Invalidate();
+                if (Changed != null) Changed(this, EventArgs.Empty);
+                e.Handled = true;
+            }
+            base.OnKeyDown(e);
+        }
 
         void OpenMenu()
         {

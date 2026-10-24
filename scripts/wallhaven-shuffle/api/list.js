@@ -5,17 +5,20 @@
 // left that qualify (stragglers still turn up after shorter gaps). Pages that fail (rate limit) are skipped: the
 // list is then marked incomplete and cached for 2 minutes only, so the next call fills the gaps. A complete list is
 // cached for 6 hours.
-import { CACHE_GOOD, MAX_PAGES, PER_SET, listParams, pageQuery, passes, selfUrl, sleep } from '../lib/core.js';
+import { CACHE_GOOD, MAX_PAGES, PER_SET, getJson, listParams, pageQuery, passes, selfUrl, sleep } from '../lib/core.js';
 
 export const config = { maxDuration: 300 };
+
+// What the list keeps: an entry the apps can use (an id and a picture).
+const usable = (w) => w && typeof w.id === 'string' && typeof w.path === 'string' && /^https?:\/\//.test(w.path);
 
 export default async function handler(req, res) {
   const p = listParams(req.query);
   const started = Date.now();
   const getPage = async (n) => {
-    const r = await fetch(selfUrl(req, '/api/page', `${pageQuery(p)}&n=${n}`));
-    if (r.headers.get('x-vercel-cache') !== 'HIT') await sleep(1300); // it went to Wallhaven: keep the pace polite
-    return r.ok ? r.json() : null;
+    const r = await getJson(selfUrl(req, '/api/page', `${pageQuery(p)}&n=${n}`), 40e3);
+    if (!r?.cached) await sleep(1300); // it went to Wallhaven: keep the pace polite
+    return Array.isArray(r?.json?.data) ? r.json : null;
   };
   try {
     const first = await getPage(1);
@@ -34,7 +37,7 @@ export default async function handler(req, res) {
       belowRun = anyQualify(page.data) ? 0 : belowRun + 1;
     }
     const seen = new Set();
-    const items = all.filter((w) => w && w.id && !seen.has(w.id) && seen.add(w.id)).filter(passes(p)).sort((a, b) => (a.id < b.id ? -1 : 1));
+    const items = all.filter((w) => usable(w) && !seen.has(w.id) && seen.add(w.id)).filter(passes(p)).sort((a, b) => (a.id < b.id ? -1 : 1));
     const complete = missing === 0 && items.length >= PER_SET;
     console.log(`list ${pageQuery(p)} fav>=${p.fav} maxw=${p.maxw}: read ${read}/${pages} pages, ${missing} missing, ${items.length} wallpapers in ${Math.round((Date.now() - started) / 1000)} s`);
     res.setHeader('cache-control', complete ? CACHE_GOOD : 'public, max-age=0, s-maxage=120');

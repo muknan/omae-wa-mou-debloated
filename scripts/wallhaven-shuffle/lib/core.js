@@ -14,7 +14,7 @@ export const MAX_PAGES = 200; // 4800 wallpapers (a year of 4K, 16:9 + 16:10, is
 export const CACHE_GOOD = 'public, max-age=0, s-maxage=21600, stale-while-revalidate=604800';
 // A bit shorter than Projectivy's ~1-hour refresh, so two refreshes never land in the same window (which would
 // repeat a set). The price: now and then a set is skipped; it comes back in a later pass.
-const SLOT_MINUTES = Number(process.env.SLOT_MINUTES || 55);
+const SLOT_MINUTES = Math.min(Math.max(Number(process.env.SLOT_MINUTES) || 55, 5), 1440);
 const API_KEY = process.env.WALLHAVEN_API_KEY || '';
 const RANGES = new Set(['1d', '3d', '1w', '1M', '3M', '6M', '1y']);
 
@@ -53,20 +53,41 @@ export function selfUrl(req, path, query) {
   return `${scheme}://${host}${path}?${query}`;
 }
 
+// A JSON answer, or null for anything else (an error status, a timeout, an HTML error page), so one bad page never
+// takes a whole list or set down with it.
+export async function getJson(url, ms) {
+  try {
+    const r = await fetch(url, { signal: AbortSignal.timeout(ms) });
+    return r.ok ? { json: await r.json(), cached: r.headers.get('x-vercel-cache') === 'HIT' } : null;
+  } catch {
+    return null;
+  }
+}
+
 // One page of the toplist straight from Wallhaven: { data, last_page }. No waiting on a rate limit (429): the
 // caller skips the page and a later call fills it in. Vercel's outgoing addresses are shared with other projects,
-// so Wallhaven's 45 requests/minute limit is shared too.
+// so Wallhaven's 45 requests/minute limit is shared too. Each attempt gets 15 s: a stalled Wallhaven must not
+// hold the function until Vercel kills it.
 export async function fetchToplistPage(p, page) {
   const url = 'https://wallhaven.cc/api/v1/search?sorting=toplist' +
     `&topRange=${p.range}` + (p.atleast ? `&atleast=${p.atleast}` : `&resolutions=${encodeURIComponent(p.res)}`) +
     (p.ratios ? `&ratios=${encodeURIComponent(p.ratios)}` : '') + `&categories=${p.cats}&purity=${p.purity}&page=${page}` +
     (API_KEY ? `&apikey=${API_KEY}` : '');
   for (let attempt = 0; ; attempt++) {
-    const r = await fetch(url, { headers: { 'user-agent': 'wallhaven-shuffle (Projectivy Booru plugin helper)' } });
+    let r;
+    try {
+      r = await fetch(url, { headers: { 'user-agent': 'wallhaven-shuffle (Projectivy Booru plugin helper)' }, signal: AbortSignal.timeout(15000) });
+    } catch (err) { // timeout or network error (never includes the URL, so the API key stays out of logs)
+      if (attempt >= 1) throw new Error(`Wallhaven did not answer for page ${page} (${err.name === 'TimeoutError' ? 'timed out' : 'network error'})`);
+      await sleep(2000);
+      continue;
+    }
     if (r.ok) {
       const j = await r.json();
-      return { data: j.data || [], last_page: j.meta?.last_page || 1 };
+      if (!Array.isArray(j.data)) throw new Error(`Wallhaven sent no data for page ${page}`);
+      return { data: j.data, last_page: j.meta?.last_page || 1 };
     }
+    if (r.status === 429) throw new Error(`Wallhaven's rate limit (page ${page})`);
     if (r.status < 500 || attempt >= 1) throw new Error(`Wallhaven answered ${r.status} for page ${page}`);
     await sleep(2000); // one retry for a server error
   }
