@@ -325,7 +325,7 @@ function Get-BackgroundGroups {
 
 function New-ConfText($c) {
     $l = @('# Written by the omae-wa-mou-debloated setup wizard. Re-run the wizard to change it.')
-    foreach ($k in 'ANIM_SCALE', 'INCLUDE_USER_APPS', 'PREINSTALLED_APPS', 'STOP_ONLY', 'EXTRA_PROTECT', 'XIAOMI_ANIM_KEY', 'UNWHITELIST_NETFLIX', 'START_KEYMAPPER_EXPERT_MODE', 'QUIET_APPS', 'DAILY_REFRESH', 'DAILY_REFRESH_HOUR', 'WIFI_IPV6_ROUTER_FIX', 'VOLUME_HOLD_REPEAT') {
+    foreach ($k in 'ANIM_SCALE', 'INCLUDE_USER_APPS', 'PREINSTALLED_APPS', 'STOP_ONLY', 'EXTRA_PROTECT', 'XIAOMI_ANIM_KEY', 'UNWHITELIST_NETFLIX', 'START_KEYMAPPER_EXPERT_MODE', 'QUIET_APPS', 'DAILY_REFRESH', 'DAILY_REFRESH_HOUR', 'WIFI_IPV6_ROUTER_FIX', 'VOLUME_HOLD_REPEAT', 'IDLE_TRIM_MINUTES') {
         if ($null -eq $c.$k) { continue }
         $l += ('{0}="{1}"' -f $k, $c.$k)
     }
@@ -394,6 +394,7 @@ function Step-Background {
         DAILY_REFRESH_HOUR          = "$([int]$dailyHour)"
         WIFI_IPV6_ROUTER_FIX        = '1'
         VOLUME_HOLD_REPEAT          = '1'
+        IDLE_TRIM_MINUTES           = '10'
     }
     $script:State.conf = $c; Save-State
     Add-Change @{ type = 'deploy'; anim = "$anim"; stopOnly = $c.STOP_ONLY; protect = $c.EXTRA_PROTECT; preinstalled = $c.PREINSTALLED_APPS }
@@ -838,7 +839,7 @@ function Invoke-Undo {
         }
         Ok 'animation speed restored'
         [void](Sh "for k in `$(cmd notification snoozed 2>/dev/null | grep -oE '^[^ ]+' | grep -E 'keymapper|adbautoenable'); do cmd notification unsnooze `$k; done")
-        [void](Sh 'kill $(cat /data/local/tmp/tv-daily.pid 2>/dev/null) 2>/dev/null; rm -f /data/local/tmp/tv-daily.sh /data/local/tmp/tv-daily.pid /data/local/tmp/tv-daily.last')
+        [void](Sh 'kill $(cat /data/local/tmp/tv-daily.pid 2>/dev/null) 2>/dev/null; rm -rf /data/local/tmp/tv-daily.sh /data/local/tmp/tv-daily.pid /data/local/tmp/tv-daily.last /data/local/tmp/tv-daily.idle /data/local/tmp/tv-apply.blocked')
         [void](Sh 'pkill -f tv-volhol[d].sh; rm -f /data/local/tmp/tv-volhold.sh /data/local/tmp/tv-volhold.pid /data/local/tmp/tv-volhold.held /data/local/tmp/tv-volhold.unsupported')
         [void](Sh 'for k in ip_reachability_ignore_incompleted_ipv6_default_router_version ip_reachability_ignore_incompleted_ipv6_dns_server_version; do device_config delete connectivity $k; done')
         [void](Sh 'rm -f /data/local/tmp/tv-apply.sh /data/local/tmp/tv-refresh.sh /data/local/tmp/tv-apply.conf /data/local/tmp/tv-apply.log /data/local/tmp/tv-apply.boot; [ -f /data/local/tmp/tv-apply.sh.bak ] && mv /data/local/tmp/tv-apply.sh.bak /data/local/tmp/tv-apply.sh')

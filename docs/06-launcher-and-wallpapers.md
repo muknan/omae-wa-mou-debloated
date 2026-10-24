@@ -118,6 +118,15 @@ Projectivy decides when it actually changes, so expect a new wallpaper about eve
 
 ## Performance notes (measured)
 On a 2 GB TV with a small Mali GPU, Projectivy is **GPU-bound**: the UI thread needs about 3 ms per frame, but the GPU needs about 21 ms. That's ~40 fps instead of 60.
+- **Turn off the glow animation** (Projectivy settings > Appearance > Cards > Focused card > Glow animation:
+  **None**). This is the biggest one. With "Breath" (or Pulse, Fade, Shine) the glow around the focused card never
+  stops moving, so the whole 4K screen is redrawn ~40 times a second even when nobody touches the remote: the GPU
+  never rests and every button press queues behind it. Measured on the test TV: 605 frames drawn in 15 idle
+  seconds with Breath, 1 with None. The glow itself is cheap (switching it off entirely saved ~1 ms a frame), so
+  keep the glow and just stop it moving.
+- Check how busy it is yourself: `adb shell dumpsys gfxinfo com.spocky.projengmenu reset`, leave the remote alone
+  for 15 s, then `adb shell dumpsys gfxinfo com.spocky.projengmenu | grep "Total frames"`. A handful is right; hundreds
+  means something on the home screen is animating.
 - Wallpaper **blur / brightness / contrast / saturation** effects cost GPU time on every frame; keep them neutral.
 - A **still image** is cheaper than a GIF or video background.
-- "First navigation after idle is janky, then smooth" is memory being paged back in from zram. Debloating and keeping background apps asleep reduce it.
+- "First navigation after idle is janky, then smooth" is memory being paged back in from zram. Debloating and keeping background apps asleep reduce it, and so does the idle trim (streaming apps left in the background are put to sleep after 10 minutes; see [09](09-extras.md#streaming-apps-left-in-the-background)).

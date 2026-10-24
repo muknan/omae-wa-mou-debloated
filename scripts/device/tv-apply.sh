@@ -56,6 +56,12 @@ QUIET_APPS="io.github.sds100.keymapper com.tpn.adbautoenable"
 DAILY_REFRESH=1
 DAILY_REFRESH_HOUR=4
 
+# Minutes a background-blocked app (a streaming app) may sit unused in the background before it's put to sleep.
+# On a 2 GB TV, two streaming apps left in memory take ~300 MB and push the launcher into swap, which makes the
+# home screen stutter. Never the app on screen, never one playing or running a foreground service (music, VPN);
+# opening it again is a normal cold start. Checked every minute by tv-daily.sh. 0 = off.
+IDLE_TRIM_MINUTES=10
+
 # 1 = start Key Mapper's Expert Mode if it isn't running (needed for Key Mapper "Execute with ADB" actions on
 # TVs where its own auto-start can't pair). 0 = don't.
 START_KEYMAPPER_EXPERT_MODE=1
@@ -92,6 +98,8 @@ for p in $USER_APPS $PREINSTALLED_APPS; do
     listed "$p" "$BG_BLOCK" && continue
     BG_BLOCK="$BG_BLOCK $p"
 done
+# tv-daily.sh puts these to sleep when they sit unused in the background (IDLE_TRIM_MINUTES).
+echo $BG_BLOCK > /data/local/tmp/tv-apply.blocked
 
 # shellcheck disable=SC2086  # deliberate word splitting: counts the words in $1
 count() { set -- $1; echo $#; }
@@ -163,9 +171,9 @@ if [ "$START_KEYMAPPER_EXPERT_MODE" = "1" ] && pm path $KM >/dev/null 2>&1 && ! 
     fi
 fi
 
-# Daily refresh + re-hiding helper notifications: start the tiny background helper (tv-daily.sh) if it isn't
-# running yet.
-if { [ "$DAILY_REFRESH" = "1" ] || [ -n "$QUIET_APPS" ]; } && [ -f /data/local/tmp/tv-daily.sh ]; then
+# Daily refresh, idle trim, re-hiding helper notifications: start the tiny background helper (tv-daily.sh) if it
+# isn't running yet.
+if { [ "$DAILY_REFRESH" = "1" ] || [ -n "$QUIET_APPS" ] || [ "${IDLE_TRIM_MINUTES:-0}" -gt 0 ]; } && [ -f /data/local/tmp/tv-daily.sh ]; then
     dp=$(cat /data/local/tmp/tv-daily.pid 2>/dev/null)
     if [ -z "$dp" ] || ! grep -q tv-daily /proc/"$dp"/cmdline 2>/dev/null; then
         setsid nohup sh /data/local/tmp/tv-daily.sh </dev/null >/dev/null 2>&1 &

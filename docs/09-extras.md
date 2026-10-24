@@ -17,6 +17,8 @@ and cached apps are cleared. You never have to remember to press it.
 - The same check re-hides helper notifications that came back (see [05](05-key-mapper.md#no-notification-clutter)),
   so it keeps running even with the daily refresh switched off.
 - **It never interrupts:** if anything is playing (music, video), it waits for the next check.
+- After a cold boot the TV's clock starts at the firmware's build date until it gets the time from the network; the
+  refresh waits for the real time, so it doesn't run on the wrong day (and then again on the right one).
 - Settings in `tv-apply.conf` (re-read at every check, no restart needed):
 
   ```sh
@@ -26,6 +28,24 @@ and cached apps are cleared. You never have to remember to press it.
 
 - See what it did: `adb shell tail /data/local/tmp/tv-apply.log` shows a `daily refresh` line each day.
 - Stop it now: `adb shell 'kill $(cat /data/local/tmp/tv-daily.pid)'`. Undo everything removes it too.
+
+## Streaming apps left in the background
+
+Leave Hotstar for the home screen and it stays in memory; open SonyLIV after it and both do. On a 2 GB TV two
+streaming apps take ~300 MB, the system starts swapping the launcher out to zram, and the home screen stutters until
+Android gets round to killing them (the test TV's log showed it doing exactly that, minutes later).
+
+The same background helper fixes it: an app from the background-blocked list (your installed apps and the
+preinstalled streaming apps, the ones the refresh puts to sleep anyway) that sits unused for 10 minutes is put to
+sleep, as at boot.
+
+- **"Unused" is Android's own call.** The helper reads the priority Android gives the app's process (a file read,
+  no `dumpsys` every minute): on screen, visible, playing or running a foreground service (music, a VPN) means in
+  use. Only "the app you were in last" or "cached" counts, and it has to stay that way the whole 10 minutes.
+- Right before stopping one it checks once more that it isn't on screen or playing. Opening it again is a normal
+  start, as after a reboot.
+- `IDLE_TRIM_MINUTES="10"` in `tv-apply.conf`; `0` switches it off. The log shows each one:
+  `put in.startv.hotstar to sleep (unused in the background for 10 min; MemAvailable now ... kB)`.
 
 ## Holding the volume buttons
 
@@ -113,7 +133,9 @@ second each time. The test TV did this every 4-9 minutes on a locked ISP router.
 **The TV-side fix (on by default):** Android's network module has switches for exactly this:
 `ip_reachability_ignore_incompleted_ipv6_default_router_version` (and `..._dns_server_version`). With them on, a
 dead IPv6 gateway is dropped from the checks as long as IPv4 still works, instead of resetting the connection. The
-boot helper sets them at every boot and refresh (`WIFI_IPV6_ROUTER_FIX="1"` in `tv-apply.conf`). By hand:
+boot helper sets them at every boot and refresh (`WIFI_IPV6_ROUTER_FIX="1"` in `tv-apply.conf`), and because
+Google's remote config resets them now and then (the test TV lost them twice in one afternoon), the background
+helper checks them every 10 minutes and sets them again. By hand:
 
 ```powershell
 adb shell device_config put connectivity ip_reachability_ignore_incompleted_ipv6_default_router_version 1
