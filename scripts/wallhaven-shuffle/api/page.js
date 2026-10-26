@@ -6,6 +6,12 @@ import { CACHE_GOOD, MAX_PAGES, fetchToplistPage, listParams } from '../lib/core
 export default async function handler(req, res) {
   const p = listParams(req.query);
   const n = Math.min(Math.max(parseInt(req.query.n, 10) || 1, 1), MAX_PAGES);
+  // The list's quick parallel read asks for cached pages only: one the CDN doesn't have is not fetched from
+  // Wallhaven here (the list asks for it again, one at a time). Not cached, since the answer has no page in it.
+  if (req.headers['x-cached-only'] === '1') {
+    res.setHeader('cache-control', 'no-store');
+    return res.status(404).json({ error: 'not cached' });
+  }
   try {
     const page = await fetchToplistPage(p, n);
     res.setHeader('cache-control', CACHE_GOOD);

@@ -55,9 +55,9 @@ export function selfUrl(req, path, query) {
 
 // A JSON answer, or null for anything else (an error status, a timeout, an HTML error page), so one bad page never
 // takes a whole list or set down with it.
-export async function getJson(url, ms) {
+export async function getJson(url, ms, headers = {}) {
   try {
-    const r = await fetch(url, { signal: AbortSignal.timeout(ms) });
+    const r = await fetch(url, { headers, signal: AbortSignal.timeout(ms) });
     return r.ok ? { json: await r.json(), cached: r.headers.get('x-vercel-cache') === 'HIT' } : null;
   } catch {
     return null;
@@ -131,13 +131,16 @@ function setAt(items, slot, seedText) {
   return { pass, index, sets, set: segment(passOrder(items, pass, sets, seedText), index, sets) };
 }
 
+// The number of the time window (SLOT_MINUTES long) `now` falls in.
+export const slotOf = (now) => Math.floor(now / (SLOT_MINUTES * 60 * 1000));
+
 // The set for the time window (SLOT_MINUTES) `now` falls in. Each pass orders the list anew and hands out sets
 // 1..N, one per window, so every wallpaper is shown once per pass, and a set never repeats one from the set before
 // it. If the list changed in between (which can shift a set by a wallpaper or two), anything the previous set
 // showed is left out of this one.
 export function pickSet(items, now, seedText) {
   const slotMs = SLOT_MINUTES * 60 * 1000;
-  const slot = Math.floor(now / slotMs);
+  const slot = slotOf(now);
   const cur = setAt(items, slot, seedText), before = ids(setAt(items, slot - 1, seedText).set);
   return { set: cur.set.filter((w) => !before.has(w.id)), pass: cur.pass, index: cur.index, sets: cur.sets, nextChange: (slot + 1) * slotMs };
 }

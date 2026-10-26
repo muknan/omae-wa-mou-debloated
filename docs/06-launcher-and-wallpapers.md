@@ -66,8 +66,11 @@ return "a random 24 from the toplist" (its random sort ignores `topRange`), so t
   plugin gets an answer in well under a second and Wallhaven sees each page about four times a day. Vercel's
   outgoing addresses are shared, and so is Wallhaven's rate limit: pages it refuses are simply asked for again a
   couple of minutes later, and progress is never lost.
-- On a cold start (first use, or after the cache was dropped) the plugin gets the toplist's first page within ~5 s
-  while the list is built; the shuffle takes over about a minute later.
+- The whole list is cached too, but the CDN drops it now and then when it's only asked for once an hour. Putting it
+  back together from the cached pages takes about 2 s (they're read 8 at a time), inside the 5 s the service
+  waits. Only if the pages are gone as well (first use, or right after a deploy) does the plugin get a stand-in:
+  six toplist pages that change every hour, about an hour's worth. It used to be the toplist's first page every
+  time, which brought the same ~20 wallpapers back again and again. The shuffle takes over at the next request.
 
 **Deploy your own** (free Vercel account): **Add New > Project**, import your fork of this repo, set **Root
 Directory** to `scripts/wallhaven-shuffle`, deploy. Or from that folder: `npx vercel deploy --prod`. Optional
