@@ -1,6 +1,6 @@
 # wallhaven-shuffle
 
-A Wallhaven toplist for Projectivy's Booru wallpaper plugin, a set at a time (`SET_SIZE`, default 24), shuffled, walking through
+A Wallhaven toplist for Projectivy's Booru wallpaper plugin, a set at a time (`SET_SIZE`, default 200), shuffled, walking through
 the whole list. One dependency-free Vercel function.
 
 - `api/v1/search.js` answers the plugin (`<Booru URL>/api/v1/search?...`) with the current set. It never

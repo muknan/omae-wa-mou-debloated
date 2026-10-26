@@ -4,10 +4,11 @@
 // CATEGORIES (e.g. 110 = no People), PURITY, SLOT_MINUTES, SET_SIZE, WALLHAVEN_API_KEY.
 // Each can also come from the request (?range=&res=&atleast=&ratios=&maxw=&fav=&cats=&purity=), which wins.
 
-// Wallpapers per set (one set per time window). Projectivy shows a new one every "Update delay" minutes and only
-// asks for the next set about once an hour, so a set of 60 at a 1-minute delay never loops (24, the plugin's usual
-// page size, runs out after 24 minutes and then repeats). SET_SIZE sets it; default 24.
-export const PER_SET = Math.min(Math.max(Number(process.env.SET_SIZE) || 24, 1), 200);
+// Wallpapers per set (one set per time window). The plugin asks for a set about once an hour and Projectivy keeps
+// it for that hour, showing a random one from it every "Update delay" minutes (not in order: random picks, with
+// some avoidance of recent ones). So the bigger the set, the fewer repeats within the hour: at a 1-minute delay a
+// set of 70 repeats ~20 times an hour, a set of 200 ~2-8 times. SET_SIZE sets it; default 200, the most.
+export const PER_SET = Math.min(Math.max(Number(process.env.SET_SIZE) || 200, 1), 200);
 export const MAX_PAGES = 200; // 4800 wallpapers (a year of 4K, 16:9 + 16:10, is ~4600); keeps a long range bounded
 // CDN caching: a good answer stays fresh for 6 hours, then is served stale (instantly) for up to a week while a
 // new one is fetched in the background.

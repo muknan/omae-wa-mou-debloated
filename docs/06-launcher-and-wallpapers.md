@@ -86,7 +86,7 @@ environment variables:
 | `CATEGORIES` | `111` | general / anime / people as 0-1 flags: `110` = no People |
 | `PURITY` | `100` | SFW only |
 | `MIN_FAVORITES` | `0` | skip wallpapers with fewer favourites (the toplist is every upload, ranked) |
-| `SET_SIZE` | `24` | wallpapers per hourly set; make it at least 60 ÷ Projectivy's *Update delay* (min), so the set doesn't loop before the next one: `70` for a 1-minute delay |
+| `SET_SIZE` | `200` | wallpapers per hourly set (at most 200). Projectivy keeps a set for an hour and shows a **random** one from it every *Update delay* minutes, not in order, so a bigger set means fewer repeats: at a 1-minute delay, ~20 repeats an hour with 70, ~2-8 with 200 |
 
 The toplist is really every upload in the range, ranked, so the bottom half is weak (median ~16 favourites).
 Measured for General + Anime, SFW, 4K and up, 16:9 + 16:10, with at least 50 favourites:

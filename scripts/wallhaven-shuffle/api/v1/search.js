@@ -1,5 +1,5 @@
 // Wallhaven shuffle - feeds Projectivy's Booru wallpaper plugin a Wallhaven toplist (default: top of the last
-// 3 months, 4K) a set at a time (SET_SIZE, default 24), walking through the whole list in a shuffled order.
+// 3 months, 4K) a set at a time (SET_SIZE, default 200), walking through the whole list in a shuffled order.
 //
 // The plugin asks "<its Booru URL>/api/v1/search?q=...&sorting=random" about once an hour and shows the wallpapers
 // it gets back. Wallhaven itself can't return a random set from a toplist, so this does:
