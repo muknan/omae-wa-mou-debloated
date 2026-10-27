@@ -66,9 +66,13 @@ return "a random 24 from the toplist" (its random sort ignores `topRange`), so t
   plugin gets an answer in well under a second and Wallhaven sees each page about four times a day. Vercel's
   outgoing addresses are shared, and so is Wallhaven's rate limit: pages it refuses are simply asked for again a
   couple of minutes later, and progress is never lost.
-- The whole list is cached too, but the CDN drops it now and then when it's only asked for once an hour. Putting it
-  back together from the cached pages takes about 2 s (they're read 8 at a time), inside the 5 s the service
-  waits. Only if the pages are gone as well (first use, or right after a deploy) does the plugin get a stand-in:
+- The whole list is cached too, but the CDN drops what isn't asked for, and the TV asks only when its home screen
+  needs a set, sometimes hours apart. So the TV shares the [Windows app](../scripts/wallhaven-shuffle/windows)'s
+  list: it asks for the list without the width limit (`maxw=0`, the same address as the app's `ListUrl`) and
+  applies the limit itself. Whenever the PC has been on that hour, the list is already there. If only the
+  list is gone, putting it back together from the cached pages takes about 2 s (they're read 8 at a time), inside
+  the 5 s the service waits. If the pages are gone too (the PC has been off for a while, first use, right after a
+  deploy), the plugin gets a stand-in:
   six toplist pages that change every hour, about an hour's worth. It used to be the toplist's first page every
   time, which brought the same ~20 wallpapers back again and again. The shuffle takes over at the next request.
 

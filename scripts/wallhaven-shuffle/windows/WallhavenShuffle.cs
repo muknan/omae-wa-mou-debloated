@@ -1036,7 +1036,10 @@ namespace WallhavenShuffle
                 {
                     if (id != change) return;
                     busy = false;
-                    nextChange = DateTime.Now.AddSeconds(error == null ? settings.IntervalSeconds : 30);
+                    // Counted from when this change started, not when it finished, so the time a change takes (the
+                    // fade, a download) doesn't push every later one back a little.
+                    nextChange = error != null ? DateTime.Now.AddSeconds(30)
+                        : new DateTime(Math.Max(busySince.AddSeconds(settings.IntervalSeconds).Ticks, DateTime.Now.AddSeconds(5).Ticks));
                     changeFailed = error != null;
                     if (error != null) { lastError = error; queued = 0; Log("change failed (" + w.Id + "): " + error); Changed(); return; }
                     lastError = "";

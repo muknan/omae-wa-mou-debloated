@@ -10,8 +10,9 @@
 #     stutters while the system swaps.
 #   - QUIET_APPS: helper apps re-post their permanent notifications whenever they restart or you pause/resume
 #     key maps, which undoes the snooze. Any that came back are hidden again, so a badge lasts a minute at most.
-#   - WIFI_IPV6_ROUTER_FIX: Google's remote config can reset the two switches tv-apply.sh sets; every 10 minutes
-#     they're checked and set again, so the Wi-Fi drop-outs they prevent don't come back in between.
+#   - WIFI_IPV6_ROUTER_FIX: Google's remote config resets the two switches tv-apply.sh sets (about 10 minutes after
+#     every boot, and now and then later); they're checked every minute for the first half hour after a boot and
+#     every 10 minutes after that, and set again, so the Wi-Fi drop-outs they prevent don't come back in between.
 #   - DAILY_REFRESH: on the first check at or after DAILY_REFRESH_HOUR each day it refreshes. While the TV is in
 #     standby it is asleep too, so a 4:00 refresh happens within a minute of switching the TV on. It skips any
 #     check where something is playing (music, video), so it never interrupts, and waits until the clock has been
@@ -85,7 +86,8 @@ while true; do
         done
     fi
 
-    if [ "$WIFI_IPV6_ROUTER_FIX" = "1" ] && [ $((ticks % 10)) -eq 0 ]; then
+    # Every minute for the first half hour after a boot (Google's config resets them ~10 minutes in), then every 10.
+    if [ "$WIFI_IPV6_ROUTER_FIX" = "1" ] && { [ "$(uptime_s)" -lt 1800 ] || [ $((ticks % 10)) -eq 0 ]; }; then
         for k in ip_reachability_ignore_incompleted_ipv6_default_router_version ip_reachability_ignore_incompleted_ipv6_dns_server_version; do
             v=$(device_config get connectivity $k 2>/dev/null)
             [ -z "$v" ] || [ "$v" = "1" ] || { device_config put connectivity $k 1 >/dev/null 2>&1 && log "Wi-Fi IPv6 router fix: set $k again (was $v)"; }
