@@ -52,7 +52,7 @@ Projectivy caches the list and only re-asks the plugin every so often. To switch
 pick another source, then pick Booru Wallpaper Provider again**. Check **Show wallpapers**: the names are Wallhaven
 image IDs, so you can look any of them up at `https://wallhaven.cc/w/<id>`.
 
-### A fresh 24 every hour, through the whole toplist (optional)
+### A fresh set every hour, through the whole toplist (optional)
 With the URL above, Projectivy asks about once an hour and gets the **same top 24** every time. Wallhaven can't
 return "a random 24 from the toplist" (its random sort ignores `topRange`), so this needs a tiny helper in between:
 [`scripts/wallhaven-shuffle`](../scripts/wallhaven-shuffle), one free Vercel function with no dependencies.
@@ -116,8 +116,30 @@ plugin as described above, and open `https://<your-project>.vercel.app/api/v1/se
 current set (`meta.shuffle` says which set of how many). To try other settings without redeploying, put them in the
 plugin URL instead: `https://<your-project>.vercel.app/r/6M/2560x1440/20`.
 
+### In order, no repeats: the Wallhaven Shuffle plugin (recommended)
+Even with the service, the Booru plugin can't promise "no repeats". Projectivy keeps a plugin's set for the plugin's
+cache time (Booru: an hour) and at each change shows a **random** one from it, so a set of 200 shown once a minute
+still repeats a few times an hour. On top of that, the set is only right if the service answers within seconds at
+the moment the TV asks.
+
+[`scripts/wallhaven-shuffle/projectivy-plugin`](../scripts/wallhaven-shuffle/projectivy-plugin) is a small plugin
+of our own (45 KB) that removes both problems:
+- **It hands Projectivy one wallpaper at a time.** At every change Projectivy asks again and gets the next one.
+- **It rotates the list like the Windows app:** every wallpaper once per round, none back within 20 changes.
+- **It keeps the list on the TV,** refreshed twice a day, so a slow or unreachable service doesn't matter at the
+  moment of a change.
+
+Measured on the test TV: one request per change, on the minute ("1 of 677", "2 of 677", …). The round carried on
+through an app update and a refresh, and it used ~1.5 s of CPU in 6 minutes. See its
+[README](../scripts/wallhaven-shuffle/projectivy-plugin/README.md) for install and build. The Booru plugin can stay
+installed as a fallback.
+
 ### Ask for the next wallpaper over ADB
-Projectivy listens for the same "wallpaper updated" broadcast the plugin sends:
+With the Wallhaven Shuffle plugin, ask it (Projectivy shows the next one right away; at most about every half minute):
+```powershell
+adb shell am broadcast -a io.github.muknan.wallhavenshuffle.NEXT -n io.github.muknan.wallhavenshuffle/.NextReceiver
+```
+With other plugins, Projectivy listens for the same "wallpaper updated" broadcast the plugin sends:
 ```powershell
 adb shell am broadcast -a tv.projectivy.plugin.action.WALLPAPER_PROVIDER_UPDATED -n com.spocky.projengmenu/.receivers.WallpaperProviderUpdateReceiver
 ```
