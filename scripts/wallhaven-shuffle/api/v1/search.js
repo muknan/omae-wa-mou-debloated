@@ -24,13 +24,16 @@ const memory = new Map(); // list query -> { until, list }: a warm instance skip
 
 const withTimeout = (promise, ms) => Promise.race([promise, new Promise((done) => setTimeout(done, ms, null))]);
 
-// The list as { items, complete } (complete or partial), or null if nothing usable arrived in time.
+// The list as { items, complete } (complete or partial), or null if nothing usable arrived in time. It asks for the
+// list without the width limit (maxw=0) and applies the limit itself: that's the same list the Windows app asks for
+// every hour, so whenever the PC has been on, it's already in the CDN and comes back in milliseconds, even when
+// this endpoint itself hasn't been asked for hours (the CDN drops what isn't asked for).
 async function getList(req, p) {
-  const key = listQuery(p);
+  const key = listQuery({ ...p, maxw: 0 });
   const hit = memory.get(key);
   if (hit && Date.now() < hit.until) return hit.list;
   try {
-    const r = await withTimeout(fetch(selfUrl(req, '/api/list', listQuery(p))), LIST_WAIT_MS);
+    const r = await withTimeout(fetch(selfUrl(req, '/api/list', key)), LIST_WAIT_MS);
     if (r && r.ok) {
       const j = await r.json();
       if (j.items?.length >= PER_SET) {
@@ -58,8 +61,9 @@ async function fallbackSet(req, p, now) {
   if (all.filter(passes(p)).length < 8) all = all.concat(await getPage(1));
   const seen = new Set();
   all = all.filter((w) => w && w.id && !seen.has(w.id) && seen.add(w.id));
-  const good = all.filter(passes(p));
-  return { set: (good.length >= 8 ? good : all).slice(0, PER_SET), pages: nums };
+  const fitting = all.filter((w) => !p.maxw || (w.dimension_x || 0) <= p.maxw); // the width limit always holds
+  const good = fitting.filter(passes(p));
+  return { set: (good.length >= 8 ? good : fitting).slice(0, PER_SET), pages: nums };
 }
 
 export default async function handler(req, res) {
@@ -74,8 +78,11 @@ export default async function handler(req, res) {
       res.setHeader('cache-control', 'no-store');
       return res.status(200).json({ data: top, meta: { current_page: 1, last_page: 1, per_page: PER_SET, total: top.length, query: null, seed: null, shuffle: { fallback: 'list is being built', pages } } });
     }
-    const all = list.items, filtered = all.filter(passes(p));
-    const items = filtered.length >= PER_SET ? filtered : all; // a too-strict minimum falls back to the whole list
+    // The width limit always holds (the shared list has 5K/8K ones too); a favourites minimum so strict that not
+    // even one set is left falls back to everything that fits.
+    const fitting = list.items.filter((w) => !p.maxw || (w.dimension_x || 0) <= p.maxw);
+    const filtered = fitting.filter(passes(p));
+    const items = filtered.length >= 24 ? filtered : fitting;
     const now = Date.now();
     const { set, pass, index, sets, nextChange } = pickSet(items, now, listQuery(p));
     const secondsLeft = Math.max(30, Math.floor((nextChange - now) / 1000));

@@ -37,10 +37,11 @@ export function listParams(query = {}) {
   return { range, res, atleast, ratios, maxw, fav, cats, purity };
 }
 
-// What Wallhaven is asked for: the CDN cache key of /api/page.
-export const pageQuery = (p) => `range=${p.range}` +
-  (p.atleast ? `&atleast=${p.atleast}` : `&res=${encodeURIComponent(p.res)}`) +
-  (p.ratios ? `&ratios=${encodeURIComponent(p.ratios)}` : '') + `&cats=${p.cats}&purity=${p.purity}`;
+// What Wallhaven is asked for: the CDN cache key of /api/page. Commas stay as they are (res and ratios are checked
+// to be digits, x and commas), so the address is exactly the one people type, e.g. the Windows app's ListUrl, and
+// both share one cached copy.
+export const pageQuery = (p) => `range=${p.range}` + (p.atleast ? `&atleast=${p.atleast}` : `&res=${p.res}`) +
+  (p.ratios ? `&ratios=${p.ratios}` : '') + `&cats=${p.cats}&purity=${p.purity}`;
 // ... plus the filters applied while putting the list together: the CDN cache key of /api/list.
 export const listQuery = (p) => `${pageQuery(p)}&fav=${p.fav}&maxw=${p.maxw}`;
 
