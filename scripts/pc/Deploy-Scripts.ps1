@@ -26,8 +26,9 @@ if ($CleanStaging) {
 
 if ($Remove) {
     & $adb -s $Device shell 'kill $(cat /data/local/tmp/tv-daily.pid 2>/dev/null) 2>/dev/null; rm -rf /data/local/tmp/tv-daily.sh /data/local/tmp/tv-daily.pid /data/local/tmp/tv-daily.last /data/local/tmp/tv-daily.idle /data/local/tmp/tv-apply.blocked'
-    & $adb -s $Device shell 'pkill -f tv-volhol[d].sh; rm -f /data/local/tmp/tv-volhold.sh /data/local/tmp/tv-volhold.pid /data/local/tmp/tv-volhold.held /data/local/tmp/tv-volhold.unsupported'
-    & $adb -s $Device shell "rm -f /data/local/tmp/tv-apply.sh /data/local/tmp/tv-refresh.sh /data/local/tmp/tv-apply.log /data/local/tmp/tv-apply.boot; rm -rf /sdcard/Download/tvagent"
+    & $adb -s $Device shell 'for p in $(pgrep -f tv-volhol[d].sh); do kill $p 2>/dev/null; pkill -P $p 2>/dev/null; done; rm -f /data/local/tmp/tv-volhold.sh /data/local/tmp/tv-volhold.pid /data/local/tmp/tv-volhold.held /data/local/tmp/tv-volhold.unsupported'
+    & $adb -s $Device shell "rm -f /data/local/tmp/tv-apply.sh /data/local/tmp/tv-refresh.sh /data/local/tmp/tv-apply.conf /data/local/tmp/tv-apply.log /data/local/tmp/tv-apply.boot /data/local/tmp/keymapper_sysbridge_starter; rm -rf /sdcard/Download/tvagent"
+    & $adb -s $Device shell 'cmd deviceidle sys-whitelist +com.netflix.ninja >/dev/null 2>&1'   # UNWHITELIST_NETFLIX took it off
     & $adb -s $Device shell 'for k in ip_reachability_ignore_incompleted_ipv6_default_router_version ip_reachability_ignore_incompleted_ipv6_dns_server_version; do device_config delete connectivity $k; done'
     # Back to stock animation speed (1.0). The background limits clear themselves at the next restart.
     & $adb -s $Device shell "for k in window_animation_scale transition_animation_scale animator_duration_scale mitv_fast_cur_anim_scale; do settings put global `$k 1.0; done"
@@ -39,6 +40,8 @@ if ($Remove) {
 foreach ($f in "tv-apply.sh", "tv-refresh.sh", "tv-daily.sh", "tv-volhold.sh") {
     & $adb -s $Device push (Join-Path $root "device\$f") "/data/local/tmp/$f" | Out-Null
 }
+# Running helpers keep their old code until they're restarted: stop them, tv-apply.sh starts them again.
+& $adb -s $Device shell 'kill $(cat /data/local/tmp/tv-daily.pid 2>/dev/null) 2>/dev/null; for p in $(pgrep -f tv-volhol[d].sh); do kill $p 2>/dev/null; pkill -P $p 2>/dev/null; done; rm -f /data/local/tmp/tv-volhold.pid /data/local/tmp/tv-volhold.held'
 & $adb -s $Device shell "chmod 755 /data/local/tmp/tv-apply.sh /data/local/tmp/tv-refresh.sh /data/local/tmp/tv-daily.sh /data/local/tmp/tv-volhold.sh; sh /data/local/tmp/tv-apply.sh; tail -n 4 /data/local/tmp/tv-apply.log"
 
 if ($Termux) {

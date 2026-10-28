@@ -36,7 +36,7 @@ async function getList(req, p) {
     const r = await withTimeout(fetch(selfUrl(req, '/api/list', key)), LIST_WAIT_MS);
     if (r && r.ok) {
       const j = await r.json();
-      if (j.items?.length >= PER_SET) {
+      if (j.items?.length > 0) {                  // any list with wallpapers (a short one is shuffled too)
         if (memory.size >= 16 && !memory.has(key)) memory.delete(memory.keys().next().value); // a few lists at most
         const list = { items: j.items, complete: j.complete === true };
         memory.set(key, { until: Date.now() + (list.complete ? 3600e3 : 120e3), list });

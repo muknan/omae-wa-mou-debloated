@@ -32,7 +32,7 @@ function Test-Health {
 
 if ($Restore) {
     if (-not (Test-Path $Log)) { throw "No change log at $Log" }
-    $entries = Get-Content $Log | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.type -eq "pm-disable" }
+    $entries = @(Get-Content $Log | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.type -eq "pm-disable" })
     [array]::Reverse($entries)
     foreach ($e in $entries) {
         if ($WhatIf) { Write-Host "[WhatIf] pm enable --user 0 $($e.package)"; continue }

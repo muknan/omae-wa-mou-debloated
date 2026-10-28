@@ -14,7 +14,8 @@
 #
 # Safety: at most MAX_REPEATS steps per hold (also the limit if a release is ever missed); the steps don't come
 # back through getevent, so it can't trigger itself. Started by tv-apply.sh, kept running by tv-daily.sh;
-# VOLUME_HOLD_REPEAT="0" in tv-apply.conf stops it. Stop it now: pkill -f tv-volhold.sh
+# VOLUME_HOLD_REPEAT="0" in tv-apply.conf stops it. Stop it now (the shell acts on a signal only once getevent
+# ends, so stop its children too): for p in $(pgrep -f tv-volhol[d].sh); do kill $p 2>/dev/null; pkill -P $p 2>/dev/null; done
 DIR=/data/local/tmp
 LOG=$DIR/tv-apply.log
 HELD=$DIR/tv-volhold.held   # names the hold in progress; the repeat loop runs only while it names its own hold

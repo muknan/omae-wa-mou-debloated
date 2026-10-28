@@ -37,7 +37,8 @@ mkdir -p $IDLE
 trap 'kill "$napper" 2>/dev/null; rm -f $DIR/tv-daily.pid; exit 0' TERM INT
 
 log() { echo "$(date '+%F %T') $*" >> $LOG; }
-uptime_s() { cut -d. -f1 /proc/uptime; }
+# The minute loop reads files with the shell's own `read` and avoids starting commands: on the test TV every
+# external command (even `sleep 0`) costs ~25-30 ms of CPU, which added up to ~1 s a minute.
 # The app on screen (its package).
 top_app() { dumpsys activity activities 2>/dev/null | grep -m1 -E 'topResumedActivity|mResumedActivity' | sed 's/.* u0 //; s/\/.*//'; }
 # Apps busy in the background: playing something, or running a foreground service (music, a connected VPN).
@@ -63,14 +64,19 @@ while true; do
     # shellcheck source=/dev/null
     [ -f $DIR/tv-apply.conf ] && . $DIR/tv-apply.conf
     [ -f $DIR/tv-refresh.sh ] || DAILY_REFRESH=0
+    read -r up _ < /proc/uptime; now=${up%%.*}                  # seconds since boot
     # Keep the volume hold-to-repeat helper running (it can end, e.g. if killed to free memory).
     if [ "${VOLUME_HOLD_REPEAT:-1}" = "1" ] && [ -f $DIR/tv-volhold.sh ]; then
-        vp=$(cat $DIR/tv-volhold.pid 2>/dev/null)
-        if ! grep -q tv-volhold /proc/"$vp"/cmdline 2>/dev/null &&
-            [ "$(cat $DIR/tv-volhold.unsupported 2>/dev/null)" != "$(getprop ro.build.fingerprint)" ]; then
-            setsid nohup sh $DIR/tv-volhold.sh </dev/null >/dev/null 2>&1 &
-            log "restarted volume hold-to-repeat helper"
-        fi
+        vp=; vc=; read -r vp 2>/dev/null < $DIR/tv-volhold.pid
+        [ -n "$vp" ] && read -r vc 2>/dev/null < /proc/"$vp"/cmdline
+        case "$vc" in
+            *tv-volhold*) ;;
+            *)  un=; read -r un 2>/dev/null < $DIR/tv-volhold.unsupported
+                if [ "$un" != "$(getprop ro.build.fingerprint)" ]; then
+                    setsid nohup sh $DIR/tv-volhold.sh </dev/null >/dev/null 2>&1 &
+                    log "restarted volume hold-to-repeat helper"
+                fi ;;
+        esac
     fi
     if [ "$DAILY_REFRESH" != "1" ] && [ -z "$QUIET_APPS" ] && [ "${IDLE_TRIM_MINUTES:-0}" -le 0 ]; then
         log "background helper stopped (switched off or removed)"
@@ -87,7 +93,7 @@ while true; do
     fi
 
     # Every minute for the first half hour after a boot (Google's config resets them ~10 minutes in), then every 10.
-    if [ "$WIFI_IPV6_ROUTER_FIX" = "1" ] && { [ "$(uptime_s)" -lt 1800 ] || [ $((ticks % 10)) -eq 0 ]; }; then
+    if [ "$WIFI_IPV6_ROUTER_FIX" = "1" ] && { [ "$now" -lt 1800 ] || [ $((ticks % 10)) -eq 0 ]; }; then
         for k in ip_reachability_ignore_incompleted_ipv6_default_router_version ip_reachability_ignore_incompleted_ipv6_dns_server_version; do
             v=$(device_config get connectivity $k 2>/dev/null)
             [ -z "$v" ] || [ "$v" = "1" ] || { device_config put connectivity $k 1 >/dev/null 2>&1 && log "Wi-Fi IPv6 router fix: set $k again (was $v)"; }
@@ -100,14 +106,24 @@ while true; do
     # IDLE_TRIM_MINUTES unused in a row; the moment it's in use again the count starts over. Before stopping it,
     # one last check that nothing of it is on screen or playing.
     if [ "${IDLE_TRIM_MINUTES:-0}" -gt 0 ] && [ -f $DIR/tv-apply.blocked ]; then
-        now=$(uptime_s)
-        for p in $(cat $DIR/tv-apply.blocked); do
-            pid=$(pidof "$p") || { rm -f "$IDLE/$p"; continue; }
-            adj=$(cat /proc/"${pid%% *}"/oom_score_adj 2>/dev/null)
+        # One pidof for all of them (empty, the usual case, when none runs); names from /proc, as " package=pid ...".
+        blocked=; read -r blocked < $DIR/tv-apply.blocked
+        running=" "
+        for pid in $(pidof $blocked 2>/dev/null); do
+            n=; read -r n 2>/dev/null < /proc/"$pid"/cmdline        # (no newline at the end: read says "end of file" but has the name)
+            [ -n "$n" ] && running="$running$n=$pid "
+        done
+        for f in "$IDLE"/*; do                                    # forget the ones that stopped
+            [ -f "$f" ] || continue
+            case "$running" in *" ${f##*/}="*) ;; *) rm -f "$f" ;; esac
+        done
+        for entry in $running; do
+            p=${entry%%=*}; pid=${entry#*=}
+            adj=; read -r adj 2>/dev/null < /proc/"$pid"/oom_score_adj
             case "$adj" in ''|*[!0-9-]*) continue ;; esac
-            if [ "$adj" -lt 700 ]; then rm -f "$IDLE/$p"; continue; fi
+            if [ "$adj" -lt 700 ]; then [ -f "$IDLE/$p" ] && rm -f "$IDLE/$p"; continue; fi
             [ -f "$IDLE/$p" ] || { echo "$now" > "$IDLE/$p"; continue; }
-            since=$(cat "$IDLE/$p" 2>/dev/null)
+            since=; read -r since 2>/dev/null < "$IDLE/$p"
             case "$since" in ''|*[!0-9]*) echo "$now" > "$IDLE/$p"; continue ;; esac
             [ $((now - since)) -ge $((IDLE_TRIM_MINUTES * 60)) ] || continue
             [ "$(top_app)" = "$p" ] && { rm -f "$IDLE/$p"; continue; }
@@ -119,10 +135,11 @@ while true; do
     fi
 
     [ "$DAILY_REFRESH" = "1" ] || continue
-    [ "$(date +%s)" -gt $((${BUILT:-0} + 172800)) ] || continue   # the clock isn't set yet (it starts at the build date)
-    today=$(date +%F)
-    hour=$(date +%H); hour=${hour#0}
-    [ "$(cat $STAMP 2>/dev/null)" = "$today" ] && continue
+    set -- $(date '+%s %F %H')                                   # one date call: seconds, day, hour
+    [ "$1" -gt $((${BUILT:-0} + 172800)) ] || continue           # the clock isn't set yet (it starts at the build date)
+    today=$2; hour=${3#0}
+    last=; read -r last 2>/dev/null < $STAMP
+    [ "$last" = "$today" ] && continue
     [ "${hour:-0}" -lt "$DAILY_REFRESH_HOUR" ] && continue
     if dumpsys media_session 2>/dev/null | grep -qE 'state=PlaybackState \{state=(PLAYING|3[,)])'; then
         continue   # something is playing: try again at the next check

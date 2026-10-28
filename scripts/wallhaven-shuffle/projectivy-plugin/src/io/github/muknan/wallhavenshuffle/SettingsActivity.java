@@ -29,7 +29,7 @@ public final class SettingsActivity extends Activity {
 
     @Override protected void onCreate(Bundle saved) {
         super.onCreate(saved);
-        applyExtras(getIntent());
+        if (saved == null) applyExtras(getIntent());   // once: not again when Android re-creates the screen
 
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
@@ -69,7 +69,17 @@ public final class SettingsActivity extends Activity {
         showStatus(null);
     }
 
-    @Override protected void onNewIntent(Intent intent) { super.onNewIntent(intent); if (applyExtras(intent)) recreate(); }
+    // Opened again while open (singleTask): take the new settings and show them. Not recreate(): that would run
+    // onCreate with the screen's first intent and put its (older) settings back.
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        if (!applyExtras(intent)) return;
+        SharedPreferences p = ListStore.prefs(this);
+        url.setText(p.getString("list_url", ""));
+        width.setText(String.valueOf(p.getInt("max_width", 3840)));
+        status.setText("Getting the list…");
+    }
 
     // Settings given on the command line (ADB): saved straight away, and the list is fetched.
     private boolean applyExtras(Intent i) {

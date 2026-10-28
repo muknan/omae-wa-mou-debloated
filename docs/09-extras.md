@@ -66,7 +66,7 @@ back without touching Projectivy:
 - **Who runs it.** `tv-apply.sh` starts it at boot, and `tv-daily.sh` restarts it within a minute if it ever
   stops. It also listens again by itself when the remote reconnects.
 - **Switching it off.** Set `VOLUME_HOLD_REPEAT="0"` in `tv-apply.conf`. To stop it right now:
-  `adb shell "pkill -f 'tv-volhol[d].sh'"` (the `[d]` keeps the command from matching itself). Undo everything
+  `adb shell 'for p in $(pgrep -f tv-volhol[d].sh); do kill $p 2>/dev/null; pkill -P $p 2>/dev/null; done'` (the `[d]` keeps the command from matching itself; stopping its children matters, because the helper acts on the signal only once its `getevent` ends). Undo everything
   removes it too.
 
 ## Ad and tracker blocking for the whole TV (Private DNS)

@@ -5,7 +5,7 @@
 // stops after four pages in a row with none left that qualify (stragglers still turn up after shorter gaps). Pages
 // that fail (rate limit) are skipped: the list is then marked incomplete and cached for 2 minutes only, so the next
 // call fills the gaps. A complete list is cached for 6 hours.
-import { CACHE_GOOD, MAX_PAGES, PER_SET, getJson, listParams, pageQuery, passes, selfUrl, sleep } from '../lib/core.js';
+import { CACHE_GOOD, MAX_PAGES, getJson, listParams, pageQuery, passes, selfUrl, sleep } from '../lib/core.js';
 
 export const config = { maxDuration: 300 };
 
@@ -58,7 +58,7 @@ export default async function handler(req, res) {
     }
     const seen = new Set();
     const items = all.filter((w) => usable(w) && !seen.has(w.id) && seen.add(w.id)).filter(passes(p)).sort((a, b) => (a.id < b.id ? -1 : 1));
-    const complete = missing === 0 && items.length >= PER_SET;
+    const complete = missing === 0 && items.length > 0; // nothing missing: complete, however short the list
     console.log(`list ${pageQuery(p)} fav>=${p.fav} maxw=${p.maxw}: read ${read}/${pages} pages, ${missing} missing, ${items.length} wallpapers in ${Math.round((Date.now() - started) / 1000)} s`);
     res.setHeader('cache-control', complete ? CACHE_GOOD : 'public, max-age=0, s-maxage=120');
     res.status(200).json({ range: p.range, resolutions: p.atleast ? `>=${p.atleast}` : p.res, ratios: p.ratios, max_width: p.maxw, min_favorites: p.fav, categories: p.cats, purity: p.purity, complete, missing_pages: missing, fetched_at: new Date().toISOString(), items });

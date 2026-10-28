@@ -191,7 +191,9 @@ if [ "$VOLUME_HOLD_REPEAT" = "1" ] && [ -f /data/local/tmp/tv-volhold.sh ]; then
         log "started volume hold-to-repeat helper"
     fi
 elif [ "$VOLUME_HOLD_REPEAT" != "1" ]; then
-    pkill -f 'tv-volhol[d].sh' 2>/dev/null && log "stopped volume hold-to-repeat helper"
+    # Stop the shell and its children: it acts on the signal only once its getevent ends, which ending the children does.
+    vh=$(pgrep -f 'tv-volhol[d].sh')
+    if [ -n "$vh" ]; then for p in $vh; do kill $p 2>/dev/null; pkill -P $p 2>/dev/null; done; log "stopped volume hold-to-repeat helper"; fi
     rm -f /data/local/tmp/tv-volhold.pid /data/local/tmp/tv-volhold.held
 fi
 

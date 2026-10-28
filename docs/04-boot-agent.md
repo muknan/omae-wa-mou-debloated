@@ -66,8 +66,13 @@ debugging → *Pair device with pairing code* and type the code and port into th
 **Security trade-off:** the TV keeps ADB open on your LAN. Only approved keys can connect, but use this only on a network you trust.
 
 ## Change what it does
-Edit the CONFIG block in [`scripts/device/tv-apply.sh`](../scripts/device/tv-apply.sh), then:
+The settings live in `/data/local/tmp/tv-apply.conf` on the TV. The wizard writes it, and your copy is in
+`my-tv/<your TV>/tv-apply.conf`. It overrides the CONFIG block at the top of
+[`scripts/device/tv-apply.sh`](../scripts/device/tv-apply.sh), which only applies when there is no `tv-apply.conf`.
+To change something, re-run the wizard, or edit your copy and push it:
 ```powershell
-.\scripts\pc\Deploy-Scripts.ps1 -Device <TV-IP>:5555
+adb -s <TV-IP>:5555 push my-tv\<your TV>\tv-apply.conf /data/local/tmp/tv-apply.conf
 ```
-No Termux changes are needed. The agent always runs whatever is in `/data/local/tmp/tv-apply.sh`.
+The background helper re-reads it every minute; the rest applies at the next refresh or restart. After changing the
+scripts themselves, run `.\scripts\pc\Deploy-Scripts.ps1 -Device <TV-IP>:5555`. No Termux changes are needed: the
+agent always runs whatever is in `/data/local/tmp/tv-apply.sh`.

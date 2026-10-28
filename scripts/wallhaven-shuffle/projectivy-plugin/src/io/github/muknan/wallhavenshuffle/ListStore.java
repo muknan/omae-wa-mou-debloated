@@ -5,6 +5,7 @@ import android.content.SharedPreferences;
 import android.util.Log;
 
 import org.json.JSONArray;
+import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
@@ -22,7 +23,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * The wallpaper list, kept on the TV. It's downloaded from the wallhaven-shuffle service's /api/list (with no time
@@ -36,8 +36,8 @@ final class ListStore {
     static final String PREFS = "settings";
     static final long REFRESH_AFTER_MS = 12L * 3600 * 1000;      // a new list twice a day is plenty (toplists change slowly)
     static final long RETRY_AFTER_MS = 10L * 60 * 1000;          // after a failed download
+    static final long HUNG_AFTER_MS = 6L * 60 * 1000;            // a download running longer than this no longer blocks new ones
 
-    private static final AtomicBoolean downloading = new AtomicBoolean();
     private static List<Shuffle.Item> cached = Collections.emptyList();
     private static long cachedStamp = -1;
 
@@ -47,7 +47,7 @@ final class ListStore {
     /** The wallpapers this TV shows, from the saved list (empty until the first download). */
     static synchronized List<Shuffle.Item> pool(Context c) {
         File f = poolFile(c);
-        long stamp = f.exists() ? f.lastModified() : 0;
+        long stamp = f.exists() ? f.lastModified() * 31 + f.length() : 0;   // time and size: a new file is never missed
         if (stamp == cachedStamp) return cached;
         List<Shuffle.Item> items = new ArrayList<>();
         if (stamp != 0) {
@@ -78,23 +78,42 @@ final class ListStore {
 
     interface Done { void done(String result); }
 
+    // One download at a time. A request that comes while one runs (the address was just changed) isn't dropped: the
+    // running one goes round again with the current settings when it's done. One running for over HUNG_AFTER_MS (a
+    // hung connection) no longer blocks new ones, and its result is thrown away.
+    private static final Object gate = new Object();
+    private static long running;                                   // when the running download started; 0 = none
+    private static boolean again;
+    private static int generation;
+
     /** Downloads the list now, in the background; done (if any) gets a one-line result. */
     static void refreshNow(final Context context, final Done done) {
         final Context c = context.getApplicationContext();
-        if (!downloading.compareAndSet(false, true)) { if (done != null) done.done("already downloading"); return; }
+        final int gen;
+        synchronized (gate) {
+            long now = System.currentTimeMillis();
+            if (running != 0 && now - running < HUNG_AFTER_MS) { again = true; return; }
+            running = now; again = false; gen = ++generation;
+        }
         prefs(c).edit().putLong("list_tried", System.currentTimeMillis()).apply();
         new Thread(() -> {
             String result;
-            try { result = download(c); }
-            catch (Exception e) { result = "couldn't get the list: " + e.getMessage(); Log.w(TAG, result); }
-            finally { downloading.set(false); }
+            while (true) {
+                try { result = download(c, gen); }
+                catch (Exception e) { result = "couldn't get the list: " + e.getMessage(); Log.w(TAG, result); }
+                synchronized (gate) {
+                    if (gen != generation) return;                 // a newer download took over
+                    if (!again) { running = 0; break; }
+                    again = false; running = System.currentTimeMillis();
+                }
+            }
             if (done != null) done.done(result);
         }, "list-download").start();
     }
 
-    private static String download(Context c) throws Exception {
+    private static String download(Context c, int gen) throws Exception {
         SharedPreferences p = prefs(c);
-        String url = p.getString("list_url", "");
+        String url = p.getString("list_url", "");                  // read now: the latest settings
         if (url.isEmpty()) throw new IllegalStateException("no list address set");
         int maxWidth = p.getInt("max_width", 3840), minFav = p.getInt("min_favorites", 0);
         HttpURLConnection http = (HttpURLConnection) new URL(url).openConnection();
@@ -102,12 +121,23 @@ final class ListStore {
         http.setReadTimeout(300_000);                             // a cold list can take the service a few minutes
         http.setRequestProperty("User-Agent", "WallhavenShuffle-Projectivy/1.0");
         byte[] body;
-        try (InputStream in = http.getInputStream()) { body = readAll(in); }
-        finally { http.disconnect(); }
-        if (http.getResponseCode() != 200) throw new IllegalStateException("the service answered " + http.getResponseCode());
+        try {
+            int code = http.getResponseCode();                     // first: a 404's own error only names the address
+            if (code != 200) throw new IllegalStateException("the service answered " + code + " (is the address right?)");
+            try (InputStream in = http.getInputStream()) { body = readAll(in); }
+        } finally {
+            http.disconnect();
+        }
 
-        JSONObject root = new JSONObject(new String(body, StandardCharsets.UTF_8));
-        JSONArray arr = root.has("items") ? root.getJSONArray("items") : root.getJSONArray("data");
+        JSONObject root;
+        JSONArray arr;
+        try {
+            root = new JSONObject(new String(body, StandardCharsets.UTF_8));
+            arr = root.has("items") ? root.getJSONArray("items") : root.getJSONArray("data");
+        } catch (JSONException e) {
+            throw new IllegalStateException("that address doesn't give a wallpaper list (use the service's /api/list link)");
+        }
+        boolean complete = root.optBoolean("complete", true);
         File tmp = new File(c.getFilesDir(), "pool.tsv.new");
         int kept = 0;
         try (Writer w = new OutputStreamWriter(new FileOutputStream(tmp), StandardCharsets.UTF_8)) {
@@ -123,11 +153,27 @@ final class ListStore {
             }
         }
         if (kept == 0) { tmp.delete(); throw new IllegalStateException("the list had no wallpapers that fit"); }
-        File f = poolFile(c);
-        if (!tmp.renameTo(f)) { f.delete(); if (!tmp.renameTo(f)) throw new IllegalStateException("couldn't save the list"); }
-        p.edit().putLong("list_time", System.currentTimeMillis()).putInt("list_size", kept)
-            .putBoolean("list_complete", root.optBoolean("complete", true)).apply();
-        String result = "list: " + kept + " wallpapers" + (root.optBoolean("complete", true) ? "" : " (partial)");
+
+        // The service marks a list it couldn't read in full (Wallhaven's rate limit) as incomplete; it's filled in a
+        // few minutes later. Such a list never replaces a fuller saved one (another try comes after RETRY_AFTER_MS).
+        int saved = pool(c).size();
+        if (!complete && kept < saved) {
+            tmp.delete();
+            String r = "list partial (" + kept + "), kept the saved one (" + saved + ")";
+            Log.i(TAG, r);
+            return r;
+        }
+        synchronized (gate) {
+            if (gen != generation || !url.equals(p.getString("list_url", ""))) {   // settings changed meanwhile
+                tmp.delete();
+                return "settings changed: getting the list again";
+            }
+            File f = poolFile(c);
+            if (!tmp.renameTo(f)) { f.delete(); if (!tmp.renameTo(f)) throw new IllegalStateException("couldn't save the list"); }
+        }
+        // A partial list (when nothing fuller was saved) is used, but not counted as fresh: the next try fills it in.
+        p.edit().putLong("list_time", complete ? System.currentTimeMillis() : 0).putInt("list_size", kept).apply();
+        String result = "list: " + kept + " wallpapers" + (complete ? "" : " (partial, filled in at the next try)");
         Log.i(TAG, result);
         return result;
     }

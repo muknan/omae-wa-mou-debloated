@@ -207,8 +207,11 @@ function Get-AppCandidates($matched) {
 function Step-Debloat {
     Title 'Step 1' $StepNames.debloat
     $matched = @(Get-CatalogMatches (Read-Catalog))
-    $low = @($matched | Where-Object { $_.Risk -eq 'low' -and -not $_.AlreadyOff })
-    $med = @($matched | Where-Object { $_.Risk -eq 'medium' -and -not $_.AlreadyOff })
+    # Never the Home app, the keyboard or an accessibility service, whatever the catalog says (switching one off
+    # changes Home or locks the remote out).
+    $prot = @(Get-ProtectedSystemApps) + @(Read-BackgroundCatalog | Where-Object { $_.kind -eq 'protect' } | ForEach-Object { $_.package })
+    $low = @($matched | Where-Object { $_.Risk -eq 'low' -and -not $_.AlreadyOff -and $prot -notcontains $_.Package })
+    $med = @($matched | Where-Object { $_.Risk -eq 'medium' -and -not $_.AlreadyOff -and $prot -notcontains $_.Package })
     $keep = @($matched | Where-Object { $_.Risk -eq 'keep' })
     $already = @($matched | Where-Object { $_.AlreadyOff -and $_.Risk -ne 'keep' })
     $unknown = $script:Info.System.Count - $matched.Count
@@ -341,6 +344,8 @@ function Publish-Agent {
     foreach ($s in 'tv-apply.sh', 'tv-refresh.sh', 'tv-daily.sh', 'tv-volhold.sh') { Send-File ([IO.Path]::Combine($script:Root, 'scripts', 'device', $s)) "/data/local/tmp/$s" }
     Send-File $f /data/local/tmp/tv-apply.conf
     [void](Sh 'chmod 755 /data/local/tmp/tv-apply.sh /data/local/tmp/tv-refresh.sh /data/local/tmp/tv-daily.sh /data/local/tmp/tv-volhold.sh; chmod 644 /data/local/tmp/tv-apply.conf')
+    # Running helpers keep their old code until they're restarted: stop them, tv-apply.sh starts them again.
+    [void](Sh 'kill $(cat /data/local/tmp/tv-daily.pid 2>/dev/null) 2>/dev/null; for p in $(pgrep -f tv-volhol[d].sh); do kill $p 2>/dev/null; pkill -P $p 2>/dev/null; done; rm -f /data/local/tmp/tv-volhold.pid /data/local/tmp/tv-volhold.held')
     $out = Sh 'sh /data/local/tmp/tv-apply.sh; tail -n 40 /data/local/tmp/tv-apply.log'
     return $out
 }
@@ -385,7 +390,8 @@ function Step-Background {
         INCLUDE_USER_APPS           = '1'
         PREINSTALLED_APPS           = (@($rows | Where-Object { $_.Pre -and $_.Group -eq 'asleep' } | ForEach-Object { $_.Package }) -join ' ')
         STOP_ONLY                   = (@($rows | Where-Object { $_.Group -eq 'stoponly' } | ForEach-Object { $_.Package }) -join ' ')
-        EXTRA_PROTECT               = ((@($helpers -split ' ') + @($rows | Where-Object { $_.Group -eq 'protect' } | ForEach-Object { $_.Package }) | Sort-Object -Unique) -join ' ')
+        EXTRA_PROTECT               = ((@($helpers -split ' ') + @($rows | Where-Object { $_.Group -eq 'protect' } | ForEach-Object { $_.Package }) +
+                                        @(Read-BackgroundCatalog | Where-Object { $_.kind -eq 'protect' } | ForEach-Object { $_.package }) | Sort-Object -Unique) -join ' ')
         XIAOMI_ANIM_KEY             = $(if ((Sh1 'settings get global mitv_fast_cur_anim_scale') -notmatch 'null') { '1' } else { '0' })
         UNWHITELIST_NETFLIX         = $(if ($script:Info.All -contains 'com.netflix.ninja') { '1' } else { '0' })
         START_KEYMAPPER_EXPERT_MODE = $(if ($script:Info.All -contains 'io.github.sds100.keymapper') { '1' } else { '0' })
@@ -686,7 +692,8 @@ function Step-Extras {
             if ($ok -and $ad -match '\((0\.0\.0\.0|127\.0\.0\.1)\)') { Ok 'Ad-blocking DNS is on: ad domains are blocked, normal sites work.' }
             else {
                 $restoreMode = if ($mode -in '', 'null') { 'opportunistic' } else { $mode }
-                [void](Sh "settings put global private_dns_mode $restoreMode")
+                $restoreHost = if ("$dnsHost" -in '', 'null') { 'settings delete global private_dns_specifier' } else { "settings put global private_dns_specifier $dnsHost" }
+                [void](Sh "$restoreHost; settings put global private_dns_mode $restoreMode")
                 Warn 'AdGuard DNS did not answer as expected on this network, so it was switched back off.'
             }
         }
@@ -774,10 +781,11 @@ function Write-Report($before, $after, [bool]$restartOk) {
     return $f
 }
 
-function Finish-Setup {
+function Finish-Setup([int]$ranSteps = 1) {
     Title 'Done' 'Checking the result'
     $restartOk = $false
-    if ((Test-StepDone 'stick') -and -not $NoReboot) {
+    # The test restart only after a run that changed something (a re-run with every step already done doesn't).
+    if ((Test-StepDone 'stick') -and -not $NoReboot -and $ranSteps -gt 0) {
         $doIt = Get-Answer 'testRestart' $null
         if ($null -eq $doIt) { $doIt = Ask-YesNo 'Restart the TV now to test that it re-applies everything by itself? (recommended, ~5 min)' $true }
         if ($doIt) { $restartOk = Test-Restart }
@@ -807,7 +815,9 @@ function Invoke-Undo {
     $enabled = @{}
     foreach ($c in $ch) {
         if ($c.type -eq 'pm-disable' -and -not $enabled[$c.package]) {
-            if (-not ($snap -and @($snap.disabled) -contains $c.package)) { [void](Sh "pm enable --user 0 $($c.package)"); Ok "back on: $($c.package)" }
+            # Always: the wizard only logs packages it switched off itself (it skips ones already off), so even one
+            # listed in the first snapshot was switched back on in between and should be on again.
+            [void](Sh "pm enable --user 0 $($c.package)"); Ok "back on: $($c.package)"
             $enabled[$c.package] = $true
         }
         if ($c.type -eq 'notifications-off') { [void](Sh "pm grant $($c.package) android.permission.POST_NOTIFICATIONS"); Ok "notifications back on: $($c.package)" }
@@ -840,8 +850,11 @@ function Invoke-Undo {
         Ok 'animation speed restored'
         [void](Sh "for k in `$(cmd notification snoozed 2>/dev/null | grep -oE '^[^ ]+' | grep -E 'keymapper|adbautoenable'); do cmd notification unsnooze `$k; done")
         [void](Sh 'kill $(cat /data/local/tmp/tv-daily.pid 2>/dev/null) 2>/dev/null; rm -rf /data/local/tmp/tv-daily.sh /data/local/tmp/tv-daily.pid /data/local/tmp/tv-daily.last /data/local/tmp/tv-daily.idle /data/local/tmp/tv-apply.blocked')
-        [void](Sh 'pkill -f tv-volhol[d].sh; rm -f /data/local/tmp/tv-volhold.sh /data/local/tmp/tv-volhold.pid /data/local/tmp/tv-volhold.held /data/local/tmp/tv-volhold.unsupported')
+        [void](Sh 'for p in $(pgrep -f tv-volhol[d].sh); do kill $p 2>/dev/null; pkill -P $p 2>/dev/null; done; rm -f /data/local/tmp/tv-volhold.sh /data/local/tmp/tv-volhold.pid /data/local/tmp/tv-volhold.held /data/local/tmp/tv-volhold.unsupported')
         [void](Sh 'for k in ip_reachability_ignore_incompleted_ipv6_default_router_version ip_reachability_ignore_incompleted_ipv6_dns_server_version; do device_config delete connectivity $k; done')
+        # Netflix back on the power-saving whitelist (UNWHITELIST_NETFLIX took it off; Android remembers that across
+        # restarts), plus what the boot helper setup leaves behind.
+        [void](Sh 'cmd deviceidle sys-whitelist +com.netflix.ninja >/dev/null 2>&1; cmd deviceidle whitelist -com.termux >/dev/null 2>&1; rm -rf /sdcard/Download/tvagent /data/local/tmp/keymapper_sysbridge_starter')
         [void](Sh 'rm -f /data/local/tmp/tv-apply.sh /data/local/tmp/tv-refresh.sh /data/local/tmp/tv-apply.conf /data/local/tmp/tv-apply.log /data/local/tmp/tv-apply.boot; [ -f /data/local/tmp/tv-apply.sh.bak ] && mv /data/local/tmp/tv-apply.sh.bak /data/local/tmp/tv-apply.sh')
         Ok 'scripts removed from the TV'
     }
@@ -849,7 +862,8 @@ function Invoke-Undo {
     if ($inst.Count -and (Ask-YesNo "Also uninstall the helper apps the wizard installed ($(($inst | ForEach-Object { $_.name }) -join ', '))?" $true)) {
         foreach ($i in $inst) { [void](Invoke-Adb -s $script:Dev uninstall $i.package); Ok "uninstalled $($i.name)" }
     }
-    $stillOff = @($enabled.Keys | Where-Object { (Sh 'pm list packages -d') -contains "package:$_" -and -not ($snap -and @($snap.disabled) -contains $_) })
+    $disabledNow = @(Sh 'pm list packages -d')
+    $stillOff = @($enabled.Keys | Where-Object { $disabledNow -contains "package:$_" })
     if ($stillOff.Count) { Warn "Still switched off: $($stillOff -join ', '). Run Undo again, or: adb shell pm enable --user 0 <package>" }
     Add-Change @{ type = 'undo' }
     Move-Item (Join-Path $script:Dir 'changes.jsonl') (Join-Path $script:Dir ("changes-undone-{0}.jsonl" -f (Get-Date -Format 'yyyyMMdd-HHmmss')))
@@ -953,7 +967,9 @@ function Write-Plan {
 function Select-Steps {
     if ($Steps) { return $Steps }  # already split and checked in Start-Wizard
     $preset = Get-Answer 'steps' $null
-    if ($preset) { return @($StepNames.Keys | Where-Object { $preset.$_ }) }
+    # Steps asked for in the answers file, minus the ones already done on this TV (re-running is safe and quick);
+    # -Steps above runs a step again on purpose.
+    if ($preset) { return @($StepNames.Keys | Where-Object { $preset.$_ -and -not (Test-StepDone $_) }) }
     $sel = @{}
     foreach ($k in $StepNames.Keys) { $sel[$k] = ($Recommended -contains $k) -and -not (Test-StepDone $k) }
     if ($script:AutoMode) { return @($StepNames.Keys | Where-Object { $sel[$_] }) }
@@ -987,7 +1003,12 @@ function Start-Wizard {
         $bad = @($script:Steps | Where-Object { @($StepNames.Keys) -notcontains $_ })
         if ($bad.Count) { Bad "Unknown step(s): $($bad -join ', '). Use: $(@($StepNames.Keys) -join ', ')"; return }
     }
-    if ($Answers) { $script:Ans = Get-Content $Answers -Raw | ConvertFrom-Json }
+    if ($Answers) {
+        # A wrong answers file must stop the run: with -Auto it would otherwise go ahead on the defaults (and restart).
+        if (-not (Test-Path -LiteralPath $Answers)) { Bad "Answers file not found: $Answers"; return }
+        try { $script:Ans = Get-Content -LiteralPath $Answers -Raw | ConvertFrom-Json } catch { $script:Ans = $null }
+        if (-not $script:Ans) { Bad "Answers file is empty or not valid JSON: $Answers"; return }
+    }
     if ($script:AutoMode -and -not $Device) { Bad '-Auto needs -Device <TV IP>.'; return }
 
     $script:Adb = Find-Adb
@@ -1007,7 +1028,7 @@ function Start-Wizard {
     if ($Plan) { Write-Plan; return }
     if ($Status) { Show-Status; return }
     if ($PairCode) {
-        if (Connect-AaeApi) { [void](Invoke-AaePair $PairCode $PairPort) } else { Bad 'ADB Auto Enable is not reachable.' }
+        if (Connect-AaeApi $false) { [void](Invoke-AaePair $PairCode $PairPort) } else { Bad 'ADB Auto Enable is not reachable (open it on the TV once, then pair again).' }
         [void](Invoke-Adb -s $script:Dev forward --remove tcp:19093)
         return
     }
@@ -1022,7 +1043,7 @@ function Start-Wizard {
 
     Save-Snapshot
     if (-not $script:State.before) { $script:State.before = Get-Measure; Save-State }
-    $todo = Select-Steps
+    $todo = @(Select-Steps)   # @(): an empty selection must count as 0, not as one $null
     foreach ($s in $todo) {
         try {
             switch ($s) {
@@ -1038,7 +1059,7 @@ function Start-Wizard {
             Info 'Nothing half-done is left behind that Undo can''t fix. Run Start-Here.cmd again to retry.'
         }
     }
-    Finish-Setup
+    Finish-Setup @($todo).Count
 }
 
 # Dot-sourcing (tests) loads the functions without running the wizard.

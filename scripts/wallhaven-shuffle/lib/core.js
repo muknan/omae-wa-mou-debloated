@@ -143,6 +143,10 @@ export const slotOf = (now) => Math.floor(now / (SLOT_MINUTES * 60 * 1000));
 export function pickSet(items, now, seedText) {
   const slotMs = SLOT_MINUTES * 60 * 1000;
   const slot = slotOf(now);
-  const cur = setAt(items, slot, seedText), before = ids(setAt(items, slot - 1, seedText).set);
+  const cur = setAt(items, slot, seedText);
+  // When the whole pool is one set, every window hands out all of it (in a new order); leaving out "what the set
+  // before showed" would leave nothing.
+  if (cur.sets === 1) return { set: cur.set, pass: cur.pass, index: cur.index, sets: 1, nextChange: (slot + 1) * slotMs };
+  const before = ids(setAt(items, slot - 1, seedText).set);
   return { set: cur.set.filter((w) => !before.has(w.id)), pass: cur.pass, index: cur.index, sets: cur.sets, nextChange: (slot + 1) * slotMs };
 }

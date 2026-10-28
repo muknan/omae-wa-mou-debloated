@@ -2,6 +2,8 @@
 
 function Get-Adb {
     if ($env:ADB -and (Test-Path $env:ADB)) { return $env:ADB }
+    $own = Join-Path $PSScriptRoot '..\..\tools\platform-tools\adb.exe'   # where the setup wizard downloads it
+    if (Test-Path $own) { return (Resolve-Path $own).Path }
     $cmd = Get-Command adb -ErrorAction SilentlyContinue
     if ($cmd) { return $cmd.Source }
     $winget = Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet\Packages" -Recurse -Filter adb.exe -ErrorAction SilentlyContinue | Select-Object -First 1

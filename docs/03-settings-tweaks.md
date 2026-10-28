@@ -29,7 +29,7 @@ adb shell cmd appops set <package> RUN_ANY_IN_BACKGROUND ignore   # no backgroun
 adb shell am set-standby-bucket <package> restricted              # fewest jobs/alarms
 adb shell am force-stop <package>                                 # asleep until you open it
 ```
-Streaming apps are fine with this, because playback happens while they're on screen. Music players and VPNs aren't: put those in `STOP_ONLY` in `tv-apply.sh` (stopped at boot, but allowed to run once you start them).
+Streaming apps are fine with this, because playback happens while they're on screen. Music players and VPNs aren't: put those in `STOP_ONLY` in `tv-apply.conf` (see [04](04-boot-agent.md#change-what-it-does); stopped at boot, but allowed to run once you start them).
 On many firmwares, the test TV included, these app-ops reset at every cold boot, and a force-stopped app wakes up again at the next restart. That's why the [boot agent](04-boot-agent.md) exists.
 
 ## Things we measured and **didn't** do
