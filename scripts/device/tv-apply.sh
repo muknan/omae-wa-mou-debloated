@@ -171,9 +171,10 @@ if [ "$START_KEYMAPPER_EXPERT_MODE" = "1" ] && pm path $KM >/dev/null 2>&1 && ! 
     fi
 fi
 
-# Daily refresh, idle trim, re-hiding helper notifications: start the tiny background helper (tv-daily.sh) if it
-# isn't running yet.
-if { [ "$DAILY_REFRESH" = "1" ] || [ -n "$QUIET_APPS" ] || [ "${IDLE_TRIM_MINUTES:-0}" -gt 0 ]; } && [ -f /data/local/tmp/tv-daily.sh ]; then
+# Daily refresh, idle trim, re-hiding helper notifications, re-checking the Wi-Fi fix, keeping the volume helper
+# running: start the tiny background helper (tv-daily.sh) if it isn't running yet.
+if { [ "$DAILY_REFRESH" = "1" ] || [ -n "$QUIET_APPS" ] || [ "${IDLE_TRIM_MINUTES:-0}" -gt 0 ] ||
+     [ "$WIFI_IPV6_ROUTER_FIX" = "1" ] || [ "$VOLUME_HOLD_REPEAT" = "1" ]; } && [ -f /data/local/tmp/tv-daily.sh ]; then
     dp=$(cat /data/local/tmp/tv-daily.pid 2>/dev/null)
     if [ -z "$dp" ] || ! grep -q tv-daily /proc/"$dp"/cmdline 2>/dev/null; then
         setsid nohup sh /data/local/tmp/tv-daily.sh </dev/null >/dev/null 2>&1 &

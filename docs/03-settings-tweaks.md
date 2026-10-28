@@ -23,6 +23,10 @@ adb shell settings put secure screensaver_enabled 0                      # only 
 ```
 Undo by putting back `1`. (`send_action_app_error 0` also works, but Google Services may re-enable it. Not worth fighting.)
 
+Without a screensaver, a TV left idle switches off when the screensaver would have started (`screen_off_timeout`,
+10 minutes on the test TV) instead of at the later "turn off" time (`sleep_timeout`, 30 minutes). To keep it on as
+long as before: `adb shell settings put system screen_off_timeout 1800000` (milliseconds; 30 minutes).
+
 ## Background limits (what tv-apply.sh does per app)
 ```powershell
 adb shell cmd appops set <package> RUN_ANY_IN_BACKGROUND ignore   # no background work at all

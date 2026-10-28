@@ -78,7 +78,8 @@ while true; do
                 fi ;;
         esac
     fi
-    if [ "$DAILY_REFRESH" != "1" ] && [ -z "$QUIET_APPS" ] && [ "${IDLE_TRIM_MINUTES:-0}" -le 0 ]; then
+    if [ "$DAILY_REFRESH" != "1" ] && [ -z "$QUIET_APPS" ] && [ "${IDLE_TRIM_MINUTES:-0}" -le 0 ] &&
+        [ "$WIFI_IPV6_ROUTER_FIX" != "1" ] && [ "${VOLUME_HOLD_REPEAT:-1}" != "1" ]; then
         log "background helper stopped (switched off or removed)"
         rm -f $DIR/tv-daily.pid
         exit 0

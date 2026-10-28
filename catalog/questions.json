@@ -46,7 +46,7 @@
     {
       "id": "screensaver",
       "ask": "Do you want to keep the photo/art screensaver (Ambient mode)?",
-      "help": "It can use about 100 MB of memory. Without it the TV still has a basic screensaver or just dims.",
+      "help": "It can use about 100 MB of memory. Without it, a TV left idle switches off when the screensaver would have started (10 minutes on the test TV); docs/08 shows how to make that longer.",
       "recommend": "keep-if-ram-over-3gb",
       "unsure": "keep"
     },
