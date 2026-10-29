@@ -8,7 +8,6 @@ import android.media.MediaCodecInfo;
 import android.media.MediaExtractor;
 import android.media.MediaFormat;
 import android.media.MediaMuxer;
-import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.Surface;
@@ -145,9 +144,11 @@ public final class PanelResetActivity extends Activity implements SurfaceHolder.
         }
     }
 
-    /** Decodes the clip onto the surface at its own pace, with the frame rate stated to the decoder and the display. */
+    /** Decodes the clip onto the surface at its own pace, with the frame rate stated to the decoder only: the video chip
+     *  reads it from the stream. Not Surface.setFrameRate: Android answers that by drawing the whole screen at 20 fps
+     *  (60 / 3), and on the test TV that override once stayed after this screen had closed. */
     private static void play(File clip, Surface surface, int fps) throws Exception {
-        if (Build.VERSION.SDK_INT >= 30) surface.setFrameRate(fps, Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE);
+        fullFrameRate(surface);
         MediaExtractor ex = new MediaExtractor();
         MediaCodec dec = null;
         try {
@@ -186,6 +187,40 @@ public final class PanelResetActivity extends Activity implements SurfaceHolder.
         } finally {
             if (dec != null) { try { dec.stop(); } catch (Exception ignored) { } dec.release(); }
             ex.release();
+            settle(surface);
         }
+    }
+
+    /** Android turns a frame rate this app states (or its video playback states) into a whole-screen limit: a 24 fps
+     *  request made the test TV draw everything at 20 fps (60 / 3), and that stayed after this screen had closed,
+     *  because Android only recalculates it on a new request ("no preference" doesn't count). So this asks for the
+     *  display's full 60 at the start and on the way out: whatever Android keeps for this app is then 60, which limits
+     *  nothing. (The video chip takes the 24 fps from the stream itself, so the reset still works.) */
+    static void fullFrameRate(Surface surface) {
+        if (android.os.Build.VERSION.SDK_INT < 30 || surface == null || !surface.isValid()) return;
+        try {
+            surface.setFrameRate(60f, Surface.FRAME_RATE_COMPATIBILITY_DEFAULT);
+            Thread.sleep(150);                                       // let Android take it before the surface goes
+        } catch (Exception e) {
+            Log.w(ListStore.TAG, "couldn't set the frame rate: " + e);
+        }
+    }
+
+    /** After the video: two plain black frames carrying the 60 request. Android works the limit out again only when a
+     *  frame arrives, and the decoder's own last request (the clip's rate) would otherwise be the one it keeps. */
+    static void settle(Surface surface) {
+        fullFrameRate(surface);
+        for (int i = 0; i < 2 && surface != null && surface.isValid(); i++) {
+            try {
+                android.graphics.Canvas c = surface.lockCanvas(null);
+                c.drawColor(android.graphics.Color.BLACK);
+                surface.unlockCanvasAndPost(c);
+                Thread.sleep(40);
+            } catch (Exception e) {
+                Log.w(ListStore.TAG, "couldn't draw the closing frame: " + e);
+                return;
+            }
+        }
+        try { Thread.sleep(150); } catch (InterruptedException ignored) { }
     }
 }

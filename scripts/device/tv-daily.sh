@@ -77,11 +77,15 @@ busy_apps() {
 # has let go of its video. "VSYNC period" other than 16666666 ns with the display set to 60 Hz = the panel is stuck.
 RESET=io.github.muknan.wallhavenshuffle/.PanelResetActivity
 hpkg=; hpid=; away=0; due=; tries=0; quiet=0; reset_ok=
+# Also stuck: Android drawing the whole screen below 60 fps ("activeMode=20.00 Hz (60.00 Hz)"), which a video's
+# frame-rate request can leave behind; the reset clears that too. $why says which.
 panel_stuck() {
-    s=$(dumpsys SurfaceFlinger 2>/dev/null | grep -m2 -E 'VSYNC period|refresh-rate')
+    s=$(dumpsys SurfaceFlinger 2>/dev/null | grep -m3 -E 'VSYNC period|activeMode=|refresh-rate')
     case "$s" in *"VSYNC period:"*"refresh-rate"*"60.00 Hz"*) ;; *) return 1 ;; esac   # can't tell, or not 60 Hz
-    case "$s" in *"VSYNC period:"*" 16666666 ns"*) return 1 ;; esac
-    return 0
+    why=
+    case "$s" in *"VSYNC period:"*" 16666666 ns"*) ;; *) why="the panel at 50 Hz" ;; esac
+    case "$s" in *"activeMode=60.00 Hz"*) ;; *"activeMode="*) why="${why:+$why and }the screen drawn below 60 fps" ;; esac
+    [ -n "$why" ]
 }
 panel_check() {
     [ -n "$hpid" ] || return
@@ -99,8 +103,8 @@ panel_check() {
         [ "$tries" -gt 0 ] && log "panel at 60 Hz again"
         tries=0; return
     fi
-    if [ "$tries" -ge 2 ]; then log "panel still at 50 Hz after 2 resets; leaving it until the home screen comes back again"; return; fi
-    [ "$tries" = 0 ] && log "home screen came back with the panel at 50 Hz (left by a 25 fps video): resetting it to 60 Hz"
+    if [ "$tries" -ge 2 ]; then log "still $why after 2 resets; leaving it until the home screen comes back again"; return; fi
+    [ "$tries" = 0 ] && log "home screen came back with $why (left by a video): resetting it to 60 Hz"
     am start -n "$RESET" >/dev/null 2>&1
     tries=$((tries + 1)); quiet=$((u + 8)); due=$((u + 6))        # look again once it has closed
 }

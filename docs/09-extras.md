@@ -62,6 +62,10 @@ The background helper puts it back without a restart:
 - If it is, it starts the [wallpaper plugin](../scripts/wallhaven-shuffle/projectivy-plugin)'s panel reset: a silent
   black 24 fps clip in a 2-pixel corner for under a second, nothing you can see. 24 fps makes the chip choose 60 Hz,
   and it stays there. The log shows `home screen came back with the panel at 50 Hz ...` and `panel at 60 Hz again`.
+- It also catches Android drawing the whole screen below 60 fps (SurfaceFlinger `activeMode=20.00 Hz (60.00 Hz)`),
+  which a video's frame-rate request can leave behind, and the same reset clears it. The reset itself asks for the
+  full 60 fps before and after its clip, so it can't leave one of its own (an early version did: the home screen ran
+  at 20 fps until the next reset).
 - It only does this with the plugin installed and the display set to 60 Hz, at most twice each time, and never while
   you're in an app, so videos still get their smooth 50 Hz. A remote press during the reset ends it at once.
 - Measured on the test TV: back to 60 Hz 3-5 s after leaving the video app; the helper's CPU use didn't change
