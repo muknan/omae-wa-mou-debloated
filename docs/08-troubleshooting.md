@@ -19,7 +19,7 @@ often Wi-Fi reconnected since boot (many reconnects point at the router, see the
 
 | Symptom | Fix |
 |---|---|
-| The test restart says the helper didn't run | Usually debugging was off at startup. Android 14+: make sure ADB Auto Enable is paired (re-run step 3, or `.\setup\Wizard.ps1 -Device <ip> -PairCode <code>`). The helper keeps trying for 20 minutes after a restart. |
+| The test restart says the helper didn't run | Usually debugging was off at startup. Android 14+: make sure ADB Auto Enable is paired (re-run step 3, or `.\setup\Wizard.ps1 -Device <ip> -PairCode <code>`). The helper keeps trying for 20 minutes after a restart. If the log has no "apply start" at all after a restart, Termux:Boot never got to start it: `adb shell am get-standby-bucket com.termux.boot` should say `5`; if not, `adb shell cmd deviceidle whitelist +com.termux.boot` (see [04](04-boot-agent.md#install), step 2). |
 | Check what it did | `adb shell tail /data/local/tmp/tv-apply.log` (each run logs "apply start (uptime ...)"). |
 | Termux setup failed "apt update" | The TV had no internet. Re-run step 3. |
 | Termux "is already installed from another store" | Termux and Termux:Boot must come from the same place. Uninstall Termux on the TV and re-run step 3. |

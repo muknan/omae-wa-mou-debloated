@@ -31,7 +31,12 @@ boot ─► ADB Auto Enable turns wireless debugging on
    adb shell pm grant com.termux android.permission.READ_EXTERNAL_STORAGE
    adb shell pm grant com.termux android.permission.WRITE_EXTERNAL_STORAGE
    adb shell cmd deviceidle whitelist +com.termux
+   adb shell cmd deviceidle whitelist +com.termux.boot
    ```
+   The second line matters: Android rates Termux:Boot "never used" and never runs a never-used app's scheduled jobs,
+   which is how Termux:Boot starts the script. On the test TV it was also the first thing the memory killer took
+   during startup, so the boot script didn't run at all. Whitelisted, it's "exempted" from both
+   (`adb shell am get-standby-bucket com.termux.boot` shows `5`).
 3. Push the TV scripts and stage the Termux files:
    ```powershell
    .\scripts\pc\Deploy-Scripts.ps1 -Device <TV-IP>:5555 -Termux

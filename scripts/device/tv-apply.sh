@@ -112,6 +112,9 @@ for k in window_animation_scale transition_animation_scale animator_duration_sca
 done
 [ "$XIAOMI_ANIM_KEY" = "1" ] && settings put global mitv_fast_cur_anim_scale "$ANIM_SCALE"
 [ "$UNWHITELIST_NETFLIX" = "1" ] && cmd deviceidle sys-whitelist -com.netflix.ninja >/dev/null 2>&1
+# Termux:Boot starts this script at boot through a scheduled job, which Android never runs for an app it rates
+# "never used"; whitelisted, it's "exempted" (setups made before the wizard did this get it here).
+pm path com.termux.boot >/dev/null 2>&1 && cmd deviceidle whitelist +com.termux.boot >/dev/null 2>&1
 if [ "$WIFI_IPV6_ROUTER_FIX" = "1" ] && [ "${SDK:-0}" -ge 29 ]; then
     for k in ip_reachability_ignore_incompleted_ipv6_default_router_version ip_reachability_ignore_incompleted_ipv6_dns_server_version; do
         [ "$(device_config get connectivity $k 2>/dev/null)" = "1" ] || { device_config put connectivity $k 1 >/dev/null 2>&1 && log "Wi-Fi IPv6 router fix: set $k"; }

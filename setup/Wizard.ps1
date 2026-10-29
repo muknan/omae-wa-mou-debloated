@@ -439,8 +439,10 @@ function Step-Stick {
     }
     try { [void](Install-Helper 'termux-boot') } catch { Bad $_.Exception.Message; return }
     [void](Sh 'pm grant com.termux android.permission.READ_EXTERNAL_STORAGE; pm grant com.termux android.permission.WRITE_EXTERNAL_STORAGE')
-    # Keep power saving from cutting the boot script short (removed again when Termux is uninstalled).
-    [void](Sh 'cmd deviceidle whitelist +com.termux >/dev/null 2>&1')
+    # Keep power saving from cutting the boot script short (removed again when Termux is uninstalled). Termux:Boot
+    # too: Android rates it "never used" and never runs a never-used app's jobs, which is how it starts the script at
+    # boot; the test TV's memory killer also took it first while it waited. Whitelisted, it's "exempted".
+    [void](Sh 'cmd deviceidle whitelist +com.termux >/dev/null 2>&1; cmd deviceidle whitelist +com.termux.boot >/dev/null 2>&1')
     $st = '/sdcard/Download/tvagent'
     [void](Sh "mkdir -p $st; rm -f $st/status $st/setup.log")
     foreach ($s in 'setup.sh', '10-tv-agent.sh') { Send-File ([IO.Path]::Combine($script:Root, 'scripts', 'termux', $s)) "$st/$s" }
@@ -854,7 +856,7 @@ function Invoke-Undo {
         [void](Sh 'for k in ip_reachability_ignore_incompleted_ipv6_default_router_version ip_reachability_ignore_incompleted_ipv6_dns_server_version; do device_config delete connectivity $k; done')
         # Netflix back on the power-saving whitelist (UNWHITELIST_NETFLIX took it off; Android remembers that across
         # restarts), plus what the boot helper setup leaves behind.
-        [void](Sh 'cmd deviceidle sys-whitelist +com.netflix.ninja >/dev/null 2>&1; cmd deviceidle whitelist -com.termux >/dev/null 2>&1; rm -rf /sdcard/Download/tvagent /data/local/tmp/keymapper_sysbridge_starter')
+        [void](Sh 'cmd deviceidle sys-whitelist +com.netflix.ninja >/dev/null 2>&1; cmd deviceidle whitelist -com.termux >/dev/null 2>&1; cmd deviceidle whitelist -com.termux.boot >/dev/null 2>&1; rm -rf /sdcard/Download/tvagent /data/local/tmp/keymapper_sysbridge_starter')
         [void](Sh 'rm -f /data/local/tmp/tv-apply.sh /data/local/tmp/tv-refresh.sh /data/local/tmp/tv-apply.conf /data/local/tmp/tv-apply.log /data/local/tmp/tv-apply.boot; [ -f /data/local/tmp/tv-apply.sh.bak ] && mv /data/local/tmp/tv-apply.sh.bak /data/local/tmp/tv-apply.sh')
         Ok 'scripts removed from the TV'
     }
