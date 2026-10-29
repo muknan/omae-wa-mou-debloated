@@ -36,6 +36,17 @@ plugin does it differently:
 
 To go back, choose **Booru Wallpaper Provider** (or anything else) there. Uninstall: `adb uninstall io.github.muknan.wallhavenshuffle`.
 
+## Panel reset (MediaTek TVs)
+
+The plugin also carries the fix for a MediaTek firmware fault: after a 25 fps video the panel stays at 50 Hz and the
+home screen judders until a restart. `PanelResetActivity` plays a silent black 24 fps clip in a 2-pixel corner for
+under a second, which puts the panel back to 60 Hz; nothing shows on screen. The TV's background helper starts it by
+itself when needed ([docs/09](../../../docs/09-extras.md#home-screen-judders-after-a-video-until-you-restart)). By hand:
+
+```powershell
+adb shell am start -n io.github.muknan.wallhavenshuffle/.PanelResetActivity
+```
+
 ## Next wallpaper from the remote
 
 ```powershell
@@ -66,6 +77,7 @@ Android only installs an update that's signed with the same key. Neither ever go
 - `src/.../ShuffleService.java`: what Projectivy calls (`getWallpapers` for TIME_ELAPSED; settings for
   Projectivy's backup).
 - `src/.../SettingsActivity.java`, `NextReceiver.java`: the settings screen and "next wallpaper".
+- `src/.../PanelResetActivity.java`: the 60 Hz panel reset (makes its clip on the TV with MediaCodec on first use).
 - `aidl/` and `src/tv/projectivy/...`: Projectivy's plugin interface, from
   [projectivy-plugin-wallpaper-provider](https://github.com/spocky/projectivy-plugin-wallpaper-provider) (Apache 2.0),
   with the two data classes written in Java to the same layout.

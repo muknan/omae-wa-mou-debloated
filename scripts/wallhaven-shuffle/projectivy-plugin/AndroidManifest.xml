@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="io.github.muknan.wallhavenshuffle"
-    android:versionCode="5"
-    android:versionName="1.4">
+    android:versionCode="6"
+    android:versionName="1.5">
 
     <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="34" />
     <uses-permission android:name="android.permission.INTERNET" />
@@ -50,5 +50,11 @@
                 <action android:name="io.github.muknan.wallhavenshuffle.NEXT" />
             </intent-filter>
         </receiver>
+
+        <!-- Puts the panel back to 60 Hz after a 25 fps video left it at 50 Hz (MediaTek "frame sync"); started by
+             tv-daily.sh when the home screen comes back at 50 Hz. See-through, under a second, never in Recents. -->
+        <activity android:name=".PanelResetActivity" android:exported="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" android:taskAffinity=""
+            android:excludeFromRecents="true" android:noHistory="true" android:launchMode="singleInstance" />
     </application>
 </manifest>

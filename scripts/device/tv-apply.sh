@@ -62,6 +62,11 @@ DAILY_REFRESH_HOUR=4
 # opening it again is a normal cold start. Checked every minute by tv-daily.sh. 0 = off.
 IDLE_TRIM_MINUTES=10
 
+# 1 = put the panel back to 60 Hz when the home screen comes back at 50 Hz. On MediaTek TVs a 25 fps video leaves the
+# panel at 50 Hz after it ends and the home screen judders until a restart; tv-daily.sh notices within seconds and
+# starts the wallpaper plugin's silent reset (only if that plugin is installed). 0 = off.
+PANEL_60HZ_FIX=1
+
 # 1 = start Key Mapper's Expert Mode if it isn't running (needed for Key Mapper "Execute with ADB" actions on
 # TVs where its own auto-start can't pair). 0 = don't.
 START_KEYMAPPER_EXPERT_MODE=1
@@ -175,9 +180,9 @@ if [ "$START_KEYMAPPER_EXPERT_MODE" = "1" ] && pm path $KM >/dev/null 2>&1 && ! 
 fi
 
 # Daily refresh, idle trim, re-hiding helper notifications, re-checking the Wi-Fi fix, keeping the volume helper
-# running: start the tiny background helper (tv-daily.sh) if it isn't running yet.
+# running, the panel fix: start the tiny background helper (tv-daily.sh) if it isn't running yet.
 if { [ "$DAILY_REFRESH" = "1" ] || [ -n "$QUIET_APPS" ] || [ "${IDLE_TRIM_MINUTES:-0}" -gt 0 ] ||
-     [ "$WIFI_IPV6_ROUTER_FIX" = "1" ] || [ "$VOLUME_HOLD_REPEAT" = "1" ]; } && [ -f /data/local/tmp/tv-daily.sh ]; then
+     [ "$WIFI_IPV6_ROUTER_FIX" = "1" ] || [ "$VOLUME_HOLD_REPEAT" = "1" ] || [ "$PANEL_60HZ_FIX" = "1" ]; } && [ -f /data/local/tmp/tv-daily.sh ]; then
     dp=$(cat /data/local/tmp/tv-daily.pid 2>/dev/null)
     if [ -z "$dp" ] || ! grep -q tv-daily /proc/"$dp"/cmdline 2>/dev/null; then
         setsid nohup sh /data/local/tmp/tv-daily.sh </dev/null >/dev/null 2>&1 &

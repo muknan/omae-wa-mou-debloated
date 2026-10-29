@@ -47,6 +47,28 @@ sleep, as at boot.
 - `IDLE_TRIM_MINUTES="10"` in `tv-apply.conf`; `0` switches it off. The log shows each one:
   `put in.startv.hotstar to sleep (unused in the background for 10 min; MemAvailable now ... kB)`.
 
+## Home screen judders after a video until you restart
+
+On MediaTek TVs (the Xiaomi test TV) the video chip retimes the panel to each video's frame rate ("frame sync"): a
+25 fps video runs the panel at 50 Hz, which makes the video smooth. But when the video ends nothing switches it back,
+so the home screen keeps running at 50 Hz while Android draws for 60 Hz. Moving around stutters (on the test TV 30% of
+frames late instead of 6%), standby doesn't clear it, a restart does. 25 fps is common: Indian and European TV
+channels, many YouTube uploads.
+
+The background helper puts it back without a restart:
+
+- Every 2 seconds it reads one file to see whether the home screen is in front. When the home screen comes back from
+  behind an app, it asks Android's display service once whether the panel is at 50 Hz.
+- If it is, it starts the [wallpaper plugin](../scripts/wallhaven-shuffle/projectivy-plugin)'s panel reset: a silent
+  black 24 fps clip in a 2-pixel corner for under a second, nothing you can see. 24 fps makes the chip choose 60 Hz,
+  and it stays there. The log shows `home screen came back with the panel at 50 Hz ...` and `panel at 60 Hz again`.
+- It only does this with the plugin installed and the display set to 60 Hz, at most twice each time, and never while
+  you're in an app, so videos still get their smooth 50 Hz. A remote press during the reset ends it at once.
+- Measured on the test TV: back to 60 Hz 3-5 s after leaving the video app; the helper's CPU use didn't change
+  (126 ms a minute before and after).
+- `PANEL_60HZ_FIX="1"` in `tv-apply.conf`; `0` switches it off. Check yours:
+  `adb shell "dumpsys SurfaceFlinger | grep -m1 'VSYNC period'"` (16666666 ns = 60 Hz, 20000000 ns = stuck at 50 Hz).
+
 ## Holding the volume buttons
 
 On a TV where an app filters key presses through Android's accessibility service, holding VOLUME changes the volume
