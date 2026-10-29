@@ -78,7 +78,7 @@ back without touching Projectivy:
 
 - **It only listens.** It reads the remote's button events with `getevent` and intercepts nothing, so every
   button, Power included, works exactly as before. A short press is still one step.
-- **While you hold.** After 0.4 s it steps the volume about 12 times a second, with the volume bar showing, until
+- **While you hold.** After 0.4 s it steps the volume about 16 times a second, with the volume bar showing, until
   you let go, and at most 100 steps per hold (a full 0-100 sweep).
 - **How it steps.** The steps go straight to Android's audio service, not as extra key presses. Xiaomi's
   volume-down handling tracks the held key itself, and extra presses confuse it: it can end up muting.

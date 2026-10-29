@@ -5,7 +5,7 @@
 # itself, but not while an accessibility service filters key events, and Projectivy's (needed for its Home button
 # handling) does. This helper restores the repeat without touching that. It only *listens* to the remote
 # (getevent, read-only: nothing is intercepted, every button keeps working as before). When VOLUME UP or DOWN stays
-# held longer than HOLD_DELAY, it steps the volume every REPEAT_EVERY until the button is released.
+# held longer than HOLD_DELAY, it steps the volume every REPEAT_GAP until the button is released (about 16 steps a second).
 #
 # The steps go straight to Android's audio service (adjustStreamVolume, with the volume bar shown), not as key
 # presses: Xiaomi's own volume-down handling tracks the held key, and extra key presses confuse it (it can end up
@@ -20,8 +20,8 @@ DIR=/data/local/tmp
 LOG=$DIR/tv-apply.log
 HELD=$DIR/tv-volhold.held   # names the hold in progress; the repeat loop runs only while it names its own hold
 HOLD_DELAY=0.4      # seconds before repeating starts (Android's own key repeat waits 0.4 s too)
-REPEAT_GAP=0.01     # pause between steps; each step itself takes ~0.07 s, so about 12 steps a second
-MAX_REPEATS=100     # a whole 0-100 sweep in one hold (~8 s)
+REPEAT_GAP=0.025    # pause between steps; each step itself takes ~0.035 s, so about 16 steps a second
+MAX_REPEATS=100     # a whole 0-100 sweep in one hold (~6 s)
 # IAudioService method numbers on this firmware (Android 14): adjustStreamVolume, getStreamVolume, getStreamMaxVolume
 ADJUST=10; GET=24; GETMAX=26
 
@@ -44,6 +44,10 @@ rm -f $DIR/tv-volhold.unsupported
 
 echo $$ > $DIR/tv-volhold.pid
 rm -f $HELD
+# The pause between steps: `read -t` on a sleeping co-process that never writes, so no command is started per step
+# (a `sleep` costs ~45 ms here, more than the pause itself). Stopping the helper stops it too (it's a child).
+sleep 2147483 |&
+exec 3<&p
 
 # getevent ends when an input device goes away (the Bluetooth remote disconnects when the TV sleeps, or a battery
 # change), so listen again whenever it does; a hold in progress stops then too.
@@ -62,7 +66,7 @@ while true; do
                         now=; read -r now < $HELD 2>/dev/null
                         [ "$now" = "$hold" ] || break          # released (or a newer hold took over)
                         service call audio $ADJUST i32 3 i32 $dir i32 1 s16 com.android.shell >/dev/null 2>&1   # 1 = show the volume bar
-                        sleep "$REPEAT_GAP"
+                        read -t "$REPEAT_GAP" -u3 _ 2>/dev/null
                         n=$((n + 1))
                     done
                 ) &
