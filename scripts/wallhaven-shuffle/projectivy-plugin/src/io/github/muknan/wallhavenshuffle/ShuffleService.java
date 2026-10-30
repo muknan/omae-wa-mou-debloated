@@ -24,7 +24,9 @@ import tv.projectivy.plugin.wallpaperprovider.api.Wallpaper;
 /**
  * What Projectivy talks to. Projectivy keeps what a plugin returns for itemsCacheDurationMillis and, at each change
  * ("Update delay"), shows a random one of those. So this returns exactly one wallpaper, the next in the rotation,
- * and asks Projectivy to keep it for 30 seconds: at every change Projectivy asks again and gets the next one. The
+ * and asks Projectivy to keep it for 1 second: at every change Projectivy asks again and gets the next one, and a
+ * refresh asked for at any moment is answered at once (it ignores one while what it has is fresh: with 30 s, as up to
+ * 1.12, a Next just after a change waited up to 30 s; Projectivy reads this when it starts). The
  * result is the Windows app's order on the TV: every wallpaper once per round, no repeats until all were shown.
  *
  * It answers with nothing (Projectivy keeps the wallpaper it has) while paused or keeping one, and until this TV's
@@ -146,10 +148,12 @@ public final class ShuffleService extends Service {
         askUntilChanged(c);
     }
 
-    // Projectivy ignores a refresh that comes within about 30 s of its last ask, so a change asked for from the remote
-    // is asked for now, and again once Projectivy listens (its last ask + 30 s, then every 31 s, three times at most)
-    // until the wallpaper has actually changed. When it's expected goes to the remote ("Changing in 0:12").
-    static final long THROTTLE = 30_500;
+    // A change asked for from the remote: Projectivy answers a refresh at once (see the class comment), so it's
+    // expected in a second or two (within a few seconds of a change it waits a little). Until the wallpaper has actually
+    // changed it's asked for again, at 2, 4, 7, 12 and 31 s
+    // (31 s covers a Projectivy that still has the old 30 s from before it restarted), and the remote is told when
+    // to expect it ("Changing…", or "Changing in 0:20" after an ask was ignored).
+    private static final long[] RETRY_AT = { 2_000, 4_000, 7_000, 12_000, 31_000 };
     private static final android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
     private static final Object RETRY = new Object();
     private static long wantedAt, nextAsk;
@@ -158,13 +162,13 @@ public final class ShuffleService extends Service {
     private static void askUntilChanged(Context c) {
         final Context app = c.getApplicationContext();
         SharedPreferences p = ListStore.prefs(app);
-        long now = System.currentTimeMillis(), listens = p.getLong("asked_at", 0) + THROTTLE;
+        long now = System.currentTimeMillis();
         main.removeCallbacksAndMessages(RETRY);
         wantedAt = now;
-        asks = 1;
+        asks = 0;
         askProjectivyToRefresh(app, 1);
-        nextAsk = now < listens ? listens : now + THROTTLE;
-        p.edit().putLong("change_eta", now < listens ? listens : now + 1_500).apply();
+        nextAsk = now + RETRY_AT[0];
+        p.edit().putLong("change_eta", now + 1_500).apply();
         Sync.statusChanged(app);
         tick(app);
     }
@@ -176,14 +180,14 @@ public final class ShuffleService extends Service {
             if (!waiting || p.getLong("changed_at", 0) >= wantedAt) return;
             long now = System.currentTimeMillis(), eta = p.getLong("change_eta", 0);
             if (now >= nextAsk) {
-                if (asks >= 4) { p.edit().remove("change_eta").apply(); Sync.statusChanged(app); return; }   // Projectivy isn't listening
+                if (asks >= RETRY_AT.length) { p.edit().remove("change_eta").apply(); Sync.statusChanged(app); return; }   // Projectivy isn't listening
                 asks++;
-                Log.i(ListStore.TAG, "still waiting for Projectivy: asking again (" + (asks - 1) + ")");
+                Log.i(ListStore.TAG, "still waiting for Projectivy: asking again (" + asks + ")");
                 askProjectivyToRefresh(app, 1);
-                nextAsk = now + THROTTLE + 500;
+                nextAsk = asks < RETRY_AT.length ? wantedAt + RETRY_AT[asks] : now + 3_000;
                 p.edit().putLong("change_eta", now + 1_500).apply();
                 Sync.statusChanged(app);
-            } else if (eta > 0 && eta + 2_000 < now && eta < nextAsk) {
+            } else if (eta > 0 && eta + 1_000 < now && eta < nextAsk) {
                 p.edit().putLong("change_eta", nextAsk + 1_000).apply();   // that ask was ignored: the next one, then
                 Sync.statusChanged(app);
             }

@@ -12,8 +12,11 @@ plugin: an hour) and at each change shows a **random** one of those. A set of 20
 a few times an hour, and the set depends on the service answering within seconds, right when the TV asks. This
 plugin does it differently:
 
-- **It returns one wallpaper at a time, kept for 30 s.** At every change Projectivy asks again and gets the next
-  one in the rotation, so Projectivy's random pick has only one to choose from.
+- **It returns one wallpaper at a time, kept for 1 s.** At every change Projectivy asks again and gets the next
+  one in the rotation, so Projectivy's random pick has only one to choose from. Projectivy ignores a refresh while
+  what it has is still fresh, so the short time also lets Next work at any moment (up to 1.12 it was 30 s, and a
+  Next just after a change waited up to 30 s). Projectivy reads it when it starts: after updating from 1.12 or
+  earlier, restart the TV once.
 - **The list lives on the TV.** It's downloaded from the service's `/api/list` twice a day, with no time limit, and
   saved as a small file of just what the TV shows (~100 KB). A request reads that file in milliseconds. If the
   service or the network is down, the saved list keeps working.
@@ -55,9 +58,9 @@ Paired, a background thread checks in every 10 s while the screen is on and the 
 while a remote is open), with one small request. Settings made on the TV while offline go up at the next check-in.
 
 A Next, Previous or Show from the remote is answered at once ("it arrived", and when the change is expected).
-Projectivy ignores a refresh within about 30 s of its last ask, so the plugin asks now and again when Projectivy
-listens (its last ask + 30 s, then every 31 s, three times at most) until the wallpaper has changed; the remote
-counts down to it ("Changing in 0:12"). The remote also shows what Next will bring before it's pressed: the
+Projectivy shows the next one about 0.2 s after the plugin asks. A refresh within a few seconds of a change waits,
+so until it has changed the plugin asks again at 2, 4, 7, 12 and 31 s, and the remote says when to expect it.
+The remote also shows what Next will bring before it's pressed: the
 plugin's pick is seeded, so the preview and the real pick are the same one. When Projectivy lets go of the plugin
 (another app opened), the remote is told "Not on the home screen" straight away and checking stops until it binds
 again. Coming from 1.7, the old list address and width carry over as the same filters.
