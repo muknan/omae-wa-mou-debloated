@@ -1,5 +1,12 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "images": {
+    "sizes": [640, 1080, 1600, 2048],
+    "remotePatterns": [{ "protocol": "https", "hostname": "w.wallhaven.cc", "pathname": "^/full/.*$" }],
+    "minimumCacheTTL": 2592000,
+    "qualities": [75],
+    "formats": ["image/webp"]
+  },
   "rewrites": [
     { "source": "/r/:range/:res/api/v1/search", "destination": "/api/v1/search?range=:range&res=:res" },
     { "source": "/r/:range/:res/:fav/api/v1/search", "destination": "/api/v1/search?range=:range&res=:res&fav=:fav" },

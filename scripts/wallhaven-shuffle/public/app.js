@@ -11,7 +11,7 @@
   };
   let token = store.get('whs.token');
   const S = { doc: null, status: {}, presets: null, me: null, online: true, inFlight: 0 };
-  const UI = { dev: store.get('whs.dev'), pending: {}, localWant: {}, heroes: {}, shown: {}, full: new Set(), browse: { dev: store.get('whs.browseDev'), sort: 'fav', withHidden: false } };
+  const UI = { dev: store.get('whs.dev'), pending: {}, localWant: {}, heroes: {}, shown: {}, browse: { dev: store.get('whs.browseDev'), sort: 'fav', withHidden: false } };
   const lists = new Map(); // list query -> { items, error, loading, at }
   const sheets = new Set(); // open sheets' refill functions, so they follow changes made elsewhere
 
@@ -158,16 +158,21 @@
 
   const thumb = (it, size = 'lg') => `https://th.wallhaven.cc/${size}/${it.id.slice(0, 2)}/${it.id}.jpg`;
   const fullOf = (it) => `https://w.wallhaven.cc/full/${it.id.slice(0, 2)}/wallhaven-${it.id}.${it.ext || 'jpg'}`;
-  // On a big screen the 432 px thumbnail looks soft: the original replaces it once it has loaded (not on a phone,
-  // and not when the browser asks to save data, since originals are several megabytes).
-  const bigScreen = matchMedia('(min-width: 960px)');
-  const sharpening = new Set();
+  // Wallhaven's thumbnail is 432 px wide, soft on a phone's screen; originals are megabytes. So the picture at the top
+  // shows the thumbnail at once, then a copy of the original sized for this screen (resized by the deployment, cached
+  // there for a month), once it has loaded. Where that isn't available (a local copy of the service) the thumbnail stays.
+  const sharp = new Map(), sharpening = new Set();   // wallpaper id -> its screen-sized address, once loaded
+  function sharpUrl(it) {
+    const want = Math.min(innerWidth, 1200) * Math.min(devicePixelRatio || 1, 3);
+    const w = [640, 1080, 1600, 2048].find((x) => x >= want) || 2048;
+    return `/_vercel/image?url=${encodeURIComponent(fullOf(it))}&w=${w}&q=75`;
+  }
   function sharpen(it) {
-    if (!bigScreen.matches || navigator.connection?.saveData || UI.full.has(it.id) || sharpening.has(it.id)) return;
+    if (!it?.id || navigator.connection?.saveData || sharp.has(it.id) || sharpening.has(it.id)) return;
     sharpening.add(it.id);
-    const full = new Image();
-    full.onload = () => { UI.full.add(it.id); changed(); };
-    full.src = fullOf(it);
+    const url = sharpUrl(it), im = new Image();
+    im.onload = () => { sharp.set(it.id, url); changed(); };
+    im.src = url;
   }
 
   // The picture at the top of a device's page. It stays the same element from one drawing to the next, and a new
@@ -178,6 +183,14 @@
       H = UI.heroes[id] = { el: h('div', { class: 'hero', 'data-slot': `hero-${id}` }), pics: h('div', { class: 'pics' }), over: h('div'), src: null, pending: false };
       H.el.append(H.pics, H.over);
       slots[`hero-${id}`] = H.el;
+      let x0 = null, y0 = 0;
+      H.el.addEventListener('touchstart', (e) => { x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; }, { passive: true });
+      H.el.addEventListener('touchend', (e) => {
+        if (x0 == null) return;
+        const dx = e.changedTouches[0].clientX - x0, dy = e.changedTouches[0].clientY - y0;
+        x0 = null;
+        if (Math.abs(dx) > 60 && Math.abs(dx) > 2 * Math.abs(dy)) { H.swiped = Date.now(); H.onSwipe?.(dx < 0 ? 'next' : 'prev'); }
+      }, { passive: true });
     }
     return H;
   }
@@ -192,7 +205,7 @@
       H.pics.append(pic);
       void pic.offsetWidth;        // drawn at 0 first, so it fades
       pic.classList.add('in');
-      setTimeout(() => { for (const el of [...H.pics.children]) if (el !== pic && H.src === src) el.remove(); }, 500);
+      setTimeout(() => { const top = H.pics.lastElementChild; for (const el of [...H.pics.children]) if (el !== top) el.remove(); }, 500);
     };
     // loaded, then decoded (but never wait on decoding long: a tab in the background may not decode at all)
     new Promise((ok) => { if (pic.complete) ok(); else pic.onload = pic.onerror = () => ok(); })
@@ -390,7 +403,7 @@
       S.online = true;
       S.me = j.me; S.presets = j.presets; S.status = j.status;
       if (j.doc && (force || S.docStale || (!S.inFlight && (!S.doc || j.doc.v >= S.doc.v)))) { S.doc = j.doc; S.docStale = false; }
-      for (const st of Object.values(S.status)) { warm(st.st?.up); warm(st.st?.recent?.[0]); }
+      for (const st of Object.values(S.status)) { warm(st.st?.up); warm(st.st?.recent?.[0]); if (st.st?.cur?.id) sharpen(st.st.cur); sharpen(st.st?.up); }
       settlePending();
       if (!S.doc.devices[S.me]) return signedOut('This browser was signed out');
     } catch (e) {
@@ -410,6 +423,14 @@
     timer = setTimeout(async () => { await refresh(); schedule(); }, first ?? every);
   }
   document.addEventListener('visibilitychange', () => { if (!document.hidden) { lastTouch = Date.now(); refresh().then(schedule); } else clearTimeout(timer); });
+  addEventListener('keydown', (e) => {
+    if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || route().name !== 'now' || document.querySelector('dialog[open]')) return;
+    if (e.target.closest?.('input, select, textarea, button, a')) { if (e.key === ' ' || !e.target.closest('button, a')) return; }
+    const label = e.key === 'ArrowRight' ? 'Next' : e.key === 'ArrowLeft' ? 'Previous' : e.key === ' ' ? 'main' : null;
+    if (!label) return;
+    const b = label === 'main' ? document.querySelector('.controls .main') : document.querySelector(`.controls button[aria-label="${label}"]`);
+    if (b && !b.disabled) { e.preventDefault(); b.click(); }
+  });
   for (const ev of ['pointerdown', 'keydown']) addEventListener(ev, () => { const was = idle(); lastTouch = Date.now(); if (was) { refresh(); schedule(); } }, { passive: true });
 
   // ---------- sheets, prompts, toasts
@@ -638,13 +659,14 @@
     // the picture: the coming one, held back, while it changes (see heroOf)
     const pic0 = pend?.ahead || cur;
     const H = heroOf(id), hero = h('div', { 'data-slot': `hero-${id}` });
-    heroShow(H, pic0 ? (pic0.local ? pic0.thumb : UI.full.has(pic0.id) ? fullOf(pic0) : thumb(pic0)) : null,
+    heroShow(H, pic0 ? (pic0.local ? pic0.thumb : sharp.get(pic0.id) || thumb(pic0)) : null,
       pic0?.local ? pic0.name || 'Your picture' : pend ? 'The wallpaper that’s coming' : 'The wallpaper on screen');
-    if (pic0 && !pic0.local && !pend) sharpen(pic0);
+    if (pic0 && !pic0.local) sharpen(pic0);
     H.pending = !!pend;            // applied after the page is in place, so it eases (render)
+    H.onSwipe = (dir) => { if (online && !pend) command(id, { type: dir }); };
     morphKids(H.over, h('div', {},
       pic0 ? null : h('div', { class: 'blank' }, st.note || (online ? 'Nothing on screen yet' : `${d.name} will show here when it checks in`)),
-      pic0 ? h('button', { class: 'tap', 'aria-label': 'About this wallpaper', onclick: () => preview(pic0, { device: id }) }) : null,
+      pic0 ? h('button', { class: 'tap', 'aria-label': 'About this wallpaper', onclick: () => { if (Date.now() - (H.swiped || 0) > 500) preview(pic0, { device: id }); } }) : null,
       kept ? h('span', { class: 'flag' }, icon('pinOn'), 'Keeping') : paused ? h('span', { class: 'flag' }, icon('pause'), 'Paused') : null));
 
     const total = st.total || 0, shown = Math.min(st.shown || 0, total);
@@ -686,7 +708,7 @@
       d.kind === 'tv' && st.base > 70 && s.every * 60 < st.base
         ? h('p', { class: 'hint pad' }, `Projectivy asks about every ${everyLabel(Math.round(st.base / 60))}, so the TV changes at most that often.`) : null,
       recent.length ? [groupLabel('Recently shown'), h('div', { class: 'strip pad' }, recent.map((r, i) => h('button', { 'data-key': r.id || `local:${r.name}:${i}`, 'aria-label': r.local ? r.name : 'Earlier wallpaper', onclick: () => preview(r, { device: id }) },
-        r.local ? (r.thumb ? img(r.thumb) : h('div', { class: 'own' }, r.name)) : img(thumb(r, 'small')))))] : null);
+        r.local ? (r.thumb ? img(r.thumb) : h('div', { class: 'own' }, r.name)) : img(thumb(r)))))] : null);
 
     return h('div', { class: 'stage' }, h('div', {}, hero, caption, controls), side);
   }

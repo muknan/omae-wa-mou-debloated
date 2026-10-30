@@ -29,7 +29,8 @@ Open the deployment's address on a phone (or any browser) for the remote:
 
 - **Now**: what each device shows, with Keep, Previous, Pause, Next and ♡; what it shuffles (any mix of the toplist,
   Favourites and playlists, and a PC's own folders), its toplist filters, and how often it changes. Tap the picture
-  for the rest: show it on another device, add it to a playlist, never show it again, open it on Wallhaven.
+  for the rest: show it on another device, add it to a playlist, never show it again, open it on Wallhaven. Swipe
+  it for Next and Previous; on a computer, ← and → do the same and the space bar pauses.
 - **Playlists**: the same on every device. Each device picks which ones it shuffles. Add a wallpaper by its
   Wallhaven link; Hidden lists what's never shown, to let ones back.
 - **Browse**: a device's toplist as a grid, by most favourites, newest or shuffled, to add to playlists.
