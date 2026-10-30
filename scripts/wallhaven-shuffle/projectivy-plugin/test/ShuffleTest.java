@@ -53,6 +53,22 @@ public class ShuffleTest {
         String real = new Shuffle(Shuffle.split(round), Shuffle.split(history), new Random(77)).next(p).id;
         check("the preview of Next is the one Next shows", peek.equals(again) && peek.equals(real), peek + " " + real);
 
+        // Projectivy's timing, from a real evening: it asks every 60 s, and any ask restarts that.
+        check("Update delay: a minute until it's measured", Shuffle.base(List.of()) == 60_000, Shuffle.base(List.of()));
+        check("Update delay: one odd gap (26 min in another app) doesn't move it",
+            Shuffle.base(List.of("60000", "1560000", "60010", "59990", "60000")) == 60_000, Shuffle.base(List.of("60000", "1560000", "60010", "59990", "60000")));
+        long t0 = 1_000_000_000L;   // a Next from the remote was shown at t0 (Projectivy asked then)
+        check("every 1 minute: the next change at the next ask, 60 s on",
+            Shuffle.nextChange(t0, 60_000, t0, 60_000, t0 + 5_000) == t0 + 60_000, Shuffle.nextChange(t0, 60_000, t0, 60_000, t0 + 5_000) - t0);
+        check("every 5 minutes: the first ask after 4:45 (the 5th)",
+            Shuffle.nextChange(t0, 60_000, t0, 300_000, t0 + 5_000) == t0 + 300_000, Shuffle.nextChange(t0, 60_000, t0, 300_000, t0 + 5_000) - t0);
+        check("an ask that kept the wallpaper moves the grid with it",
+            Shuffle.nextChange(t0 + 61_000, 60_000, t0, 300_000, t0 + 70_000) == t0 + 301_000, Shuffle.nextChange(t0 + 61_000, 60_000, t0, 300_000, t0 + 70_000) - t0);
+        check("Projectivy asks every 2 min, change every minute: every 2 min",
+            Shuffle.nextChange(t0, 120_000, t0, 60_000, t0 + 1_000) == t0 + 120_000, Shuffle.nextChange(t0, 120_000, t0, 60_000, t0 + 1_000) - t0);
+        check("never in the past (an ask missed while asleep)",
+            Shuffle.nextChange(t0, 60_000, t0, 60_000, t0 + 600_500) == t0 + 660_000, Shuffle.nextChange(t0, 60_000, t0, 60_000, t0 + 600_500) - t0);
+
         // The list changes: new ones join the current round, dropped ones don't block a new round.
         Shuffle c = new Shuffle(List.of(), List.of(), new Random(4));
         for (int i = 0; i < 39; i++) c.next(p);

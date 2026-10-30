@@ -11,7 +11,7 @@
   };
   let token = store.get('whs.token');
   const S = { doc: null, status: {}, presets: null, me: null, online: true, inFlight: 0 };
-  const UI = { dev: store.get('whs.dev'), pending: {}, localWant: {}, hero: {}, shown: {}, full: new Set(), browse: { dev: store.get('whs.browseDev'), sort: 'fav', withHidden: false } };
+  const UI = { dev: store.get('whs.dev'), pending: {}, localWant: {}, heroes: {}, shown: {}, full: new Set(), browse: { dev: store.get('whs.browseDev'), sort: 'fav', withHidden: false } };
   const lists = new Map(); // list query -> { items, error, loading, at }
   const sheets = new Set(); // open sheets' refill functions, so they follow changes made elsewhere
 
@@ -23,15 +23,61 @@
       if (v == null || v === false) continue;
       if (k === 'class') el.className = v;
       else if (k === 'style' && typeof v === 'object') Object.assign(el.style, v);
-      else if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2).toLowerCase(), v);
-      else if (k === 'value') el.value = v;
-      else if (k === 'checked') el.checked = !!v;
+      else if (k.startsWith('on') && typeof v === 'function') { const t = k.slice(2).toLowerCase(); (el.__on ||= {})[t] = v; el.addEventListener(t, dispatch); }
+      else if (k === 'value') { el.value = v; el.__value = String(v); }
+      else if (k === 'checked') { el.checked = !!v; el.__checked = true; }
       else if (v === true) el.setAttribute(k, '');
       else el.setAttribute(k, v);
     }
     for (const kid of kids.flat(Infinity)) if (kid != null && kid !== false) el.append(kid instanceof Node ? kid : document.createTextNode(String(kid)));
     return el;
   }
+  function dispatch(e) { this.__on?.[e.type]?.call(this, e); }
+
+  // Brings a live element in line with a freshly built one, changing only what differs: elements stay (so a tap in
+  // progress lands, pictures don't reload or blink, focus and scroll stay), text and attributes are updated, and
+  // children with a data-key are matched by key (a list that gains one at the top moves, it isn't redrawn).
+  // data-slot elements are managed elsewhere (the hero) and left alone.
+  const keyOf = (n) => (n.nodeType === 1 ? n.getAttribute('data-key') : null);
+  const slotOf = (n) => (n.nodeType === 1 ? n.getAttribute('data-slot') : null);
+  const slots = {};   // data-slot name -> the live element that stands in for its placeholder
+  function adopt(n) {
+    if (n.nodeType !== 1) return n;
+    const sl = slotOf(n);
+    if (sl && slots[sl]) return slots[sl];
+    for (const ph of n.querySelectorAll('[data-slot]')) if (slots[ph.getAttribute('data-slot')]) ph.replaceWith(slots[ph.getAttribute('data-slot')]);
+    return n;
+  }
+  function morph(old, neu) {
+    if (old.nodeType !== neu.nodeType || old.nodeName !== neu.nodeName || slotOf(old) !== slotOf(neu)) { old.replaceWith(adopt(neu)); return; }
+    if (old.nodeType === 3) { if (old.nodeValue !== neu.nodeValue) old.nodeValue = neu.nodeValue; return; }
+    if (old.nodeType !== 1 || slotOf(old)) return;
+    for (const a of [...old.attributes]) if (!neu.hasAttribute(a.name)) old.removeAttribute(a.name);
+    for (const a of neu.attributes) if (old.getAttribute(a.name) !== a.value) old.setAttribute(a.name, a.value);
+    old.__on = neu.__on;
+    for (const t in neu.__on || {}) old.addEventListener(t, dispatch);
+    old.__more = neu.__more;
+    morphKids(old, neu);
+    const focused = old === document.activeElement;
+    if (old.tagName === 'INPUT' && old.type === 'checkbox') old.checked = !!neu.__checked && neu.checked;
+    else if ((old.tagName === 'INPUT' || old.tagName === 'TEXTAREA') && !focused && neu.__value != null && old.value !== neu.__value) old.value = neu.__value;
+    else if (old.tagName === 'SELECT') { const sel = neu.querySelector('option[selected]'); if (sel && old.value !== sel.value) old.value = sel.value; }
+  }
+  function morphKids(old, neu) {
+    const kids = [...neu.childNodes];
+    const byKey = new Map();
+    for (const c of old.childNodes) { const k = keyOf(c); if (k != null) byKey.set(k, c); }
+    kids.forEach((n, i) => {
+      const ref = old.childNodes[i] || null, k = keyOf(n);
+      let m = null;
+      if (k != null) { m = byKey.get(k) || null; byKey.delete(k); }
+      else if (ref && keyOf(ref) == null) m = ref;
+      if (m) { if (m !== ref) old.insertBefore(m, ref); morph(m, n); }
+      else old.insertBefore(adopt(n), ref);
+    });
+    while (old.childNodes.length > kids.length) old.lastChild.remove();
+  }
+
   const P = {
     now: '<rect x="3" y="4.5" width="18" height="12" rx="2"/><path d="M8.5 20h7"/>',
     playlists: '<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>',
@@ -76,9 +122,12 @@
     s.innerHTML = P[name] || '';
     return s;
   };
+  const loaded = new Set();   // pictures shown once already: drawn again, they appear at once instead of fading in
   const img = (src, alt = '', eager = false) => {
-    const i = h('img', { src, alt, decoding: 'async', loading: eager ? 'eager' : 'lazy', draggable: 'false' });
-    if (!i.complete) { i.classList.add('loading'); i.addEventListener('load', () => i.classList.remove('loading'), { once: true }); }
+    const known = loaded.has(src);
+    const i = h('img', { src, alt, decoding: known ? 'sync' : 'async', loading: eager || known ? 'eager' : 'lazy', draggable: 'false' });
+    if (!i.complete && !known) i.classList.add('loading');
+    i.addEventListener('load', () => { loaded.add(src); i.classList.remove('loading'); }, { once: true });
     i.addEventListener('error', () => i.classList.remove('loading'), { once: true });
     return i;
   };
@@ -98,7 +147,7 @@
   }
   function switchItem({ ic, label, sub, on, onchange, id }) {
     const input = h('input', { type: 'checkbox', role: 'switch', checked: on, id, onchange: (e) => onchange(e.target.checked) });
-    return h('label', { class: `item ${ic ? 'has-icon' : ''}` }, ic ? icon(ic) : null, h('span', { class: 'label' }, label, sub ? h('small', {}, sub) : null), h('span', { class: 'switch' }, input, h('span')));
+    return h('label', { class: `item ${ic ? 'has-icon' : ''}`, 'data-key': id || null }, ic ? icon(ic) : null, h('span', { class: 'label' }, label, sub ? h('small', {}, sub) : null), h('span', { class: 'switch' }, input, h('span')));
   }
   // append that skips nothing-children and flattens lists, like h()
   const put = (el, ...kids) => el.append(...kids.flat(Infinity).filter((k) => k != null && k !== false));
@@ -112,11 +161,43 @@
   // On a big screen the 432 px thumbnail looks soft: the original replaces it once it has loaded (not on a phone,
   // and not when the browser asks to save data, since originals are several megabytes).
   const bigScreen = matchMedia('(min-width: 960px)');
-  function sharpen(el, it) {
-    if (!bigScreen.matches || navigator.connection?.saveData || UI.full.has(it.id)) return;
+  const sharpening = new Set();
+  function sharpen(it) {
+    if (!bigScreen.matches || navigator.connection?.saveData || UI.full.has(it.id) || sharpening.has(it.id)) return;
+    sharpening.add(it.id);
     const full = new Image();
-    full.onload = () => { UI.full.add(it.id); if (el.isConnected) el.src = full.src; };
+    full.onload = () => { UI.full.add(it.id); changed(); };
     full.src = fullOf(it);
+  }
+
+  // The picture at the top of a device's page. It stays the same element from one drawing to the next, and a new
+  // picture goes on top only once it's decoded, then fades in over the old one: no blank frame, no flicker.
+  function heroOf(id) {
+    let H = UI.heroes[id];
+    if (!H) {
+      H = UI.heroes[id] = { el: h('div', { class: 'hero', 'data-slot': `hero-${id}` }), pics: h('div', { class: 'pics' }), over: h('div'), src: null, pending: false };
+      H.el.append(H.pics, H.over);
+      slots[`hero-${id}`] = H.el;
+    }
+    return H;
+  }
+  function heroShow(H, src, alt) {
+    if (src === H.src) { if (H.pics.lastElementChild) H.pics.lastElementChild.alt = alt; return; }
+    H.src = src;
+    if (!src) { H.pics.replaceChildren(); return; }
+    const pic = h('img', { alt, draggable: 'false' });
+    pic.src = src;
+    const show = () => {
+      if (H.src !== src) return;   // a newer one came meanwhile
+      H.pics.append(pic);
+      void pic.offsetWidth;        // drawn at 0 first, so it fades
+      pic.classList.add('in');
+      setTimeout(() => { for (const el of [...H.pics.children]) if (el !== pic && H.src === src) el.remove(); }, 500);
+    };
+    // loaded, then decoded (but never wait on decoding long: a tab in the background may not decode at all)
+    new Promise((ok) => { if (pic.complete) ok(); else pic.onload = pic.onerror = () => ok(); })
+      .then(() => Promise.race([pic.decode ? pic.decode().catch(() => {}) : null, new Promise((ok) => setTimeout(ok, 250))]))
+      .then(show);
   }
   const pageOf = (it) => `https://wallhaven.cc/w/${it.id}`;
   const fromList = (w) => ({ id: w.id, ext: /\.png$/i.test(w.path || '') ? 'png' : 'jpg', res: w.resolution || '', fav: w.favorites || 0 });
@@ -291,13 +372,21 @@
 
   let timer = null, lastTouch = Date.now();
   const idle = () => Date.now() - lastTouch > 10 * 60e3;
+  // One answer at a time is applied, newest only: an older answer that arrives late (slow network) is dropped, so
+  // the page never steps back to what it showed a moment ago.
+  let asked = 0, applied = 0, inflight = null;
   async function refresh(force) {
     if (!token) return;
+    if (inflight && !force) return inflight;
+    const mine = ++asked;
+    const run = (async () => {
     try {
       const query = {};
       if (idle()) query.quiet = '1';
       if (S.doc && !force && !S.docStale) query.v = S.doc.v;   // the doc comes back only when it changed
       const j = await api('state', { query });
+      if (mine < applied) return;
+      applied = mine;
       S.online = true;
       S.me = j.me; S.presets = j.presets; S.status = j.status;
       if (j.doc && (force || S.docStale || (!S.inFlight && (!S.doc || j.doc.v >= S.doc.v)))) { S.doc = j.doc; S.docStale = false; }
@@ -305,9 +394,13 @@
       settlePending();
       if (!S.doc.devices[S.me]) return signedOut('This browser was signed out');
     } catch (e) {
+      if (mine < applied) return;
       if (e.status !== 401) S.online = false;
     }
     changed();
+    })();
+    if (!force) { inflight = run; run.finally(() => { if (inflight === run) inflight = null; }); }
+    return run;
   }
   // every 4 s while in use, every second while a device is changing, every 30 s when left alone
   function schedule(first) {
@@ -322,7 +415,7 @@
   // ---------- sheets, prompts, toasts
 
   // A sheet's content is drawn by fill(body, close), and drawn again when the data changes while it's open.
-  function sheet(title, fill) {
+  function sheet(title, fill, { fixed = false } = {}) {
     const body = h('div', { class: 'body' });
     const dlg = h('dialog', { class: 'sheet', 'aria-label': title || 'Details' },
       h('div', { class: 'handle', 'aria-hidden': 'true' }),
@@ -330,11 +423,9 @@
       body);
     let closed = false;
     const redraw = () => {
-      const keep = body.scrollTop, focused = document.activeElement?.id;
-      body.replaceChildren();
-      fill(body, close);
-      body.scrollTop = keep;
-      if (focused) document.getElementById(focused)?.focus();
+      const fresh = h('div');
+      fill(fresh, close);
+      if (!closed) morphKids(body, fresh);
     };
     const close = () => {
       if (closed) return;
@@ -343,7 +434,7 @@
       dlg.classList.add('closing');
       setTimeout(() => { dlg.close(); dlg.remove(); }, 190);
     };
-    const refill = () => { if (!body.contains(document.activeElement) || document.activeElement.type === 'checkbox') redraw(); };
+    const refill = () => { if (!fixed) redraw(); };
     dlg.addEventListener('cancel', (e) => { e.preventDefault(); close(); });
     dlg.addEventListener('click', (e) => { if (e.target === dlg) close(); });
     // a downward swipe on the handle or title closes it, as on the phone's own sheets
@@ -379,7 +470,7 @@
           h('div', { class: 'foot' }, h('button', { class: 'btn', type: 'button', onclick: () => close() }, 'Cancel'), ok)));
         validate();
         setTimeout(() => { input.focus(); input.select(); }, 80);
-      });
+      }, { fixed: true });
       s.dlg.addEventListener('close', () => { if (!done) resolve(null); });
     });
   }
@@ -391,7 +482,7 @@
         put(body, h('div', { class: 'pad' }, h('p', { class: 'note' }, message),
           h('div', { class: 'foot' }, h('button', { class: 'btn', onclick: () => close() }, 'Cancel'),
             h('button', { class: 'btn danger', onclick: () => { done = true; resolve(true); close(); } }, okLabel))));
-      });
+      }, { fixed: true });
       s.dlg.addEventListener('close', () => { if (!done) resolve(false); });
     });
   }
@@ -544,22 +635,17 @@
     const online = !!stat.online && !away, pend = UI.pending[id];
     const kept = !!s.keep, paused = !!s.paused;
 
-    // the picture (the coming one, dimmed, while it changes); the last one stays underneath while the next fades in
+    // the picture: the coming one, held back, while it changes (see heroOf)
     const pic0 = pend?.ahead || cur;
-    const heroSrc = pic0 ? (pic0.local ? pic0.thumb : thumb(pic0)) : null;
-    const hero = h('div', { class: `hero ${pend ? 'pending' : ''}` });
-    const prev = UI.hero[id];
-    if (prev && prev !== heroSrc && !prev.startsWith('data:')) hero.style.backgroundImage = `url("${prev}")`;
-    UI.hero[id] = heroSrc;
-    if (heroSrc) {
-      const pic = img(UI.full.has(pic0.id) ? fullOf(pic0) : heroSrc, pic0.local ? pic0.name || 'Your picture' : pend ? 'The wallpaper that’s coming' : 'The wallpaper on screen', true);
-      hero.append(pic);
-      if (!pic0.local && !pend) sharpen(pic, pic0);
-    }
-    else hero.append(h('div', { class: 'blank' }, st.note || (online ? 'Nothing on screen yet' : `${d.name} will show here when it checks in`)));
-    if (pic0) hero.append(h('button', { class: 'tap', 'aria-label': 'About this wallpaper', onclick: () => preview(pic0, { device: id }) }));
-    if (kept) hero.append(h('span', { class: 'flag' }, icon('pinOn'), 'Keeping'));
-    else if (paused) hero.append(h('span', { class: 'flag' }, icon('pause'), 'Paused'));
+    const H = heroOf(id), hero = h('div', { 'data-slot': `hero-${id}` });
+    heroShow(H, pic0 ? (pic0.local ? pic0.thumb : UI.full.has(pic0.id) ? fullOf(pic0) : thumb(pic0)) : null,
+      pic0?.local ? pic0.name || 'Your picture' : pend ? 'The wallpaper that’s coming' : 'The wallpaper on screen');
+    if (pic0 && !pic0.local && !pend) sharpen(pic0);
+    H.pending = !!pend;            // applied after the page is in place, so it eases (render)
+    morphKids(H.over, h('div', {},
+      pic0 ? null : h('div', { class: 'blank' }, st.note || (online ? 'Nothing on screen yet' : `${d.name} will show here when it checks in`)),
+      pic0 ? h('button', { class: 'tap', 'aria-label': 'About this wallpaper', onclick: () => preview(pic0, { device: id }) }) : null,
+      kept ? h('span', { class: 'flag' }, icon('pinOn'), 'Keeping') : paused ? h('span', { class: 'flag' }, icon('pause'), 'Paused') : null));
 
     const total = st.total || 0, shown = Math.min(st.shown || 0, total);
     const caption = h('div', { class: 'pad' },
@@ -573,7 +659,7 @@
       h('div', { class: 'status' }, h('span', { class: `dot ${online ? 'on' : ''}` }),
         pend ? pendingLabel(pend, d.name)
         : online
-          ? h('span', {}, paused ? 'Paused' : kept ? 'Keeping this wallpaper' : st.next ? h('span', { 'data-next': st.next }) : 'Online')
+          ? h('span', {}, paused ? 'Paused' : kept ? 'Keeping this wallpaper' : st.next ? h('span', { 'data-next': st.next }, nextText(st.next)) : 'Online')
           : h('span', {}, presence(id))));
 
     const favOn = cur && !cur.local && inPl('fav', cur.id);
@@ -599,7 +685,7 @@
       // a TV changes when Projectivy asks (its Update delay): say so when that is slower than the choice
       d.kind === 'tv' && st.base > 70 && s.every * 60 < st.base
         ? h('p', { class: 'hint pad' }, `Projectivy asks about every ${everyLabel(Math.round(st.base / 60))}, so the TV changes at most that often.`) : null,
-      recent.length ? [groupLabel('Recently shown'), h('div', { class: 'strip pad' }, recent.map((r) => h('button', { 'aria-label': r.local ? r.name : 'Earlier wallpaper', onclick: () => preview(r, { device: id }) },
+      recent.length ? [groupLabel('Recently shown'), h('div', { class: 'strip pad' }, recent.map((r, i) => h('button', { 'data-key': r.id || `local:${r.name}:${i}`, 'aria-label': r.local ? r.name : 'Earlier wallpaper', onclick: () => preview(r, { device: id }) },
         r.local ? (r.thumb ? img(r.thumb) : h('div', { class: 'own' }, r.name)) : img(thumb(r, 'small')))))] : null);
 
     return h('div', { class: 'stage' }, h('div', {}, hero, caption, controls), side);
@@ -695,7 +781,7 @@
   function viewPlaylists() {
     const album = (p) => {
       const used = usedOn(p.id), first = p.items[0];
-      return h('a', { class: 'album', href: `#/playlists/${encodeURIComponent(p.id)}` },
+      return h('a', { class: 'album', 'data-key': p.id, href: `#/playlists/${encodeURIComponent(p.id)}` },
         h('div', { class: 'cover' }, first ? img(thumb(first, 'small')) : icon(p.kind === 'fav' ? 'heart' : 'image')),
         h('div', {}, h('div', { class: 'name ellipsis' }, p.name),
           h('div', { class: 'meta ellipsis' }, plural(p.items.length, 'wallpaper'), used.length ? ` · on ${used.join(', ')}` : '')));
@@ -755,7 +841,7 @@
       } }, h('p', { class: 'note' }, 'Paste the link of any wallpaper on Wallhaven.'), input, err,
       h('div', { class: 'foot' }, h('button', { class: 'btn', type: 'button', onclick: () => close() }, 'Cancel'), go)));
       setTimeout(() => input.focus(), 80);
-    });
+    }, { fixed: true });
   }
 
   function playlistSheet(p) {
@@ -778,25 +864,24 @@
 
   // A grid of wallpapers, drawn a screenful at a time as you scroll.
   function photoGrid(items, ctx = {}) {
-    const grid = h('div', { class: 'photos' });
     const favs = new Set(findPl('fav').items.map((x) => x.id)), hidden = new Set(findPl('hidden').items.map((x) => x.id));
     const key = ctx.key || ctx.pl || 'grid';
-    let shown = 0;
-    const sentinel = h('div', { class: 'more', 'aria-hidden': 'true' });
-    const more = () => {
-      const end = Math.min(items.length, Math.max(shown + 60, UI.shown[key] || 0));
-      for (; shown < end; shown++) {
-        const it = items[shown], isHidden = hidden.has(it.id) && ctx.pl !== 'hidden';
-        grid.append(h('button', { class: `photo ${isHidden ? 'dim' : ''}`, 'aria-label': `Wallpaper ${fmtRes(it.res)}`, onclick: () => preview(it, ctx) },
-          img(thumb(it, 'small')),
-          favs.has(it.id) && ctx.pl !== 'fav' ? h('span', { class: 'badge heart' }, icon('heartOn')) : isHidden ? h('span', { class: 'badge' }, icon('hide')) : null));
-      }
-      UI.shown[key] = shown;
-      sentinel.hidden = shown >= items.length;
-    };
-    new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting)) more(); }, { rootMargin: '900px' }).observe(sentinel);
-    more();
+    const count = Math.min(items.length, Math.max(60, UI.shown[key] || 0));
+    const grid = h('div', { class: 'photos' }, items.slice(0, count).map((it) => {
+      const isHidden = hidden.has(it.id) && ctx.pl !== 'hidden';
+      return h('button', { class: `photo ${isHidden ? 'dim' : ''}`, 'data-key': it.id, 'aria-label': `Wallpaper ${fmtRes(it.res)}`, onclick: () => preview(it, ctx) },
+        img(thumb(it, 'small')),
+        favs.has(it.id) && ctx.pl !== 'fav' ? h('span', { class: 'badge heart' }, icon('heartOn')) : isHidden ? h('span', { class: 'badge' }, icon('hide')) : null);
+    }));
+    const sentinel = count < items.length ? h('div', { class: 'more', 'aria-hidden': 'true' }) : null;
+    if (sentinel) sentinel.__more = () => { UI.shown[key] = count + 60; render(true); };
     return h('div', {}, grid, sentinel);
+  }
+  // the grid's end coming into view (900 px ahead) draws the next 60
+  const moreIO = new IntersectionObserver((es) => { for (const e of es) if (e.isIntersecting) e.target.__more?.(); }, { rootMargin: '900px' });
+  function watchMore() {
+    moreIO.disconnect();
+    for (const el of shell.main.querySelectorAll('.more')) moreIO.observe(el);
   }
 
   // ---------- Browse
@@ -889,12 +974,12 @@
       code, name, err,
       h('div', { class: 'foot' }, h('button', { class: 'btn', type: 'button', onclick: () => close() }, 'Cancel'), go)));
       setTimeout(() => code.focus(), 80);
-    });
+    }, { fixed: true });
   }
 
   // ---------- rendering: the whole view, only when something it shows changed
 
-  let shell = null, lastSig = '', deferred = false;
+  let shell = null, lastSig = '';
   function buildShell() {
     const tab = (name, label, ic) => h('a', { href: `#/${name === 'now' ? '' : name}`, 'data-tab': name }, icon(ic), h('span', {}, label));
     const nav = h('nav', { class: 'tabbar', 'aria-label': 'Sections' }, tab('now', 'Now', 'now'), tab('playlists', 'Playlists', 'playlists'), tab('browse', 'Browse', 'browse'), tab('devices', 'Devices', 'devices'));
@@ -911,13 +996,14 @@
 
   function changed() { render(); sheets.forEach((r) => r()); }
 
-  function render() {
+  function render(force) {
     if (!token) return;
     if (!shell) buildShell();
     const r = route();
     for (const a of shell.nav.querySelectorAll('a')) { if (a.dataset.tab === r.name) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); }
     if (!S.doc) {
       // the page's shape while the first answer comes: a title line, the picture and three rows, all quiet
+      lastSig = '';
       shell.main.replaceChildren(h('div', { 'aria-busy': 'true', 'aria-label': 'Loading' },
         h('div', { class: 'switcher pad' }, h('div', { class: 'ghost-line', style: { width: '45%', height: '28px' } })),
         h('div', { class: 'hero ghost' }),
@@ -927,25 +1013,37 @@
     }
     const roundedStatus = Object.fromEntries(Object.entries(S.status).map(([k, v]) => [k, { ...v, seen: Math.round(v.seen / 60e3) }]));
     const sig = JSON.stringify([r, S.online, S.doc, roundedStatus, UI.pending, UI.dev, UI.browse, [...lists.entries()].map(([k, v]) => [k, !!v.items, v.loading, v.error])]);
-    if (sig === lastSig) return;
-    const active = document.activeElement;
-    if (active && shell.main.contains(active) && ['INPUT', 'SELECT'].includes(active.tagName) && active.type !== 'checkbox') { deferred = true; return; }
+    if (sig === lastSig && !force) return;
     lastSig = sig;
-    deferred = false;
     const view = r.name === 'playlists' ? (r.arg ? viewPlaylist(r.arg) : viewPlaylists()) : r.name === 'browse' ? viewBrowse() : r.name === 'devices' ? viewDevices() : viewNow();
-    shell.main.replaceChildren(...[S.online ? null : h('div', { class: 'offline pad', style: { paddingTop: '16px' } }, icon('alert'), h('span', {}, 'Can’t reach the service. Retrying…')), view].filter(Boolean));
+    const fresh = h('div', {}, S.online ? null : h('div', { class: 'offline pad', style: { paddingTop: '16px' } }, icon('alert'), h('span', {}, 'Can’t reach the service. Retrying…')),
+      h('div', { 'data-key': `view:${r.name}/${r.arg || ''}` }, view));
+    morphKids(shell.main, fresh);
+    watchMore();
+    // a new one at the front of "Recently shown": back to the start, where it is
+    for (const st of shell.main.querySelectorAll('.strip')) {
+      const k = st.firstElementChild ? keyOf(st.firstElementChild) : '';
+      if (st.__first !== undefined && st.__first !== k && st.scrollLeft) st.scrollTo({ left: 0, behavior: 'smooth' });
+      st.__first = k;
+    }
+    // a picture held back while its device changes: switched once it's on the page, so the change eases
+    for (const H of Object.values(UI.heroes)) {
+      if (!H.el.isConnected || H.el.classList.contains('pending') === H.pending) continue;
+      void H.el.offsetWidth;
+      H.el.classList.toggle('pending', H.pending);
+    }
     tick();
   }
-  document.addEventListener('focusout', () => setTimeout(() => { if (deferred) render(); }, 0));
   addEventListener('hashchange', () => { lastSig = ''; render(); scrollTo(0, 0); });
 
   // countdowns ("Next in 2:41") without drawing the page again
+  function nextText(at) {
+    const left = Math.round((at - Date.now()) / 1000);
+    return left <= 0 ? 'Changing…' : left >= 3600 ? `Next in ${Math.floor(left / 3600)} h ${Math.round((left % 3600) / 60)} min` : `Next in ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+  }
   function tick() {
     for (const el of document.querySelectorAll('[data-pending]')) { const t = pendingText(el); if (el.textContent !== t) el.textContent = t; }
-    for (const el of document.querySelectorAll('[data-next]')) {
-      const left = Math.round((Number(el.dataset.next) - Date.now()) / 1000);
-      el.textContent = left <= 0 ? 'Changing now' : left >= 3600 ? `Next in ${Math.floor(left / 3600)} h ${Math.round((left % 3600) / 60)} min` : `Next in ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
-    }
+    for (const el of document.querySelectorAll('[data-next]')) { const t = nextText(Number(el.dataset.next)); if (el.textContent !== t) el.textContent = t; }
   }
   setInterval(tick, 1000);
 

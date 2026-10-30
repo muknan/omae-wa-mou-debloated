@@ -38,7 +38,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (url.pathname === '/api/list') {
     if (!origin) { res.statusCode = 502; return res.end('{"error":"set LIST_ORIGIN to use the list"}'); }
-    const r = await fetch(`${origin}/api/list${url.search}`).catch(() => null);
+    const r = await fetch(`${origin}/api/list${url.search}`, { signal: AbortSignal.timeout(90e3) }).catch(() => null);
     res.statusCode = r ? r.status : 502;
     res.setHeader('content-type', 'application/json');
     return res.end(r ? Buffer.from(await r.arrayBuffer()) : '{"error":"no answer"}');

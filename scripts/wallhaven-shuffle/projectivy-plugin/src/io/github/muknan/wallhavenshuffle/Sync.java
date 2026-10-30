@@ -33,7 +33,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * is open), with one small request; the playlists come down only when they changed.
  */
 final class Sync {
-    static final String VERSION = "1.10";
+    static final String VERSION = "1.12";
 
     // ---- settings (always local; mirrored to the service when paired)
 
@@ -329,7 +329,7 @@ final class Sync {
             if (paired(c) && (pm == null || pm.isInteractive())) {
                 try { checkIn(c); reachable = true; lastError = ""; }
                 catch (Exception e) { reachable = false; lastError = e.getMessage(); Log.w(ListStore.TAG, "sync: " + e.getMessage()); }
-                wait = live ? 1_500 : reachable ? 15_000 : 60_000;
+                wait = live ? 1_500 : reachable ? 10_000 : 60_000;
             } else {
                 wait = 60_000;
             }
@@ -366,7 +366,7 @@ final class Sync {
         if (sendSt) e.putString("st_hash", hash);
         boolean wasLive = live;
         live = r.optBoolean("live");
-        if (live != wasLive) Log.i(ListStore.TAG, live ? "remote open: checking every 1.5 s" : "remote closed: checking every 15 s");
+        if (live != wasLive) Log.i(ListStore.TAG, live ? "remote open: checking every 1.5 s" : "remote closed: checking every 10 s");
         long now = r.optLong("now", System.currentTimeMillis());
         JSONObject d = r.optJSONObject("doc");
         if (d != null) { saveDoc(c, d); e.putInt("doc_v", r.optInt("v")); }

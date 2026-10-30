@@ -72,6 +72,28 @@ final class Shuffle {
     String roundState() { return String.join(",", round); }
     String historyState() { return String.join(",", history); }
 
+    // ---- Projectivy's timing (plain Java, so it's tested off the TV)
+
+    /** Projectivy's Update delay, from the gaps between its own asks: the middle one (an odd gap, say after the TV
+     *  slept, doesn't move it), or a minute until there are any. */
+    static long base(List<String> gaps) {
+        List<Long> g = new ArrayList<>();
+        for (String x : gaps) try { g.add(Long.parseLong(x)); } catch (NumberFormatException ignored) { }
+        if (g.isEmpty()) return 60_000;
+        java.util.Collections.sort(g);
+        return g.get(g.size() / 2);
+    }
+
+    /** When the next change comes. Projectivy asks every `base` after its last ask (any ask restarts its timer), and
+     *  the change happens at the first ask once `every` has passed since the last change (15 s early is fine). */
+    static long nextChange(long lastAsk, long base, long changed, long every, long now) {
+        long due = changed + every - 15_000;
+        long t = lastAsk + base;
+        if (t < due) t += ((due - t + base - 1) / base) * base;
+        if (t < now) t += ((now - t + base - 1) / base) * base;   // an ask it missed (asleep): the next one from now
+        return t;
+    }
+
     static List<String> split(String s) {
         List<String> out = new ArrayList<>();
         if (s == null || s.isEmpty()) return out;

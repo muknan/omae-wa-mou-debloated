@@ -274,7 +274,7 @@ public final class SettingsActivity extends Activity implements Sync.Listener {
     }
 
     private void pickEvery() {
-        long base = ListStore.prefs(this).getLong("base_ms", 0);
+        long base = ShuffleService.base(this);
         pickInts("Change every", TvSettings.EVERY, Sync.settings(this).every, TvSettings::everyLabel, (s, v) -> s.every = v);
         if (base >= 90_000) toast("Projectivy asks about every " + Math.round(base / 60000.0) + " min, so the TV can’t change faster than that");
     }

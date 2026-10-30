@@ -51,7 +51,7 @@ to playlist** and **Hide**, and on the right a short list of rows, each opening 
   everything here and send Next, Previous or a wallpaper, and Hide on any device leaves it out here too.
 - **Service**: the address, and **Get a fresh list now**.
 
-Paired, a background thread checks in every 15 s while the screen is on and the plugin is in use (every 1.5 s
+Paired, a background thread checks in every 10 s while the screen is on and the plugin is in use (every 1.5 s
 while a remote is open), with one small request. Settings made on the TV while offline go up at the next check-in.
 
 A Next, Previous or Show from the remote is answered at once ("it arrived", and when the change is expected).

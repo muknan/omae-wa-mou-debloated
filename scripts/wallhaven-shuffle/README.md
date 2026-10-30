@@ -36,7 +36,7 @@ Open the deployment's address on a phone (or any browser) for the remote:
 - **Devices**: pair a TV, PC or browser with the 6-digit code it shows; rename or sign out any of them.
 
 It works as an app on the phone's home screen (Add to Home screen). Changes reach a device within its next check-in:
-1.5 s while the remote is open, otherwise about 10 s (PC) or 15 s (TV). Next shows the coming wallpaper at once
+1.5 s while the remote is open, otherwise about every 10 s. Next shows the coming wallpaper at once
 (dimmed) and then where it's at: Sending…, Waiting for the device to check in…, Changing in 0:12 (a TV waits until
 Projectivy listens again, at most about 30 s). The TV changes wallpapers only on Projectivy's home screen: in another
 app the remote says "Not on the home screen".

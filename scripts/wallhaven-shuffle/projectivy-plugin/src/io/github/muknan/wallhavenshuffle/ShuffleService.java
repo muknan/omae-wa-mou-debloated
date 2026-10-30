@@ -54,7 +54,10 @@ public final class ShuffleService extends Service {
         @Override public void setPreferences(String params) { importPrefs(ShuffleService.this, params); }
     };
 
-    @Override public void onCreate() { super.onCreate(); Sync.serviceUp(this); }
+    private static volatile long boundAt, refreshAskedAt;
+    static long base(Context c) { return Shuffle.base(Shuffle.split(ListStore.prefs(c).getString("gaps", ""))); }
+
+    @Override public void onCreate() { super.onCreate(); boundAt = System.currentTimeMillis(); Sync.serviceUp(this); }
     @Override public void onDestroy() { Sync.serviceDown(); super.onDestroy(); }
     @Override public IBinder onBind(Intent intent) { return binder; }
 
@@ -79,10 +82,19 @@ public final class ShuffleService extends Service {
     static synchronized Wallpaper next(Context c) {
         SharedPreferences p = ListStore.prefs(c);
         long now = System.currentTimeMillis();
-        // How often Projectivy asks (its Update delay), to say when the next change comes.
-        long lastAsk = p.getLong("asked_at", 0), base = p.getLong("base_ms", 60_000);
-        if (lastAsk > 0 && now - lastAsk > 20_000 && now - lastAsk < 3 * 3600_000L) base = (base * 3 + (now - lastAsk)) / 4;
-        p.edit().putLong("asked_at", now).putLong("base_ms", base).apply();
+        // How often Projectivy asks on its own (its Update delay), to say when the next change comes: only gaps that
+        // end in one of its own asks count (not one this plugin asked for, nor the first after it binds, which may come
+        // after a long time in another app), the last five of them.
+        long lastAsk = p.getLong("asked_at", 0);
+        boolean own = now - refreshAskedAt > 5_000 && now - boundAt > 5_000;
+        SharedPreferences.Editor ed = p.edit().putLong("asked_at", now).remove("base_ms");
+        if (own && lastAsk > 0 && now - lastAsk > 20_000 && now - lastAsk < 3 * 3600_000L) {
+            List<String> gaps = Shuffle.split(p.getString("gaps", ""));
+            gaps.add(String.valueOf(now - lastAsk));
+            while (gaps.size() > 5) gaps.remove(0);
+            ed.putString("gaps", String.join(",", gaps));
+        }
+        ed.apply();
 
         ListStore.refreshIfDue(c);                                 // in the background; never holds up this answer
         TvSettings s = Sync.settings(c);
@@ -249,11 +261,9 @@ public final class ShuffleService extends Service {
             Shuffle.Item cur = current(c);
             if (cur != null) st.put("cur", Sync.itemJson(cur).put("key", cur.id));
             st.put("shown", p.getInt("shown", 0)).put("total", p.getInt("total", 0));
-            long base = p.getLong("base_ms", 60_000), changed = p.getLong("changed_at", 0);
-            if (!s.paused && s.keep.isEmpty() && changed > 0) {
-                long steps = Math.max(1, (s.every * 60_000L - 15_000 + base - 1) / base);
-                st.put("next", changed + steps * base);
-            }
+            long base = base(c), changed = p.getLong("changed_at", 0), lastAsk = p.getLong("asked_at", 0);
+            if (!s.paused && s.keep.isEmpty() && changed > 0 && lastAsk > 0)
+                st.put("next", Shuffle.nextChange(lastAsk, base, changed, s.every * 60_000L, System.currentTimeMillis()));
             st.put("paused", s.paused).put("kept", !s.keep.isEmpty());
             st.put("recent", new JSONArray(p.getString("recent_json", "[]")));
             List<Shuffle.Item> pool = pool(c, s);
@@ -276,6 +286,7 @@ public final class ShuffleService extends Service {
      *  (reason 1) right away, but on "data changed" (2) only at its next change, so Next uses reason 1 as well. */
     static void askProjectivyToRefresh(Context c, int reason) {
         Log.d(ListStore.TAG, "asking Projectivy to refresh (" + reason + ")");
+        refreshAskedAt = System.currentTimeMillis();
         Intent i = new Intent(ACTION_UPDATED)
             .putExtra("tv.projectivy.plugin.extra.PROVIDER_ID", PROVIDER_ID)
             .putExtra("tv.projectivy.plugin.extra.UPDATE_REASON", reason)
