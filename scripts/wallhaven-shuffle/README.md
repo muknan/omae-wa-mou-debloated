@@ -13,8 +13,9 @@ Setup, settings and how it behaves: [docs/06](../../docs/06-launcher-and-wallpap
 
 ## On a Windows PC
 
-[`windows/`](windows) is a small tray app that uses the same list as the desktop wallpaper: see its
-[README](windows/README.md).
+[`windows/`](windows) is a small tray app that uses the same list as the desktop wallpaper, with "Keep this
+wallpaper", favourites, and playlists (folders of hard links, no duplicate files) or your own picture folders as
+other things to shuffle: see its [README](windows/README.md).
 
 ## On the TV, in order (recommended)
 

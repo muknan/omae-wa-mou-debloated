@@ -23,7 +23,7 @@ using Microsoft.Win32;
 
 [assembly: System.Reflection.AssemblyTitle("Wallhaven Shuffle")]
 [assembly: System.Reflection.AssemblyProduct("Wallhaven Shuffle")]
-[assembly: System.Reflection.AssemblyVersion("2.0.0.0")]
+[assembly: System.Reflection.AssemblyVersion("2.1.0.0")]
 
 namespace WallhavenShuffle
 {
@@ -128,6 +128,37 @@ namespace WallhavenShuffle
         {
             int round = 2;
             DwmSetWindowAttribute(hwnd, 33, ref round, 4);
+        }
+
+        // ---- files: a second name for the same file (no copy), and the Recycle Bin
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        static extern bool CreateHardLink(string newName, string existing, IntPtr security);
+
+        // dst becomes another name for src's data (an NTFS hard link): it shows up in that folder like any picture but
+        // takes no extra space, and stays valid when src is deleted. Only within one drive; elsewhere it's copied.
+        // True if linked, false if copied.
+        public static bool LinkOrCopy(string src, string dst)
+        {
+            if (CreateHardLink(dst, src, IntPtr.Zero)) return true;
+            File.Copy(src, dst);
+            return false;
+        }
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        struct SHFILEOPSTRUCT { public IntPtr hwnd; public uint wFunc; public string pFrom, pTo; public ushort fFlags; public bool fAnyOperationsAborted; public IntPtr hNameMappings; public string lpszProgressTitle; }
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode)] static extern int SHFileOperation(ref SHFILEOPSTRUCT op);
+
+        // Moves a file or folder to the Recycle Bin, without asking or showing progress. False if it couldn't.
+        public static bool Recycle(string path)
+        {
+            var op = new SHFILEOPSTRUCT
+            {
+                wFunc = 3,                                   // FO_DELETE
+                pFrom = Path.GetFullPath(path) + "\0\0",
+                fFlags = 0x0040 | 0x0010 | 0x0004 | 0x0400   // FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI
+            };
+            return SHFileOperation(ref op) == 0 && !op.fAnyOperationsAborted && !File.Exists(path) && !Directory.Exists(path);
         }
 
         // ---- copying a bitmap to a window with its alpha channel (GDI drawing would wipe it)
@@ -421,7 +452,10 @@ namespace WallhavenShuffle
     {
         public const string Previous = "", Next = "", Pause = "", Play = "", Heart = "",
             HeartFill = "", Hide = "", Open = "", Settings = "", Folder = "", Power = "",
-            Chevron = "", More = "", Restore = "", Edit = "", View = "";
+            Chevron = "", More = "", Restore = "", Edit = "", View = "",
+            Pin = "", PinFill = "", Add = "", Library = "", FolderOpen = "",
+            NewFolder = "", Rename = "", Delete = "", Shuffle = "", Globe = "", Pictures = "",
+            Check = "";
     }
 
     // ==================================================================================================== data
@@ -430,10 +464,41 @@ namespace WallhavenShuffle
     {
         public string Id, Page, Image, Resolution, Extension;
         public int Favorites;
+        public string LocalPath;             // a picture in a folder (favourites, a playlist, your own): shown from there, never downloaded
+        public bool IsLocal { get { return LocalPath != null; } }
 
         // Ids and extensions name the files in the cache, so only plain ones are taken (letters, digits, - and _).
         static readonly System.Text.RegularExpressions.Regex SafeId = new System.Text.RegularExpressions.Regex(@"^[A-Za-z0-9_-]{1,40}$");
-        static readonly HashSet<string> ImageTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif" };
+        public static readonly HashSet<string> ImageTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif" };
+
+        // A picture in a folder. Its id is its full path (so rounds and history work as for the list). Pictures this
+        // app saved are named after their Wallhaven id: those keep their Wallhaven page, and the list's details if the
+        // list has them.
+        public static Wall Local(string path, Wall fromList)
+        {
+            string name = Path.GetFileNameWithoutExtension(path);
+            bool wallhaven = SafeId.IsMatch(name) && name.Length <= 12;
+            return new Wall
+            {
+                Id = path, LocalPath = path, Extension = Path.GetExtension(path).ToLowerInvariant(),
+                Page = fromList != null ? fromList.Page : wallhaven ? "https://wallhaven.cc/w/" + name : null,
+                Resolution = fromList != null ? fromList.Resolution : "", Favorites = fromList != null ? fromList.Favorites : -1
+            };
+        }
+
+        // The name a picture gets when it's saved to favourites or a playlist.
+        public string FileName { get { return IsLocal ? Path.GetFileName(LocalPath) : Id + Extension; } }
+        // The Wallhaven id, also for a saved picture named after it; null for other pictures.
+        public string WallhavenId
+        {
+            get
+            {
+                if (!IsLocal) return Id;
+                string name = Path.GetFileNameWithoutExtension(LocalPath);
+                return Page != null && Page.EndsWith("/" + name) ? name : null;
+            }
+        }
+        public static bool IsImageFile(string path) { return ImageTypes.Contains(Path.GetExtension(path)); }
 
         // A usable entry of the list, or null.
         public static Wall Make(string id, string image, string page, string resolution, int favorites)
@@ -470,10 +535,22 @@ namespace WallhavenShuffle
         public string CacheDir = "";         // where the originals are kept; empty = "cache" next to the exe
         public int CacheLimitGB = 10;        // the whole 1-year list is about 7 GB
         public bool LockScreen = false;      // also put each wallpaper on the lock screen
+        public string Source = "";           // what it shuffles: "" = the list, "favourites", "playlist:<name>", "folder:<path>"
+        public string KeepId = "";           // "Keep this wallpaper": the one kept on screen (no automatic changes); "" = none
+        public string PlaylistsDir = "";     // where playlists are made; empty = "Playlists" next to the cache folder (same drive: linked, not copied)
 
         public static readonly string Dir = Path.GetDirectoryName(Application.ExecutablePath);
         public static string FilePath { get { return Path.Combine(Dir, "settings.ini"); } }
         public string CacheFolder { get { return string.IsNullOrEmpty(CacheDir) ? Path.Combine(Dir, "cache") : Environment.ExpandEnvironmentVariables(CacheDir); } }
+        public string PlaylistsFolder
+        {
+            get
+            {
+                if (!string.IsNullOrEmpty(PlaylistsDir)) return Environment.ExpandEnvironmentVariables(PlaylistsDir);
+                string parent = Path.GetDirectoryName(Path.GetFullPath(CacheFolder).TrimEnd('\\'));
+                return Path.Combine(string.IsNullOrEmpty(parent) ? Dir : parent, "Playlists");
+            }
+        }
         public DateTime Stamp;               // settings.ini's time when last read or written: edits in Notepad are picked up
 
         public static readonly string[] Positions = { "Fill", "Fit", "Stretch", "Tile", "Center", "Span" };
@@ -509,6 +586,9 @@ namespace WallhavenShuffle
                     case "CacheDir": s.CacheDir = v; break;
                     case "CacheLimitGB": if (int.TryParse(v, out n)) s.CacheLimitGB = Math.Max(1, n); break;
                     case "LockScreen": s.LockScreen = v == "1"; break;
+                    case "Source": s.Source = v; break;
+                    case "KeepId": s.KeepId = v; break;
+                    case "PlaylistsDir": s.PlaylistsDir = v; break;
                 }
             }
             return s;
@@ -526,7 +606,11 @@ namespace WallhavenShuffle
                     "Paused=" + (Paused ? "1" : "0"), "StartupDone=" + (StartupDone ? "1" : "0"), "ListUrl=" + ListUrl,
                     "OriginalWallpaper=" + OriginalWallpaper, "OriginalStyle=" + OriginalStyle, "OriginalTile=" + OriginalTile,
                     "# Downloaded originals are kept here (empty = a cache folder next to the app), up to CacheLimitGB.",
-                    "CacheDir=" + CacheDir, "CacheLimitGB=" + CacheLimitGB, "LockScreen=" + (LockScreen ? "1" : "0") }) + Environment.NewLine);
+                    "CacheDir=" + CacheDir, "CacheLimitGB=" + CacheLimitGB, "LockScreen=" + (LockScreen ? "1" : "0"),
+                    "# Source: what it shuffles (empty = the list; favourites; playlist:<name>; folder:<path>). KeepId: the wallpaper kept on screen.",
+                    "Source=" + Source, "KeepId=" + KeepId,
+                    "# Playlists are folders in PlaylistsDir (empty = Playlists next to the cache folder: on the same drive, pictures are linked, not copied).",
+                    "PlaylistsDir=" + PlaylistsDir }) + Environment.NewLine);
                 Stamp = File.GetLastWriteTimeUtc(FilePath);
             }
             catch (IOException) { }
@@ -556,6 +640,15 @@ namespace WallhavenShuffle
         }
 
         public bool InRound(string id) { return id != null && inRound.Contains(id); }
+
+        // Each source (the list, favourites, a playlist) has its own round: switching swaps it in. History is shared,
+        // so Previous goes back through what was really on screen.
+        public void LoadRound(IEnumerable<string> round)
+        {
+            Round.Clear(); inRound.Clear();
+            foreach (var id in round) if (inRound.Add(id)) Round.Add(id);
+            Back = -1;
+        }
 
         // The next new one: one not shown yet this round (when all were, the next round begins), and where possible
         // not one of the last few shown, so the end of one round and the start of the next don't repeat. Changes
@@ -648,6 +741,11 @@ namespace WallhavenShuffle
         bool changeFailed;                   // the last change didn't work (it's retried shortly)
         readonly Dictionary<string, Task<string>> downloads = new Dictionary<string, Task<string>>();   // under way, by id
         MainWindow window;
+        readonly List<string> folders = new List<string>();   // your own folders, used like playlists (folders.txt)
+        List<Wall> folderPool;               // the pictures of the folder being shuffled, re-read now and then
+        string folderPoolKey;
+        DateTime folderPoolTime;
+        bool keepAfterChange;                // "Keep this wallpaper" pressed during a change: keep the one coming
 
         public event EventHandler StateChanged;  // the window listens: new wallpaper, pause, list loaded
 
@@ -668,12 +766,21 @@ namespace WallhavenShuffle
                 cacheDir = defaultCache;
                 Directory.CreateDirectory(cacheDir);
             }
-            rot = new Rotation(ReadList("seen.txt"), ReadList("history.txt"), 0);
+            folders.AddRange(ReadList("folders.txt"));
+            if (settings.Source.StartsWith("folder:") && !folders.Contains(settings.Source.Substring(7))) settings.Source = "";
+            rot = new Rotation(ReadList(RoundFile), ReadList("history.txt"), 0);
             blocked = new HashSet<string>(ReadList("blocked.txt"));
             string cachedList = "";
             try { if (File.Exists(ListCache)) cachedList = File.ReadAllText(ListCache); } catch (IOException) { }
             walls = ParseWalls(cachedList, out listComplete);
-            if (rot.History.Count > 0) current = walls.FirstOrDefault(w => w.Id == rot.History[rot.History.Count - 1]);
+            if (rot.History.Count > 0) current = FindWall(rot.History[rot.History.Count - 1]);
+            if (settings.KeepId.Length > 0)
+            {
+                // Kept on screen when the app last ran: carry on keeping it, if it's still there.
+                var kept = FindWall(settings.KeepId);
+                if (kept != null && File.Exists(CachePath(kept))) { current = kept; Log("still keeping " + Describe(kept)); }
+                else { Log("the kept wallpaper (" + settings.KeepId + ") isn't there any more; shuffling again"); settings.KeepId = ""; settings.Save(); }
+            }
 
             if (string.IsNullOrEmpty(settings.OriginalWallpaper)) RememberOriginal();
             if (!settings.StartupDone)
@@ -705,7 +812,7 @@ namespace WallhavenShuffle
             SystemEvents.PowerModeChanged += OnPowerModeChanged;
             UpdateTooltip();
             Log("started");
-            if (string.IsNullOrEmpty(settings.ListUrl)) BeginInvoke(new Action(ShowMainWindow)); // first run: needs a source
+            if (!HasSource) BeginInvoke(new Action(ShowMainWindow)); // first run: needs a source
             else BeginInvoke(new Action(delegate { window = new MainWindow(this); window.CreateControl(); })); // ready ahead of time
         }
 
@@ -718,11 +825,17 @@ namespace WallhavenShuffle
         public bool StartsWithWindowsNow { get { return StartsWithWindows(); } }
         public bool CanGoBack { get { return rot.CanGoBack; } }
         public int HiddenCount { get { return blocked.Count; } }
+        // "Keep this wallpaper" is on for the one on screen.
+        public bool IsKept { get { return current != null && settings.KeepId.Length > 0 && settings.KeepId == current.Id; } }
 
         public string Status()
         {
-            if (string.IsNullOrEmpty(settings.ListUrl)) return "Add a source: ⋯ > Advanced settings";
-            if (walls.Count == 0) return listBusy || string.IsNullOrEmpty(lastError) ? "Loading the wallpaper list…" : "Can't reach the source right now, retrying";
+            if (!HasSource)
+                return IsListSource ? "Add a source: ⋯ > Advanced settings" : "Can't find the folder of \"" + SourceName(settings.Source) + "\"";
+            if (IsListSource && walls.Count == 0) return listBusy || string.IsNullOrEmpty(lastError) ? "Loading the wallpaper list…" : "Can't reach the source right now, retrying";
+            if (IsKept) return busy ? "Changing…" : "Keeping this wallpaper";
+            if (!IsListSource && Pool().Count == 0)
+                return settings.Source == "favourites" ? "No favourites yet: ♡ saves the one on screen" : "\"" + SourceName(settings.Source) + "\" is empty: add wallpapers with Add to playlist";
             if (settings.Paused) return "Paused";
             if (busy) return "Changing…";
             string hold = HoldReason();
@@ -736,8 +849,9 @@ namespace WallhavenShuffle
         // Where the one on screen is in this round: "12 of 1182".
         public string Stats()
         {
-            if (walls.Count == 0) return "";
+            if (IsListSource && walls.Count == 0) return "";
             var pool = Pool();
+            if (pool.Count == 0) return "";
             if (current == null) return pool.Count.ToString("N0") + " wallpapers";
             int n = rot.Counter(current.Id, new HashSet<string>(pool.Select(w => w.Id)));
             return n > 0 ? string.Format("{0:N0} of {1:N0}", n, pool.Count) : "from the last round";
@@ -753,8 +867,8 @@ namespace WallhavenShuffle
         {
             base.OnHandleCreated(e);
             const uint mods = 0x0001 | 0x0002 | 0x0004 | 0x4000; // Alt + Ctrl + Shift, no auto-repeat
-            var keys = new[] { 0x27u, 0x25u, 0x46u, 0x50u };   // Right: next, Left: previous, F: favourite, P: pause
-            var names = new[] { "→", "←", "F", "P" };
+            var keys = new[] { 0x27u, 0x25u, 0x46u, 0x50u, 0x4Bu };   // Right: next, Left: previous, F: favourite, P: pause, K: keep
+            var names = new[] { "→", "←", "F", "P", "K" };
             for (int i = 0; i < keys.Length; i++)
                 if (!Native.RegisterHotKey(Handle, i + 1, mods, keys[i])) Log("Ctrl+Alt+Shift+" + names[i] + " is taken by another app");
         }
@@ -763,7 +877,7 @@ namespace WallhavenShuffle
         {
             if (m.Msg == Native.WM_HOTKEY)
             {
-                switch (m.WParam.ToInt32()) { case 1: Next("hotkey"); break; case 2: Previous(); break; case 3: Favourite(); break; case 4: TogglePause(); break; }
+                switch (m.WParam.ToInt32()) { case 1: Next("hotkey"); break; case 2: Previous(); break; case 3: Favourite(); break; case 4: TogglePause(); break; case 5: ToggleKeep(); break; }
                 return;
             }
             if (m.Msg == Native.ShowWindowMessage && Native.ShowWindowMessage != 0) { ShowMainWindow(); return; }
@@ -777,29 +891,68 @@ namespace WallhavenShuffle
             Log("window opened");
         }
 
-        ToolStripMenuItem pauseItem, favouriteItem, previousItem;
+        ToolStripMenuItem pauseItem, keepItem, favouriteItem, previousItem, nextItem, addToItem;
 
         ContextMenuStrip BuildMenu()
         {
             var menu = new FluentMenu();
+            keepItem = menu.Add("Keep this wallpaper", Glyphs.Pin, delegate { ToggleKeep(); });
             pauseItem = menu.Add("Pause", Glyphs.Pause, delegate { TogglePause(); });
-            menu.Add("Next wallpaper", Glyphs.Next, delegate { Next("menu"); });
+            nextItem = menu.Add("Next wallpaper", Glyphs.Next, delegate { Next("menu"); });
             previousItem = menu.Add("Previous wallpaper", Glyphs.Previous, delegate { Previous(); });
+            menu.AddSeparator();
             favouriteItem = menu.Add("Save to favourites", Glyphs.Heart, delegate { Favourite(); });
+            addToItem = menu.AddSubmenu("Add to playlist", Glyphs.Add, sub => FillAddToMenu(sub, null));
+            menu.AddSubmenu("Shuffle from", Glyphs.Shuffle, sub => FillSourceMenu(sub, null));
             menu.AddSeparator();
             menu.Add("Open Wallhaven Shuffle", Glyphs.Settings, delegate { ShowMainWindow(); });
             menu.Add("Exit", Glyphs.Power, delegate { Close(); });
             menu.Opening += delegate
             {
+                keepItem.Text = IsKept ? "Stop keeping this wallpaper" : "Keep this wallpaper";
+                keepItem.Tag = IsKept ? Glyphs.PinFill : Glyphs.Pin;
+                keepItem.Enabled = current != null;
                 pauseItem.Text = settings.Paused ? "Resume" : "Pause";
                 pauseItem.Tag = settings.Paused ? Glyphs.Play : Glyphs.Pause;
                 favouriteItem.Text = IsFavourite ? "Remove from favourites" : "Save to favourites";
                 favouriteItem.Tag = IsFavourite ? Glyphs.HeartFill : Glyphs.Heart;
-                favouriteItem.Enabled = current != null;
+                favouriteItem.Enabled = addToItem.Enabled = current != null;
                 previousItem.Enabled = CanGoBack;
+                nextItem.Enabled = HasSource;
                 menu.RefreshGlyphs();
             };
             return menu;
+        }
+
+        // "Add to playlist ▸": every playlist, ticked if the one on screen is in it (clicking a ticked one takes it out),
+        // then "New playlist…" (made and the one on screen added).
+        public void FillAddToMenu(FluentMenu sub, Form owner)
+        {
+            var playlists = Sources().Where(x => x.Own).ToList();
+            foreach (var p in playlists)
+            {
+                var pl = p;
+                bool inIt = current != null && InPlaylist(pl, current);
+                sub.Add(pl.Name, inIt ? Glyphs.Check : Glyphs.Library, delegate { TogglePlaylist(pl); });
+            }
+            if (playlists.Count > 0) sub.AddSeparator();
+            sub.Add("New playlist…", Glyphs.Add, delegate { NewPlaylist(true, owner); });
+        }
+
+        // "Shuffle from ▸": the list, favourites, playlists and your folders; the one in use is marked.
+        public void FillSourceMenu(FluentMenu sub, Form owner)
+        {
+            var all = Sources();
+            for (int i = 0; i < all.Count; i++)
+            {
+                var src = all[i];
+                if (i == 2) sub.AddSeparator();   // after Wallhaven and Favourites
+                var item = sub.Add(src.Name, src.Glyph, delegate { SetSource(src.Key); });
+                item.Checked = src.Key == settings.Source;
+            }
+            sub.AddSeparator();
+            sub.Add("New playlist…", Glyphs.Add, delegate { NewPlaylist(false, owner); });
+            sub.Add("Add a folder of your pictures…", Glyphs.NewFolder, delegate { AddFolderDialog(owner); });
         }
 
         // ------------------------------------------------------------------------- timer
@@ -817,11 +970,17 @@ namespace WallhavenShuffle
                 nextChange = DateTime.Now;
             }
             if (listBusy && DateTime.Now - listBusySince > TimeSpan.FromMinutes(6)) { listBusy = false; Log("the list download took over 6 minutes; carrying on"); }
-            if (string.IsNullOrEmpty(settings.ListUrl)) return;
-            if (!listBusy && DateTime.Now >= nextListRefresh) RefreshListAsync();   // in the background; changes go on
-            if (busy || walls.Count == 0) return;
+            // The list is kept fresh whatever is being shuffled (playlists use its details, and it's ready to go back to).
+            if (!string.IsNullOrEmpty(settings.ListUrl) && !listBusy && DateTime.Now >= nextListRefresh) RefreshListAsync();
+            if (busy || !HasSource || IsKept) return;
+            if (IsListSource ? walls.Count == 0 : Pool().Count == 0) return;
             if (settings.Paused || DateTime.Now < nextChange) return;
             if (HoldReason() != null) { nextChange = DateTime.Now.AddSeconds(15); return; } // try again shortly
+            if (!IsListSource && current != null && Pool().Count == 1 && Pool()[0].Id == current.Id)
+            {
+                nextChange = DateTime.Now.AddSeconds(settings.IntervalSeconds);   // a playlist of one: it's on screen already
+                return;
+            }
             Next("timer");
         }
 
@@ -840,7 +999,10 @@ namespace WallhavenShuffle
             settings.PauseFullScreen = f.PauseFullScreen; settings.PauseOnBattery = f.PauseOnBattery; settings.Paused = f.Paused;
             settings.ListUrl = f.ListUrl;
             settings.CacheLimitGB = f.CacheLimitGB; settings.LockScreen = f.LockScreen; // CacheDir: takes effect on restart
+            settings.PlaylistsDir = f.PlaylistsDir;
+            settings.KeepId = f.KeepId == "" || (current != null && f.KeepId == current.Id) ? f.KeepId : settings.KeepId;   // only the one on screen can be kept
             Log("settings.ini edited");
+            if (f.Source != settings.Source && SourceKnown(f.Source)) SetSource(f.Source);
             SettingsChanged(sourceChanged, positionChanged);
             if (window != null && !window.IsDisposed) window.LoadValues();
         }
@@ -860,10 +1022,12 @@ namespace WallhavenShuffle
             return null;
         }
 
+        // "Wallhaven Shuffle · Next in 1:23", with the playlist's name when one is being shuffled (63 characters at most).
         void UpdateTooltip()
         {
             string text = "Wallhaven Shuffle · " + Status();
-            tray.Text = text.Length > 63 ? text.Substring(0, 63) : text;
+            if (!IsListSource && HasSource) text += " · " + SourceName(settings.Source);
+            tray.Text = text.Length > 63 ? text.Substring(0, 62) + "…" : text;
         }
 
         // ------------------------------------------------------------------------- list
@@ -903,7 +1067,9 @@ namespace WallhavenShuffle
                         Log("list failed: " + lastError);
                         nextListRefresh = DateTime.Now.AddMinutes(walls.Count == 0 ? 2 : 10);
                     }
+                    folderPool = null;   // pictures in playlists pick up the list's details
                     Changed();
+                    if (!IsListSource || IsKept) return;   // playlists change on the timer; a kept one stays
                     bool due = current == null || !File.Exists(CachePath(current)) || DateTime.Now >= nextChange;
                     if (walls.Count > 0 && due && !busy && !settings.Paused && HoldReason() == null) Next("start");
                     else if (!busy && prepared == null) PrepareNext();
@@ -944,11 +1110,66 @@ namespace WallhavenShuffle
             return result;
         }
 
+        // What's being shuffled: the list (above the favourites minimum, if any are), or the pictures in the chosen
+        // folder. "Never show this one" applies to both.
         List<Wall> Pool()
         {
+            if (!IsListSource) return FolderPool().Where(w => !blocked.Contains(w.Id)).ToList();
             var pool = walls.Where(w => w.Favorites >= settings.MinFavorites && !blocked.Contains(w.Id)).ToList();
             return pool.Count > 0 ? pool : walls.Where(w => !blocked.Contains(w.Id)).ToList();
         }
+
+        // The pictures in the folder being shuffled (top level; hidden files and unfinished downloads left out). Read
+        // again every 20 seconds, so pictures copied in by hand show up, and straight after the app changes it.
+        List<Wall> FolderPool()
+        {
+            if (folderPool != null && folderPoolKey == settings.Source && DateTime.Now - folderPoolTime < TimeSpan.FromSeconds(20)) return folderPool;
+            var list = new List<Wall>();
+            string folder = SourceFolder(settings.Source);
+            try
+            {
+                if (folder != null && Directory.Exists(folder))
+                {
+                    var byId = new Dictionary<string, Wall>();
+                    foreach (var w in walls) byId[w.Id] = w;
+                    foreach (var f in new DirectoryInfo(folder).EnumerateFiles())
+                    {
+                        if (!Wall.IsImageFile(f.Name) || (f.Attributes & (FileAttributes.Hidden | FileAttributes.System)) != 0 || f.Length == 0) continue;
+                        Wall m;
+                        byId.TryGetValue(Path.GetFileNameWithoutExtension(f.Name), out m);
+                        list.Add(Wall.Local(f.FullName, m));
+                    }
+                }
+            }
+            catch (Exception ex) { Log("couldn't read " + folder + ": " + ex.Message); }
+            list.Sort((a, b) => string.Compare(a.Id, b.Id, StringComparison.OrdinalIgnoreCase));
+            folderPool = list; folderPoolKey = settings.Source; folderPoolTime = DateTime.Now;
+            return list;
+        }
+
+        // A wallpaper by its id: one from the list, a picture in a folder (its id is its path), or one that left the
+        // list but is still downloaded (a kept one, or one in history). Null if it isn't anywhere any more.
+        Wall FindWall(string id)
+        {
+            if (string.IsNullOrEmpty(id)) return null;
+            if (id.IndexOf('\\') >= 0)
+            {
+                if (!File.Exists(id)) return null;
+                string name = Path.GetFileNameWithoutExtension(id);
+                return Wall.Local(id, walls.FirstOrDefault(x => x.Id == name));
+            }
+            var w = walls.FirstOrDefault(x => x.Id == id);
+            if (w != null) return w;
+            try
+            {
+                string file = Directory.Exists(cacheDir) ? Directory.GetFiles(cacheDir, id + ".*").FirstOrDefault(f => Wall.IsCacheFile(Path.GetFileName(f))) : null;
+                if (file != null) return new Wall { Id = id, Extension = Path.GetExtension(file).ToLowerInvariant(), Page = "https://wallhaven.cc/w/" + id, Resolution = "", Favorites = -1 };
+            }
+            catch (Exception) { }
+            return null;
+        }
+
+        static string Describe(Wall w) { return w.IsLocal ? Path.GetFileName(w.LocalPath) : w.Id; }
 
         // The next new wallpaper (see Rotation.PickNew). Changes nothing.
         Wall PickNext()
@@ -972,31 +1193,34 @@ namespace WallhavenShuffle
         public void Next(string why)
         {
             if (busy) { if (why != "timer") Queue(+1); return; }
-            if (string.IsNullOrEmpty(settings.ListUrl)) { ShowMainWindow(); return; }   // nothing to show yet: say where to add a source
+            if (!HasSource) { if (IsListSource) ShowMainWindow(); else Changed(); return; }   // nothing to show yet: say where to add a source
+            ReleaseKeep(why);   // moving on takes "Keep this wallpaper" off
             Log("next (" + why + ")");
-            // Went back with Previous: walk forward again first (skipping any that have left the list).
+            // Went back with Previous: walk forward again first (skipping any that aren't there any more).
             for (int i = rot.ForwardTarget(); i >= 0 && i < rot.History.Count; i++)
             {
-                var w = walls.FirstOrDefault(x => x.Id == rot.History[i]);
+                var w = FindWall(rot.History[i]);
                 if (w != null) { ShowWall(w, i); return; }
             }
             rot.Back = -1;
-            if (prepared != null && (blocked.Contains(prepared.Id) || (current != null && prepared.Id == current.Id))) prepared = null;
+            if (prepared != null && (blocked.Contains(prepared.Id) || (current != null && prepared.Id == current.Id) || !InPool(prepared))) prepared = null;
             var next = prepared ?? PickNext();
             prepared = null;
-            if (next == null) { RefreshListAsync(); return; }
+            if (next == null) { if (IsListSource) RefreshListAsync(); else Changed(); return; }
             ShowWall(next, -1);
         }
 
         public void Previous()
         {
             if (Queue(-1)) return;
-            for (int i = rot.BackTarget(); i >= 0; i--)   // skipping any that have left the list
+            for (int i = rot.BackTarget(); i >= 0; i--)   // skipping any that aren't there any more
             {
-                var w = walls.FirstOrDefault(x => x.Id == rot.History[i]);
-                if (w != null) { ShowWall(w, i); return; }
+                var w = FindWall(rot.History[i]);
+                if (w != null) { ReleaseKeep("previous"); ShowWall(w, i); return; }
             }
         }
+
+        bool InPool(Wall w) { return Pool().Any(x => x.Id == w.Id); }
 
         // Shows a new wallpaper (fromHistory -1) or the History entry at fromHistory. Where we are (round, history)
         // only moves once it's on screen, so a failed change leaves the counter and the picture in step.
@@ -1011,7 +1235,7 @@ namespace WallhavenShuffle
             // If this one can't be downloaded (offline, e.g. just after waking up), one already on disk is used instead.
             // Unseen ones first; if every cached one was shown this round already, any of them (but not the current one).
             string cur = current == null ? null : current.Id;
-            var spare = isNew ? Pool().Where(x => x.Id != w.Id && x.Id != cur && File.Exists(CachePath(x)))
+            var spare = isNew && !w.IsLocal ? Pool().Where(x => x.Id != w.Id && x.Id != cur && File.Exists(CachePath(x)))
                 .OrderBy(x => rot.InRound(x.Id) ? 1 : 0).ThenBy(x => rng.Next()).Take(5).ToList() : new List<Wall>();
             ThreadPool.QueueUserWorkItem(delegate
             {
@@ -1041,17 +1265,24 @@ namespace WallhavenShuffle
                     nextChange = error != null ? DateTime.Now.AddSeconds(30)
                         : new DateTime(Math.Max(busySince.AddSeconds(settings.IntervalSeconds).Ticks, DateTime.Now.AddSeconds(5).Ticks));
                     changeFailed = error != null;
-                    if (error != null) { lastError = error; queued = 0; Log("change failed (" + w.Id + "): " + error); Changed(); return; }
+                    if (error != null)
+                    {
+                        lastError = error; queued = 0; keepAfterChange = false;
+                        if (w.IsLocal) folderPool = null;   // e.g. the picture was deleted: read the folder again
+                        Log("change failed (" + Describe(w) + "): " + error); Changed(); return;
+                    }
                     lastError = "";
                     current = shown;
                     if (isNew)
                     {
                         if (rot.ShownNew(shown.Id, new HashSet<string>(Pool().Select(x => x.Id)))) Log("new round");
-                        WriteList("seen.txt", rot.Round);
+                        WriteList(RoundFile, rot.Round);
                         WriteList("history.txt", rot.History);
                     }
                     else rot.ShownFromHistory(fromHistory);
-                    Log("wallpaper " + shown.Id + " " + how + (isNew ? "" : " (from history)") + " - " + Stats());
+                    if (keepAfterChange) { keepAfterChange = false; settings.KeepId = shown.Id; settings.Save(); Log("keeping " + Describe(shown)); }
+                    else if (settings.KeepId.Length > 0 && settings.KeepId != shown.Id) { settings.KeepId = ""; settings.Save(); }
+                    Log("wallpaper " + Describe(shown) + " " + how + (isNew ? "" : " (from history)") + " - " + Stats());
                     if (lockScreen) UpdateLockScreen(file);
                     Changed();
                     if (queued > 0) { queued--; Next("pressed again"); }
@@ -1091,6 +1322,7 @@ namespace WallhavenShuffle
             prepared = next;
             var protect = new HashSet<string>(rot.History.Skip(Math.Max(0, rot.History.Count - KeepCached))) { next.Id };
             if (current != null) protect.Add(current.Id);
+            if (settings.KeepId.Length > 0) protect.Add(settings.KeepId);
             var inList = new HashSet<string>(walls.Select(w => w.Id));
             var shown = new HashSet<string>(rot.Round);
             bool complete = listComplete;
@@ -1155,12 +1387,19 @@ namespace WallhavenShuffle
             UpdateLockScreen(CachePath(current));
         }
 
-        string CachePath(Wall w) { return Path.Combine(cacheDir, w.Id + w.Extension); }
+        // The file to show: the cached original, or the picture itself for one in a folder.
+        string CachePath(Wall w) { return w.IsLocal ? w.LocalPath : Path.Combine(cacheDir, w.Id + w.Extension); }
 
         // The cached original, downloaded first if needed. Asking for one that's already downloading (Next pressed
         // while it's being got ready) waits for that download instead of starting a second one.
         string Fetch(Wall w)
         {
+            if (w.IsLocal)
+            {
+                if (File.Exists(w.LocalPath)) return w.LocalPath;
+                throw new FileNotFoundException("the picture isn't there any more (" + w.LocalPath + ")");
+            }
+            if (w.Image == null && !File.Exists(CachePath(w))) throw new FileNotFoundException("not downloaded, and no longer in the list");
             string path = CachePath(w);
             if (File.Exists(path) && new FileInfo(path).Length > 0) return path;
             Task<string> t;
@@ -1212,7 +1451,38 @@ namespace WallhavenShuffle
             Changed();
         }
 
-        string FavouritePath(Wall w) { return Path.Combine(favouritesDir, w.Id + w.Extension); }
+        // "Keep this wallpaper": no automatic changes until it's taken off again (here, or by Next / Previous / another
+        // source). It's remembered across restarts. Pressed during a change, it keeps the one that's coming.
+        public void ToggleKeep()
+        {
+            if (IsKept) { ReleaseKeep("taken off"); return; }
+            if (busy) { keepAfterChange = !keepAfterChange; Changed(); return; }
+            if (current == null) return;
+            settings.KeepId = current.Id;
+            settings.Save();
+            queued = 0;
+            Log("keeping " + Describe(current));
+            Changed();
+        }
+
+        // Takes "Keep this wallpaper" off; the next automatic change is a full interval away.
+        void ReleaseKeep(string why)
+        {
+            keepAfterChange = false;
+            if (settings.KeepId.Length == 0) return;
+            settings.KeepId = "";
+            settings.Save();
+            nextChange = DateTime.Now.AddSeconds(settings.IntervalSeconds);
+            Log("stopped keeping (" + why + ")");
+            Changed();
+        }
+
+        public bool KeepPending { get { return keepAfterChange; } }
+
+        string FavouritePath(Wall w) { return Path.Combine(favouritesDir, w.FileName); }
+
+        // The picture's file, downloaded first if needed (only ever the one on screen, which is downloaded already).
+        string FileOf(Wall w) { string p = CachePath(w); return File.Exists(p) ? p : Fetch(w); }
 
         public void Favourite()
         {
@@ -1220,24 +1490,340 @@ namespace WallhavenShuffle
             try
             {
                 Directory.CreateDirectory(favouritesDir);
-                string src = CachePath(current), dst = FavouritePath(current);
-                if (File.Exists(dst)) { File.Delete(dst); Log("unfavourite " + current.Id); }      // toggles
-                else { File.Copy(File.Exists(src) ? src : Fetch(current), dst); Log("favourite " + current.Id); }
+                string dst = FavouritePath(current);
+                if (File.Exists(dst))                                                                   // toggles
+                {
+                    if (current.IsLocal && SameFolder(current.LocalPath, dst)) ReleaseKeep("taken out of favourites");   // its file is going
+                    RemoveFile(dst); Log("unfavourite " + Describe(current));
+                }
+                else Log((Native.LinkOrCopy(FileOf(current), dst) ? "favourite (linked) " : "favourite (copied) ") + Describe(current));
             }
             catch (Exception ex) { Log("favourite failed: " + ex.Message); }
+            folderPool = null;
             Changed();
         }
+
+        // A picture taken out of favourites or a playlist goes to the Recycle Bin (it may be the only copy).
+        static void RemoveFile(string path) { if (!Native.Recycle(path)) File.Delete(path); }
 
         public void Block()
         {
             if (current == null) return;
+            ReleaseKeep("hidden");
             blocked.Add(current.Id);
             WriteList("blocked.txt", blocked);
-            Log("blocked " + current.Id);
+            Log("blocked " + Describe(current));
             rot.Back = -1;   // straight to a new one, even while going back
             if (prepared != null && prepared.Id == current.Id) prepared = null;
             Next("hidden");
         }
+
+        public void ShowInFolder()
+        {
+            string file = CurrentFile;
+            if (file == null || !File.Exists(file)) return;
+            try { Process.Start("explorer.exe", "/select,\"" + file + "\""); } catch (Exception) { }
+        }
+
+        // ------------------------------------------------------------------------- sources and playlists
+
+        // Something to shuffle: the list, favourites, a playlist (a folder this app makes in PlaylistsFolder) or a
+        // folder of your own (used where it is; nothing is copied).
+        public class SourceInfo
+        {
+            public string Key, Name, Folder, Glyph;
+            public bool Own;                 // a playlist this app made: it can be renamed and deleted
+        }
+
+        public string PlaylistsRoot { get { return settings.PlaylistsFolder; } }
+        public bool IsListSource { get { return settings.Source.Length == 0; } }
+
+        // There's something to shuffle: a list address, or the chosen folder exists.
+        public bool HasSource
+        {
+            get
+            {
+                if (IsListSource) return !string.IsNullOrEmpty(settings.ListUrl);
+                string f = SourceFolder(settings.Source);
+                return f != null && Directory.Exists(f);
+            }
+        }
+
+        public string SourceFolder(string key)
+        {
+            if (key == "favourites") return favouritesDir;
+            if (key.StartsWith("playlist:")) return Path.Combine(PlaylistsRoot, key.Substring(9));
+            if (key.StartsWith("folder:")) return key.Substring(7);
+            return null;
+        }
+
+        public string SourceName(string key)
+        {
+            if (key.Length == 0) return "Wallhaven";
+            if (key == "favourites") return "Favourites";
+            if (key.StartsWith("playlist:")) return key.Substring(9);
+            if (key.StartsWith("folder:")) return FolderLabel(key.Substring(7));
+            return key;
+        }
+
+        static string FolderLabel(string path)
+        {
+            string name = Path.GetFileName(path.TrimEnd('\\'));
+            return string.IsNullOrEmpty(name) ? path : name;
+        }
+
+        bool SourceKnown(string key)
+        {
+            return key.Length == 0 || key == "favourites" || key.StartsWith("playlist:") || (key.StartsWith("folder:") && folders.Contains(key.Substring(7)));
+        }
+
+        public List<SourceInfo> Sources()
+        {
+            var list = new List<SourceInfo>
+            {
+                new SourceInfo { Key = "", Name = "Wallhaven", Glyph = Glyphs.Globe },
+                new SourceInfo { Key = "favourites", Name = "Favourites", Folder = favouritesDir, Glyph = Glyphs.Heart }
+            };
+            try
+            {
+                if (Directory.Exists(PlaylistsRoot))
+                    foreach (var d in Directory.GetDirectories(PlaylistsRoot).OrderBy(d => Path.GetFileName(d), StringComparer.CurrentCultureIgnoreCase))
+                        if ((new DirectoryInfo(d).Attributes & FileAttributes.Hidden) == 0)
+                            list.Add(new SourceInfo { Key = "playlist:" + Path.GetFileName(d), Name = Path.GetFileName(d), Folder = d, Glyph = Glyphs.Library, Own = true });
+            }
+            catch (Exception ex) { Log("couldn't read the playlists folder: " + ex.Message); }
+            foreach (var f in folders) list.Add(new SourceInfo { Key = "folder:" + f, Name = FolderLabel(f), Folder = f, Glyph = Glyphs.Pictures });
+            return list;
+        }
+
+        public SourceInfo ActiveSource { get { return Sources().FirstOrDefault(x => x.Key == settings.Source); } }
+
+        // Each source keeps its own round (seen.txt for the list, as before).
+        string RoundFile
+        {
+            get
+            {
+                if (IsListSource) return "seen.txt";
+                var safe = new string(settings.Source.Select(c => char.IsLetterOrDigit(c) || c == '-' ? c : '_').ToArray());
+                if (safe.Length > 60) safe = safe.Substring(0, 40) + "_" + ((uint)settings.Source.GetHashCode()).ToString("x8");
+                return "seen-" + safe + ".txt";
+            }
+        }
+
+        // Shuffle from another source: its round is picked up where it was left, and one of it is shown right away.
+        public void SetSource(string key)
+        {
+            if (key == settings.Source) { if (!busy && current == null) Next("source"); return; }
+            if (key == "favourites") try { Directory.CreateDirectory(favouritesDir); } catch (Exception) { }   // none saved yet: "No favourites yet"
+            WriteList(RoundFile, rot.Round);
+            ReleaseKeep("another source");
+            settings.Source = key;
+            settings.Save();
+            rot.LoadRound(ReadList(RoundFile));
+            folderPool = null; prepared = null;
+            Log("shuffling from " + SourceName(key));
+            Changed();
+            if (busy) nextChange = DateTime.Now;   // straight after the change under way
+            else if (HasSource && Pool().Count > 0) Next("source");
+        }
+
+        public bool InPlaylist(SourceInfo p, Wall w)
+        {
+            if (p.Folder == null || w == null) return false;
+            if (w.IsLocal && SameFolder(Path.GetDirectoryName(w.LocalPath), p.Folder)) return true;
+            return File.Exists(Path.Combine(p.Folder, w.FileName));
+        }
+
+        static bool SameFolder(string a, string b)
+        {
+            try { return string.Equals(Path.GetFullPath(a).TrimEnd('\\'), Path.GetFullPath(b).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase); }
+            catch (Exception) { return false; }
+        }
+
+        // Adds the one on screen to a playlist, or takes it out if it's in it already. Added = a link to the same file
+        // (no extra space) when the playlist is on the same drive, a copy otherwise.
+        public void TogglePlaylist(SourceInfo p)
+        {
+            if (current == null || p.Folder == null) return;
+            try
+            {
+                Directory.CreateDirectory(p.Folder);
+                string dst = Path.Combine(p.Folder, current.FileName);
+                bool shownFromIt = current.IsLocal && SameFolder(Path.GetDirectoryName(current.LocalPath), p.Folder);
+                if (shownFromIt || File.Exists(dst))
+                {
+                    if (shownFromIt) ReleaseKeep("taken out of its playlist");   // its file is going
+                    RemoveFile(shownFromIt ? current.LocalPath : dst);
+                    Log("removed " + Describe(current) + " from " + p.Name);
+                }
+                else Log((Native.LinkOrCopy(FileOf(current), dst) ? "added (linked) " : "added (copied: another drive) ") + Describe(current) + " to " + p.Name);
+            }
+            catch (Exception ex) { Log("playlist " + p.Name + ": " + ex.Message); }
+            folderPool = null;
+            Changed();
+        }
+
+        // Why a playlist name can't be used, or null. "except" = the playlist being renamed.
+        public string CheckPlaylistName(string name, string except)
+        {
+            name = (name ?? "").Trim();
+            if (name.Length == 0) return "Type a name";
+            if (name.Length > 60) return "Keep it under 60 characters";
+            if (name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0) return "A name can't contain \\ / : * ? \" < > |";
+            if (name.EndsWith(".")) return "A name can't end with a dot";
+            string upper = name.ToUpperInvariant();
+            if (new[] { "CON", "PRN", "AUX", "NUL" }.Contains(upper) || System.Text.RegularExpressions.Regex.IsMatch(upper, @"^(COM|LPT)[1-9]$")) return "Windows reserves that name";
+            if (except != null && string.Equals(name, except, StringComparison.Ordinal)) return null;
+            if (Sources().Any(x => x.Own && string.Equals(x.Name, name, StringComparison.OrdinalIgnoreCase) && !string.Equals(x.Name, except, StringComparison.OrdinalIgnoreCase)))
+                return "There's already a playlist called " + name;
+            return null;
+        }
+
+        public string CreatePlaylist(string name)
+        {
+            string problem = CheckPlaylistName(name, null);
+            if (problem != null) return problem;
+            name = name.Trim();
+            try { Directory.CreateDirectory(Path.Combine(PlaylistsRoot, name)); }
+            catch (Exception ex) { return "Couldn't make it: " + ex.Message; }
+            Log("new playlist " + name + " in " + PlaylistsRoot);
+            Changed();
+            return null;
+        }
+
+        public string RenamePlaylist(string oldName, string newName)
+        {
+            string problem = CheckPlaylistName(newName, oldName);
+            if (problem != null) return problem;
+            newName = newName.Trim();
+            if (newName == oldName) return null;
+            try
+            {
+                string from = Path.Combine(PlaylistsRoot, oldName), to = Path.Combine(PlaylistsRoot, newName);
+                if (string.Equals(oldName, newName, StringComparison.OrdinalIgnoreCase))
+                {
+                    // Only the capitals changed: Windows needs a step in between.
+                    string tmp = from + ".renaming";
+                    Directory.Move(from, tmp); Directory.Move(tmp, to);
+                }
+                else Directory.Move(from, to);
+                RenameIds(from, to);
+            }
+            catch (Exception ex) { return "Couldn't rename it: " + ex.Message; }
+            string oldKey = "playlist:" + oldName, newKey = "playlist:" + newName;
+            if (settings.Source == oldKey)
+            {
+                // Its round (seen file) moves with it.
+                string oldRound = RoundFile;
+                settings.Source = newKey;
+                try { string a = Path.Combine(Settings.Dir, oldRound), b = Path.Combine(Settings.Dir, RoundFile); if (File.Exists(a)) File.Move(a, b); } catch (Exception) { }
+                rot.LoadRound(ReadList(RoundFile));
+                settings.Save();
+            }
+            Log("renamed playlist " + oldName + " to " + newName);
+            folderPool = null;
+            Changed();
+            return null;
+        }
+
+        // Pictures of a renamed folder have new paths (their ids): the one on screen, a kept one and history follow.
+        void RenameIds(string fromFolder, string toFolder)
+        {
+            Func<string, string> map = id =>
+                id.StartsWith(fromFolder + "\\", StringComparison.OrdinalIgnoreCase) ? toFolder + id.Substring(fromFolder.Length) : id;
+            for (int i = 0; i < rot.History.Count; i++) rot.History[i] = map(rot.History[i]);
+            WriteList("history.txt", rot.History);
+            if (settings.KeepId.Length > 0) settings.KeepId = map(settings.KeepId);
+            if (current != null && current.IsLocal)
+            {
+                string moved = map(current.LocalPath);
+                if (moved != current.LocalPath) current = Wall.Local(moved, walls.FirstOrDefault(x => x.Id == Path.GetFileNameWithoutExtension(moved)));
+            }
+        }
+
+        // A playlist goes to the Recycle Bin (it can be restored from there). Your own folders are only taken off the
+        // list, never touched.
+        public bool DeleteSource(SourceInfo p)
+        {
+            if (p == null || p.Key.Length == 0 || p.Key == "favourites") return false;
+            if (settings.Source == p.Key) SetSource("");
+            if (p.Own)
+            {
+                bool shown = current != null && current.IsLocal && SameFolder(Path.GetDirectoryName(current.LocalPath), p.Folder);
+                if (!Native.Recycle(p.Folder)) { Log("couldn't move playlist " + p.Name + " to the Recycle Bin"); return false; }
+                if (shown && settings.KeepId == current.Id) ReleaseKeep("its playlist was deleted");
+                Log("deleted playlist " + p.Name + " (in the Recycle Bin)");
+            }
+            else
+            {
+                folders.RemoveAll(f => string.Equals(f, p.Folder, StringComparison.OrdinalIgnoreCase));
+                WriteList("folders.txt", folders);
+                Log("stopped using the folder " + p.Folder);
+            }
+            Changed();
+            return true;
+        }
+
+        // A folder of your own pictures, used where it is (nothing is copied), then shuffled from.
+        public void AddFolder(string path)
+        {
+            if (string.IsNullOrEmpty(path) || !Directory.Exists(path)) return;
+            path = Path.GetFullPath(path).TrimEnd('\\');
+            if (path.Length == 2 && path[1] == ':') path += "\\";   // a whole drive
+            if (SameFolder(path, favouritesDir)) { SetSource("favourites"); return; }
+            if (SameFolder(Path.GetDirectoryName(path) ?? "", PlaylistsRoot)) { SetSource("playlist:" + Path.GetFileName(path)); return; }
+            if (!folders.Any(f => SameFolder(f, path))) { folders.Add(path); WriteList("folders.txt", folders); Log("added the folder " + path); }
+            SetSource("folder:" + folders.First(f => SameFolder(f, path)));
+        }
+
+        // The dialogs behind "New playlist…", "Rename…", "Delete…" and "Add a folder…", centred on the flyout when it's
+        // open. addCurrent: the one on screen goes into the new playlist.
+        public void NewPlaylist(bool addCurrent, Form owner)
+        {
+            string name = FluentDialog.Ask(owner, "New playlist", addCurrent && current != null ? "Name it, and the wallpaper on screen goes in first." : "Name it. Add wallpapers with Add to playlist.",
+                "Create", "", n => CheckPlaylistName(n, null));
+            if (name == null) return;
+            string problem = CreatePlaylist(name);
+            if (problem != null) { Log("new playlist: " + problem); return; }
+            var p = Sources().FirstOrDefault(x => x.Own && x.Name == name.Trim());
+            if (p != null && addCurrent && current != null) TogglePlaylist(p);
+        }
+
+        public void RenamePlaylistDialog(SourceInfo p, Form owner)
+        {
+            if (p == null || !p.Own) return;
+            string name = FluentDialog.Ask(owner, "Rename playlist", "A new name for \"" + p.Name + "\".", "Rename", p.Name, n => CheckPlaylistName(n, p.Name));
+            if (name != null) { string problem = RenamePlaylist(p.Name, name); if (problem != null) Log("rename: " + problem); }
+        }
+
+        public void DeleteSourceDialog(SourceInfo p, Form owner)
+        {
+            if (p == null || p.Key.Length == 0 || p.Key == "favourites") return;
+            int n = 0;
+            try { n = Directory.EnumerateFiles(p.Folder).Count(Wall.IsImageFile); } catch (Exception) { }
+            bool ok = p.Own
+                ? FluentDialog.Confirm(owner, "Delete \"" + p.Name + "\"?", "The playlist and its " + n + " picture" + (n == 1 ? "" : "s") + " go to the Recycle Bin. Wallpapers it shares with the cache or other playlists stay there.", "Delete")
+                : FluentDialog.Confirm(owner, "Stop using \"" + p.Name + "\"?", "The folder and its pictures stay where they are; it's only taken off this list.", "Stop using");
+            if (ok) DeleteSource(p);
+        }
+
+        // A dialog is open (the flyout stays open behind it).
+        public static int ModalOpen;
+
+        public void AddFolderDialog(Form owner)
+        {
+            ModalOpen++;
+            Form temp = null;
+            try
+            {
+                if (owner == null || !owner.Visible) owner = temp = FluentDialog.TopOwner();   // from the tray: in front, not behind other windows
+                using (var d = new FolderBrowserDialog { Description = "Pick a folder of pictures to shuffle. They're used where they are; nothing is copied.", ShowNewFolderButton = false })
+                    if (d.ShowDialog(owner) == DialogResult.OK) AddFolder(d.SelectedPath);
+            }
+            finally { ModalOpen--; if (temp != null) temp.Dispose(); }
+        }
+
+        public void OpenPlaylists() { try { Directory.CreateDirectory(PlaylistsRoot); } catch (Exception) { } Open(PlaylistsRoot); }
 
         // Undoes every "Never show this one".
         public void UnhideAll()
@@ -1299,6 +1885,7 @@ namespace WallhavenShuffle
         public void RestoreOriginal()
         {
             settings.Paused = true;
+            settings.KeepId = ""; keepAfterChange = false;   // the original replaces a kept one
             settings.Save();
             change++; busy = false; queued = 0;  // a change still under way must not cover it up
             string file = settings.OriginalWallpaper;
@@ -1377,7 +1964,7 @@ namespace WallhavenShuffle
             SystemEvents.SessionSwitch -= OnSessionSwitch;
             SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
             SystemEvents.PowerModeChanged -= OnPowerModeChanged;
-            for (int i = 1; i <= 4; i++) Native.UnregisterHotKey(Handle, i);
+            for (int i = 1; i <= 5; i++) Native.UnregisterHotKey(Handle, i);
             tray.Visible = false;
             tray.Dispose();
             Log("exit");
@@ -1404,7 +1991,7 @@ namespace WallhavenShuffle
         static WebClient NewClient(int timeout, int readWrite)
         {
             var wc = new TimedClient(timeout, readWrite);
-            wc.Headers[HttpRequestHeader.UserAgent] = "WallhavenShuffle-Windows/2.0";
+            wc.Headers[HttpRequestHeader.UserAgent] = "WallhavenShuffle-Windows/2.1";
             wc.Encoding = Encoding.UTF8;
             return wc;
         }
@@ -1479,17 +2066,18 @@ namespace WallhavenShuffle
         readonly Settings s;
         readonly Preview preview = new Preview();
         readonly TextLine status = new TextLine();
+        readonly RoundButton pinBtn = new RoundButton(Glyphs.Pin, 40, "Keep this wallpaper  (Ctrl+Alt+Shift+K)");
         readonly RoundButton favBtn = new RoundButton(Glyphs.Heart, 40, "Save to favourites  (Ctrl+Alt+Shift+F)");
         readonly RoundButton prevBtn = new RoundButton(Glyphs.Previous, 44, "Previous  (Ctrl+Alt+Shift+←)");
         readonly RoundButton playBtn = new RoundButton(Glyphs.Pause, 56, "Pause  (Ctrl+Alt+Shift+P)") { Primary = true };
         readonly RoundButton nextBtn = new RoundButton(Glyphs.Next, 44, "Next wallpaper  (Ctrl+Alt+Shift+→)");
         readonly RoundButton moreBtn = new RoundButton(Glyphs.More, 40, "More");
-        readonly DropDown every = new DropDown(), fit = new DropDown();
+        readonly DropDown source = new DropDown { StepWithKeys = false }, every = new DropDown(), fit = new DropDown();
         readonly Toggle pauseGames = new Toggle(), pauseBattery = new Toggle(), startup = new Toggle(), lockScreen = new Toggle();
         readonly ToolTip tips = new ToolTip();
         readonly FluentMenu moreMenu = new FluentMenu();
         readonly Size size;
-        ToolStripMenuItem hideItem, openItem, unhideItem;
+        ToolStripMenuItem hideItem, openItem, unhideItem, showItem, addToItem;
         string shownFile;
         bool loading;
 
@@ -1509,13 +2097,17 @@ namespace WallhavenShuffle
             int y = Gutter, inner = W - 2 * Gutter;
             preview.Bounds = new Rectangle(Gutter, y, inner, inner * 9 / 16); y = preview.Bottom + 14;
 
-            var transport = new RoundButton[] { favBtn, prevBtn, playBtn, nextBtn, moreBtn };
-            int gap = 14, total = transport.Sum(b => b.Width) + gap * (transport.Length - 1), x = (W - total) / 2;
-            foreach (var b in transport) { b.Location = new Point(x, y + (56 - b.Height) / 2); x += b.Width + gap; }
+            // Keep and favourite (about this wallpaper) | back, play/pause, next | more. The gaps around the middle group
+            // are wider, so the three groups read as such.
+            var transport = new RoundButton[] { pinBtn, favBtn, prevBtn, playBtn, nextBtn, moreBtn };
+            int[] gaps = { 6, 22, 14, 14, 22 };
+            int total = transport.Sum(b => b.Width) + gaps.Sum(), x = (W - total) / 2;
+            for (int i = 0; i < transport.Length; i++) { var b = transport[i]; b.Location = new Point(x, y + (56 - b.Height) / 2); x += b.Width + (i < gaps.Length ? gaps[i] : 0); }
             y += 56 + 6;
             status.Bounds = new Rectangle(Gutter, y, inner, 22); y = status.Bottom + 18;
 
             var card = new Card { Bounds = new Rectangle(Gutter, y, inner, 0) };
+            card.AddRow("Shuffle from", source);
             card.AddRow("Change wallpaper every", every);
             card.AddRow("Picture fit", fit);
             card.AddRow("Pause during games and full screen", pauseGames);
@@ -1530,17 +2122,22 @@ namespace WallhavenShuffle
             size = new Size((int)Math.Round(W * Theme.Scale), (int)Math.Round(y * Theme.Scale));
             Size = size;
 
-            // The "⋯" menu: the less common actions.
-            hideItem = moreMenu.Add("Never show this one", Glyphs.Hide, delegate { app.Block(); });
+            // The "⋯" menu: the less common actions. About this wallpaper first, then playlists and the rest.
+            addToItem = moreMenu.AddSubmenu("Add to playlist", Glyphs.Add, sub => app.FillAddToMenu(sub, this));
+            showItem = moreMenu.Add("Show in folder", Glyphs.FolderOpen, delegate { app.ShowInFolder(); });
             openItem = moreMenu.Add("Open on Wallhaven", Glyphs.Open, delegate { app.OpenOnWallhaven(); });
-            moreMenu.Add("Open favourites folder", Glyphs.Folder, delegate { app.OpenFavourites(); });
+            hideItem = moreMenu.Add("Never show this one", Glyphs.Hide, delegate { app.Block(); });
             moreMenu.AddSeparator();
+            moreMenu.AddSubmenu("Playlists", Glyphs.Library, FillPlaylistsMenu);
             unhideItem = moreMenu.Add("Show hidden wallpapers again", Glyphs.View, delegate { app.UnhideAll(); });
             moreMenu.Add("Restore my original wallpaper", Glyphs.Restore, delegate { app.RestoreOriginal(); });
             moreMenu.Add("Advanced settings", Glyphs.Edit, delegate { app.EditAdvanced(); });
             moreMenu.Opening += delegate
             {
-                hideItem.Enabled = openItem.Enabled = app.Current != null;
+                var w = app.Current;
+                hideItem.Enabled = addToItem.Enabled = w != null;
+                openItem.Enabled = w != null && w.Page != null;
+                showItem.Enabled = app.CurrentFile != null && File.Exists(app.CurrentFile);
                 int hidden = app.HiddenCount;
                 unhideItem.Enabled = hidden > 0;
                 unhideItem.Text = hidden > 0 ? "Show hidden wallpapers again (" + hidden + ")" : "Show hidden wallpapers again";
@@ -1549,8 +2146,12 @@ namespace WallhavenShuffle
 
             foreach (var i in Intervals) every.Items.Add(new KeyValuePair<string, object>(IntervalText(i), i));
             foreach (var p in Settings.Positions) fit.Items.Add(new KeyValuePair<string, object>(p, p));
+            source.Actions.Add(new KeyValuePair<string, Action>("New playlist…", delegate { app.NewPlaylist(false, this); }));
+            source.Actions.Add(new KeyValuePair<string, Action>("Add a folder of your pictures…", delegate { app.AddFolderDialog(this); }));
+            source.BeforeOpen += delegate { FillSources(); };
             LoadValues();
 
+            source.Changed += delegate { if (loading) return; app.SetSource((string)source.Value); };
             every.Changed += delegate { if (loading) return; s.IntervalSeconds = (int)every.Value; app.SettingsChanged(false, false); };
             fit.Changed += delegate { if (loading) return; s.Position = (string)fit.Value; app.SettingsChanged(false, true); };
             pauseGames.CheckedChanged += delegate { if (loading) return; s.PauseFullScreen = pauseGames.Checked; app.SettingsChanged(false, false); };
@@ -1558,14 +2159,14 @@ namespace WallhavenShuffle
             startup.CheckedChanged += delegate { if (loading) return; TrayApp.SetStartup(startup.Checked); };
             lockScreen.CheckedChanged += delegate { if (loading) return; s.LockScreen = lockScreen.Checked; app.LockScreenChanged(); };
 
+            pinBtn.Click += delegate { app.ToggleKeep(); };
             favBtn.Click += delegate { app.Favourite(); };
             prevBtn.Click += delegate { app.Previous(); };
             playBtn.Click += delegate { app.TogglePause(); };
             nextBtn.Click += delegate { app.Next("window"); };
             moreBtn.Click += delegate { moreMenu.Show(moreBtn, new Point(0, moreBtn.Height + (int)(4 * Theme.Scale))); };
-            preview.Click += delegate { app.OpenOnWallhaven(); };
+            preview.Click += delegate { var w = app.Current; if (w != null && w.Page != null) app.OpenOnWallhaven(); else app.ShowInFolder(); };
             foreach (var b in transport) tips.SetToolTip(b, b.Tip);
-            tips.SetToolTip(preview, "Open on Wallhaven");
             tips.SetToolTip(status, "Each wallpaper is shown once per round, in random order: this is where you are in it");
 
             app.StateChanged += OnStateChanged;
@@ -1580,10 +2181,46 @@ namespace WallhavenShuffle
             return (sec / 3600) + (sec == 3600 ? " hour" : " hours");
         }
 
+        // "Shuffle from": the list, favourites, playlists and your folders (read again each time it opens).
+        void FillSources()
+        {
+            bool was = loading;
+            loading = true;
+            source.Items.Clear();
+            foreach (var src in app.Sources()) source.Items.Add(new KeyValuePair<string, object>(src.Name, src.Key));
+            // A playlist renamed or deleted in Explorer while it was being shuffled: say so rather than show another.
+            if (!source.Items.Any(i => Equals(i.Value, s.Source))) source.Items.Add(new KeyValuePair<string, object>(app.SourceName(s.Source) + " (not found)", s.Source));
+            source.SelectValue(s.Source);
+            loading = was;
+        }
+
+        // "Playlists ▸": make one, add a folder, rename or delete the one being shuffled, open the folders.
+        void FillPlaylistsMenu(FluentMenu sub)
+        {
+            sub.Add("New playlist…", Glyphs.Add, delegate { app.NewPlaylist(false, this); });
+            sub.Add("Add a folder of your pictures…", Glyphs.NewFolder, delegate { app.AddFolderDialog(this); });
+            var active = app.ActiveSource;
+            if (active != null && active.Own)
+            {
+                sub.AddSeparator();
+                sub.Add("Rename \"" + active.Name + "\"…", Glyphs.Rename, delegate { app.RenamePlaylistDialog(active, this); });
+                sub.Add("Delete \"" + active.Name + "\"…", Glyphs.Delete, delegate { app.DeleteSourceDialog(active, this); });
+            }
+            else if (active != null && active.Key.StartsWith("folder:"))
+            {
+                sub.AddSeparator();
+                sub.Add("Stop using \"" + active.Name + "\"…", Glyphs.Delete, delegate { app.DeleteSourceDialog(active, this); });
+            }
+            sub.AddSeparator();
+            sub.Add("Open playlists folder", Glyphs.Folder, delegate { app.OpenPlaylists(); });
+            sub.Add("Open favourites folder", Glyphs.Folder, delegate { app.OpenFavourites(); });
+        }
+
         // Shows the current settings (also after settings.ini was edited).
         public void LoadValues()
         {
             loading = true;
+            FillSources();
             if (!every.Items.Any(i => (int)i.Value == s.IntervalSeconds))
                 every.Items.Add(new KeyValuePair<string, object>(IntervalText(s.IntervalSeconds), s.IntervalSeconds));
             every.SelectValue(s.IntervalSeconds);
@@ -1637,7 +2274,7 @@ namespace WallhavenShuffle
             base.OnDeactivate(e);
             BeginInvoke(new Action(delegate
             {
-                if (IsDisposed || !Visible || ActiveForm == this || moreMenu.Visible || every.MenuOpen || fit.MenuOpen) return;
+                if (IsDisposed || !Visible || ActiveForm == this || moreMenu.Visible || every.MenuOpen || fit.MenuOpen || source.MenuOpen || TrayApp.ModalOpen > 0) return;
                 Hide();
             }));
         }
@@ -1669,7 +2306,14 @@ namespace WallhavenShuffle
         void UpdateView(bool force, bool picture)
         {
             var w = app.Current;
-            preview.Overlay = w == null ? null : (w.Resolution.Length > 0 ? w.Resolution.Replace("x", " × ") + "     " : "") + "♥ " + w.Favorites.ToString("N0");
+            preview.Overlay = Overlay(w);
+            tips.SetToolTip(preview, w != null && w.Page != null ? "Open on Wallhaven" : w != null ? "Show in folder" : "");
+            bool kept = app.IsKept || app.KeepPending;
+            pinBtn.Glyph = kept ? Glyphs.PinFill : Glyphs.Pin;
+            pinBtn.Active = kept;
+            pinBtn.Enabled = w != null;
+            tips.SetToolTip(pinBtn, kept ? "Stop keeping this wallpaper  (Ctrl+Alt+Shift+K)" : "Keep this wallpaper: no changes until you take it off  (Ctrl+Alt+Shift+K)");
+            if (!source.MenuOpen && !Equals(source.Value, s.Source)) FillSources();
             playBtn.Glyph = s.Paused ? Glyphs.Play : Glyphs.Pause;
             prevBtn.Enabled = app.CanGoBack;
             tips.SetToolTip(playBtn, s.Paused ? "Resume  (Ctrl+Alt+Shift+P)" : "Pause  (Ctrl+Alt+Shift+P)");
@@ -1684,6 +2328,17 @@ namespace WallhavenShuffle
                 shownFile = file;
                 preview.SetImage(file != null && File.Exists(file) ? file : null);
             }
+        }
+
+        // The pill on the picture: resolution and Wallhaven favourites; for a picture of your own, its name.
+        static string Overlay(Wall w)
+        {
+            if (w == null) return null;
+            string res = w.Resolution.Length > 0 ? w.Resolution.Replace("x", " × ") : "";
+            string tail = w.Favorites >= 0 ? "♥ " + w.Favorites.ToString("N0") : w.WallhavenId == null && w.IsLocal ? Path.GetFileNameWithoutExtension(w.LocalPath) : "";
+            if (tail.Length > 40) tail = tail.Substring(0, 39) + "…";
+            string text = res.Length > 0 && tail.Length > 0 ? res + "     " + tail : res + tail;
+            return text.Length > 0 ? text : null;
         }
 
         protected override void OnFormClosed(FormClosedEventArgs e)
@@ -1726,7 +2381,7 @@ namespace WallhavenShuffle
                 bmp.SetResolution(e.Graphics.DpiX, e.Graphics.DpiY);
                 using (var g = Graphics.FromImage(bmp))
                 {
-                    g.Clear(Theme.Glass ? Color.Transparent : Theme.Bg);
+                    g.Clear(Theme.Glass && FindForm() is MainWindow ? Color.Transparent : Parent != null ? Parent.BackColor : Theme.Bg);   // dialogs are solid
                     var surface = Surface; // filled edge to edge, without anti-aliasing (that would leave a faint outline)
                     if (surface.A > 0) using (var b = new SolidBrush(surface)) g.FillRectangle(b, 0, 0, Width, Height);
                     g.SmoothingMode = SmoothingMode.AntiAlias;
@@ -1929,7 +2584,9 @@ namespace WallhavenShuffle
     class DropDown : FluentControl
     {
         public readonly List<KeyValuePair<string, object>> Items = new List<KeyValuePair<string, object>>();
-        public event EventHandler Changed;
+        public readonly List<KeyValuePair<string, Action>> Actions = new List<KeyValuePair<string, Action>>();   // below the choices ("New playlist…")
+        public event EventHandler Changed, BeforeOpen;
+        public bool StepWithKeys = true;     // Up / Down change the choice (off where each change does something big)
         int index = -1;
         public bool MenuOpen;
         public object Value { get { return index >= 0 ? Items[index].Value : null; } }
@@ -1944,10 +2601,10 @@ namespace WallhavenShuffle
         protected override void OnClick(EventArgs e) { Focus(); OpenMenu(); base.OnClick(e); }
 
         // Up / Down step through the choices without opening the menu, as in Windows.
-        protected override bool IsInputKey(Keys key) { return key == Keys.Up || key == Keys.Down || base.IsInputKey(key); }
+        protected override bool IsInputKey(Keys key) { return (StepWithKeys && (key == Keys.Up || key == Keys.Down)) || base.IsInputKey(key); }
         protected override void OnKeyDown(KeyEventArgs e)
         {
-            int to = e.KeyCode == Keys.Up ? index - 1 : e.KeyCode == Keys.Down ? index + 1 : -1;
+            int to = !StepWithKeys ? -1 : e.KeyCode == Keys.Up ? index - 1 : e.KeyCode == Keys.Down ? index + 1 : -1;
             if (to >= 0 && to < Items.Count && to != index)
             {
                 index = to; Invalidate();
@@ -1959,12 +2616,21 @@ namespace WallhavenShuffle
 
         void OpenMenu()
         {
+            if (BeforeOpen != null) BeforeOpen(this, EventArgs.Empty);
             var menu = new FluentMenu { ShowImageMargin = false, ShowCheckMargin = true };
             for (int i = 0; i < Items.Count; i++)
             {
                 int n = i;
                 var item = new ToolStripMenuItem(Items[i].Key) { Checked = i == index, Padding = FluentMenu.Px(8, 9, 28, 9) };
                 item.Click += delegate { if (index == n) return; index = n; Invalidate(); if (Changed != null) Changed(this, EventArgs.Empty); };
+                menu.Items.Add(item);
+            }
+            if (Actions.Count > 0) menu.AddSeparator();
+            foreach (var a in Actions)
+            {
+                var act = a.Value;
+                var item = new ToolStripMenuItem(a.Key) { Padding = FluentMenu.Px(8, 9, 28, 9) };
+                item.Click += delegate { BeginInvoke(act); };   // after the menu has closed
                 menu.Items.Add(item);
             }
             menu.Closed += delegate { MenuOpen = false; BeginInvoke(new Action(menu.Dispose)); };
@@ -2014,6 +2680,194 @@ namespace WallhavenShuffle
         }
     }
 
+    // A Windows 11 button with a label: accent-filled (Primary) or the standard subtle one.
+    class TextButton : FluentControl
+    {
+        public bool Primary;
+        public TextButton(string text, bool primary) { Text = text; Primary = primary; }
+        protected override void OnTextChanged(EventArgs e) { Invalidate(); base.OnTextChanged(e); }
+
+        protected override void Render(Graphics g)
+        {
+            var r = new RectangleF(0.5f, 0.5f, Width - 1, Height - 1);
+            Color fill, border, fg;
+            if (!Enabled) { fill = Primary ? Theme.FieldPressed : Theme.Field; border = Theme.FieldBorder; fg = Theme.TextDisabled; }
+            else if (Primary) { fill = down ? Theme.Mix(Theme.Accent, Color.Black, 0.12) : hover ? Theme.Mix(Theme.Accent, Color.White, 0.1) : Theme.Accent; border = fill; fg = Theme.OnAccent; }
+            else { fill = down ? Theme.FieldPressed : hover ? Theme.FieldHover : Theme.Field; border = Theme.FieldBorder; fg = Theme.Text; }
+            using (var path = Theme.Rounded(r, 4 * K)) using (var b = new SolidBrush(fill)) using (var p = new Pen(border)) { g.FillPath(b, path); g.DrawPath(p, path); }
+            Theme.DrawText(g, Text, Font, ClientRectangle, fg, StringAlignment.Center);
+            FocusRing(g, RectangleF.Inflate(r, 2 * K, 2 * K), 6 * K);
+        }
+    }
+
+    // A small Windows 11 dialog: a title, a line of explanation, an optional text box (checked as you type, with the
+    // reason shown under it), and the primary and Cancel buttons. Enter = the primary button, Esc = Cancel. Solid
+    // (not acrylic), with Windows' own rounded corners, border and shadow; in front of the flyout.
+    class FluentDialog : Form
+    {
+        readonly TextBox box;
+        readonly Label problem;
+        readonly TextButton ok, cancel;
+        readonly Func<string, string> check;
+        Size content;                        // the dialog's size; applied again once the frame is gone (it would grow by the caption)
+
+        FluentDialog(string title, string message, string okText, string initial, Func<string, string> check, bool asks)
+        {
+            this.check = check;
+            AutoScaleMode = AutoScaleMode.None;
+            Font = Theme.Body(10f);
+            Text = title;
+            FormBorderStyle = FormBorderStyle.FixedSingle;
+            ControlBox = false; MaximizeBox = false; MinimizeBox = false;
+            ShowInTaskbar = false; TopMost = true; KeyPreview = true;
+            StartPosition = FormStartPosition.Manual;
+            BackColor = Theme.Bg; ForeColor = Theme.Text;
+            Func<int, int> k = v => (int)Math.Round(v * Theme.Scale);
+            int w = k(400), pad = k(24), y = pad;
+
+            var head = new Label { Text = title, Font = Theme.Strong(14f), ForeColor = Blend(Theme.Text), AutoSize = false, AutoEllipsis = true, Bounds = new Rectangle(pad, y, w - 2 * pad, k(32)) };
+            y = head.Bottom + k(8);
+            var body = new Label { Text = message, ForeColor = Blend(Theme.TextSecondary), AutoSize = false, Bounds = new Rectangle(pad, y, w - 2 * pad, 10) };
+            using (var g = CreateGraphics()) body.Height = (int)Math.Ceiling(g.MeasureString(message, Font, body.Width).Height) + k(2);
+            y = body.Bottom + k(16);
+            Controls.Add(head); Controls.Add(body);
+
+            if (asks)
+            {
+                // A Windows 11 text box: a rounded field, with the accent line at its foot while it has the focus.
+                var field = new FieldFrame { Bounds = new Rectangle(pad, y, w - 2 * pad, k(34)) };
+                box = new TextBox { BorderStyle = BorderStyle.None, Text = initial ?? "", Font = Font, BackColor = Blend(Theme.Field), ForeColor = Theme.Text, MaxLength = 80 };
+                box.Bounds = new Rectangle(k(11), (field.Height - box.PreferredHeight) / 2 + k(1), field.Width - k(22), box.PreferredHeight);
+                field.Controls.Add(box);
+                box.GotFocus += delegate { field.Invalidate(); };
+                box.LostFocus += delegate { field.Invalidate(); };
+                box.TextChanged += delegate { CheckName(false); };
+                Controls.Add(field);
+                y = field.Bottom + k(6);
+                problem = new Label { ForeColor = Theme.Dark ? Color.FromArgb(255, 153, 164) : Color.FromArgb(196, 43, 28), AutoSize = false, Bounds = new Rectangle(pad, y, w - 2 * pad, k(20)) };
+                Controls.Add(problem);
+                y = problem.Bottom + k(12);
+            }
+
+            // The footer band, as in Windows 11 dialogs: the buttons share its width.
+            var footer = new Panel { Bounds = new Rectangle(0, y, w, k(80)), BackColor = Theme.Dark ? Color.FromArgb(28, 28, 28) : Color.FromArgb(234, 234, 234) };
+            int bw = (w - 2 * pad - k(8)) / 2;
+            ok = new TextButton(okText, true) { Bounds = new Rectangle(pad, k(24), bw, k(32)) };
+            cancel = new TextButton("Cancel", false) { Bounds = new Rectangle(pad + bw + k(8), k(24), bw, k(32)) };
+            ok.Click += delegate { Accept(); };
+            cancel.Click += delegate { DialogResult = DialogResult.Cancel; };
+            footer.Controls.Add(ok); footer.Controls.Add(cancel);
+            Controls.Add(footer);
+            content = new Size(w, footer.Bottom);
+            Size = content;   // the window's size, as the flyout does: a client size would get the caption added back
+            if (box != null) CheckName(false);
+        }
+
+        // A translucent theme colour over the dialog's background, as one solid colour (Windows' text boxes need one).
+        static Color Blend(Color c) { double a = c.A / 255.0; return Theme.Mix(Theme.Bg, Color.FromArgb(c.R, c.G, c.B), a); }
+
+        // Live: the reason shown, the button greyed. On Enter / the button: only a good name is taken.
+        bool CheckName(bool final)
+        {
+            string why = check == null ? null : check(box.Text);
+            bool empty = box.Text.Trim().Length == 0;
+            problem.Text = why != null && (!empty || final) ? why : "";
+            ok.Enabled = why == null;
+            return why == null;
+        }
+
+        void Accept()
+        {
+            if (box != null && !CheckName(true)) { box.Focus(); return; }
+            DialogResult = DialogResult.OK;
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == 0x0083 && m.WParam != IntPtr.Zero) { m.Result = IntPtr.Zero; return; } // no caption or borders (Windows keeps the shadow)
+            if (m.Msg == 0x0084) { m.Result = new IntPtr(1); return; }
+            base.WndProc(ref m);
+        }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            Native.StyleFlyout(Handle, Theme.Dark, Theme.FlyoutBorder);
+            Native.SetWindowPos(Handle, IntPtr.Zero, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020);
+            Size = content;
+        }
+
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+            Activate(); Native.SetForegroundWindow(Handle);
+            if (box != null) { box.Focus(); box.SelectAll(); } else ok.Focus();
+        }
+
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if (keyData == Keys.Enter) { if (ActiveControl == cancel) DialogResult = DialogResult.Cancel; else Accept(); return true; }
+            if (keyData == Keys.Escape) { DialogResult = DialogResult.Cancel; return true; }
+            return base.ProcessCmdKey(ref msg, keyData);
+        }
+
+        // Centred on the flyout when it's open, otherwise on the screen.
+        DialogResult ShowOver(Form owner)
+        {
+            var area = owner != null && owner.Visible ? owner.Bounds : Screen.PrimaryScreen.WorkingArea;
+            Location = new Point(area.Left + (area.Width - content.Width) / 2, area.Top + (area.Height - content.Height) / 2);
+            TrayApp.ModalOpen++;
+            try { return owner != null && owner.Visible ? ShowDialog(owner) : ShowDialog(); }
+            finally { TrayApp.ModalOpen--; }
+        }
+
+        // The text typed (trimmed), or null if cancelled.
+        public static string Ask(Form owner, string title, string message, string okText, string initial, Func<string, string> check)
+        {
+            using (var d = new FluentDialog(title, message, okText, initial, check, true))
+                return d.ShowOver(owner) == DialogResult.OK ? d.box.Text.Trim() : null;
+        }
+
+        public static bool Confirm(Form owner, string title, string message, string okText)
+        {
+            using (var d = new FluentDialog(title, message, okText, null, null, false))
+                return d.ShowOver(owner) == DialogResult.OK;
+        }
+
+        // An invisible window in front of everything, to own a standard dialog opened from the tray (otherwise it can
+        // open behind other windows).
+        public static Form TopOwner()
+        {
+            var f = new Form { ShowInTaskbar = false, TopMost = true, FormBorderStyle = FormBorderStyle.None, Opacity = 0, StartPosition = FormStartPosition.Manual, Size = new Size(1, 1) };
+            var area = Screen.PrimaryScreen.WorkingArea;
+            f.Location = new Point(area.Left + area.Width / 2, area.Top + area.Height / 3);
+            f.Show();
+            f.Activate();
+            return f;
+        }
+
+        // The rounded field around the text box.
+        class FieldFrame : Panel
+        {
+            public FieldFrame() { SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true); }
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                var g = e.Graphics;
+                g.Clear(Theme.Bg);
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                float k = Theme.Scale;
+                bool focus = ContainsFocus;
+                var r = new RectangleF(0.5f, 0.5f, Width - 1, Height - 1);
+                using (var path = Theme.Rounded(r, 4 * k))
+                using (var b = new SolidBrush(focus ? Blend(Theme.Dark ? Color.FromArgb(255, 30, 30, 30) : Color.White) : Blend(Theme.Field)))
+                using (var p = new Pen(Theme.FieldBorder))
+                { g.FillPath(b, path); g.DrawPath(p, path); }
+                if (focus) using (var a = new SolidBrush(Theme.Accent)) g.FillRectangle(a, 4 * k, Height - 2 * k, Width - 8 * k, 2 * k);
+                foreach (Control c in Controls) c.BackColor = focus ? Blend(Theme.Dark ? Color.FromArgb(255, 30, 30, 30) : Color.White) : Blend(Theme.Field);
+            }
+        }
+    }
+
     // A menu in the Windows 11 style, with icon glyphs (kept in each item's Tag).
     class FluentMenu : ContextMenuStrip
     {
@@ -2026,14 +2880,33 @@ namespace WallhavenShuffle
             ShowCheckMargin = false;
         }
 
+        // The click runs once the menu has closed, so a dialog it opens gets the keyboard and the menu is gone first.
         public ToolStripMenuItem Add(string text, string glyph, EventHandler click)
         {
-            var i = new ToolStripMenuItem(text, null, click) { Padding = Px(8, 9, 28, 9), Tag = glyph };
+            var i = new ToolStripMenuItem(text, null, (s, e) => { if (IsHandleCreated) BeginInvoke(click, s, e); else click(s, e); }) { Padding = Px(8, 9, 28, 9), Tag = glyph };
             Items.Add(i);
             return i;
         }
 
         public void AddSeparator() { Items.Add(new ToolStripSeparator { AutoSize = false, Height = (int)Math.Round(13 * Theme.Scale) }); }
+
+        // An item with a submenu, filled afresh each time it opens (playlists come and go).
+        public ToolStripMenuItem AddSubmenu(string text, string glyph, Action<FluentMenu> fill)
+        {
+            var sub = new FluentMenu();
+            var item = new ToolStripMenuItem(text) { Padding = Px(8, 9, 28, 9), Tag = glyph };
+            item.DropDown = sub;
+            sub.Items.Add(new ToolStripMenuItem("…"));   // a submenu shows its arrow (and opens) only with an item in it
+            item.DropDownOpening += delegate
+            {
+                foreach (ToolStripItem old in sub.Items.Cast<ToolStripItem>().ToList()) { if (old.Image != null) old.Image.Dispose(); old.Dispose(); }
+                sub.Items.Clear();
+                fill(sub);
+                sub.RefreshGlyphs();
+            };
+            Items.Add(item);
+            return item;
+        }
 
         public static Padding Px(int left, int top, int right, int bottom)
         {
@@ -2114,14 +2987,15 @@ namespace WallhavenShuffle
         {
             var g = e.Graphics;
             float k = Theme.Scale;
-            var r = e.ImageRectangle;
-            if (e.Item.Image != null) { g.DrawImage(e.Item.Image, r); return; }
-            // The selected choice: a small accent pill, as in Windows 11 lists.
+            // The selected choice: a small accent pill, as in Windows 11 lists; with an icon, the pill sits at the row's
+            // edge and the icon in its usual place.
+            var img = e.Item.Image;
             g.SmoothingMode = SmoothingMode.AntiAlias;
             float h = (float)Math.Round(16 * k);
             using (var b = new SolidBrush(Theme.Accent))
-            using (var path = Theme.Rounded(new RectangleF((float)Math.Round(8 * k), (e.Item.Height - h) / 2, 3 * k, h), 1.5f * k))
+            using (var path = Theme.Rounded(new RectangleF((float)Math.Round((img != null ? 3 : 8) * k), (e.Item.Height - h) / 2, 3 * k, h), 1.5f * k))
                 g.FillPath(b, path);
+            if (img != null) g.DrawImage(img, (int)Math.Round(IconLeft * k), (e.Item.Height - img.Height) / 2, img.Width, img.Height);
         }
 
         protected override void OnRenderArrow(ToolStripArrowRenderEventArgs e) { e.ArrowColor = Theme.Text; base.OnRenderArrow(e); }

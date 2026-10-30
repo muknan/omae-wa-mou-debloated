@@ -30,8 +30,32 @@ A small tray app that changes the desktop wallpaper every few minutes from a wal
 **Use it**
 - **Double-click** the tray icon for the next wallpaper.
 - **Right-click** it for the everyday actions and **Open Wallhaven Shuffle**: an acrylic Windows 11 style flyout with the
-  wallpaper, the controls ♡ ⏮ ⏯ ⏭ ⋯, and six settings that apply right away. In the flyout, ← and → also go back
+  wallpaper, the controls 📌 ♡ ⏮ ⏯ ⏭ ⋯, and seven settings that apply right away. In the flyout, ← and → also go back
   and forward, and ↑/↓ change a focused dropdown. Click anywhere else or press Esc to close it.
+- **Keep this wallpaper** (📌 in the flyout, the tray menu, or `Ctrl+Alt+Shift+K`): no more changes until you take it
+  off again. It's remembered across restarts, and the cache never deletes the kept one. Next, Previous or picking
+  another source takes it off as well (you're moving on); Pause is separate.
+
+**Playlists**
+- **Shuffle from** (the first setting, also in the tray menu) picks what it shuffles: the Wallhaven list,
+  **Favourites**, one of your **playlists**, or **a folder of your own pictures**. Each keeps its own round, so going
+  back to the list carries on where it was. Switching shows one from the new source right away.
+- A playlist is a normal folder in `Playlists`, next to the cache folder (`PlaylistsDir` in Advanced settings to put
+  them elsewhere). Make one with **New playlist…** (in Shuffle from, Add to playlist, or ⋯ > Playlists).
+- **Add to playlist** (tray menu, or ⋯) puts the wallpaper on screen into a playlist; a ✓ marks the ones it's in, and
+  clicking a ✓ takes it out (to the Recycle Bin). Pictures are added as **hard links** to the downloaded original: the
+  picture shows up in the folder like any file, but takes no extra space, and stays there if the cache later drops it.
+  That needs the playlist on the same drive as the cache, which is why playlists live next to it; on another drive
+  it's copied instead (the log says which).
+- **⋯ > Playlists** also renames or deletes the playlist being shuffled (deleted ones go to the Recycle Bin; a
+  wallpaper still in the cache or another playlist stays there) and opens the playlists or favourites folder.
+- **Add a folder of your pictures…** shuffles any folder (top level; JPG, PNG, WebP, BMP, GIF) where it is: nothing
+  is copied, and it works without a Wallhaven list. "Stop using" takes it off the list and never touches the folder.
+  Pictures copied into a playlist or folder by hand show up within 20 seconds.
+- Favourites are hard-linked too when `Pictures` is on the same drive as the cache, otherwise copied as before.
+  Pictures saved by this app are named after their Wallhaven id, so "Open on Wallhaven" and the resolution / ♥ pill
+  still work for them; for your own pictures the pill shows the file name and clicking the picture shows it in
+  Explorer (⋯ > **Show in folder** does that for any wallpaper).
 - Pressing Next or Previous again while a change is still fading is remembered: it happens right after (up to 5).
 - Hotkeys:
 
@@ -41,11 +65,12 @@ A small tray app that changes the desktop wallpaper every few minutes from a wal
   | `Ctrl+Alt+Shift+←` | previous |
   | `Ctrl+Alt+Shift+P` | pause |
   | `Ctrl+Alt+Shift+F` | favourite |
+  | `Ctrl+Alt+Shift+K` | keep this wallpaper / stop keeping it |
 
-- Favourites are copied to `Pictures\Wallhaven Favourites`.
+- Favourites go to `Pictures\Wallhaven Favourites`.
 - In the **⋯** menu:
-  - "Never show this one"
-  - "Open on Wallhaven"
+  - "Add to playlist", "Show in folder", "Open on Wallhaven", "Never show this one"
+  - "Playlists": new, add a folder, rename / delete the one being shuffled, open the folders
   - "Show hidden wallpapers again", which undoes every "Never show this one"
   - "Restore my original wallpaper" (a copy of it is kept next to the app at the first run, since Windows' own copy
     is replaced with each new wallpaper)
