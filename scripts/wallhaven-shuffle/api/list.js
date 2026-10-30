@@ -61,7 +61,7 @@ export default async function handler(req, res) {
     const complete = missing === 0 && items.length > 0; // nothing missing: complete, however short the list
     console.log(`list ${pageQuery(p)} fav>=${p.fav} maxw=${p.maxw}: read ${read}/${pages} pages, ${missing} missing, ${items.length} wallpapers in ${Math.round((Date.now() - started) / 1000)} s`);
     res.setHeader('cache-control', complete ? CACHE_GOOD : 'public, max-age=0, s-maxage=120');
-    res.status(200).json({ range: p.range, resolutions: p.atleast ? `>=${p.atleast}` : p.res, ratios: p.ratios, max_width: p.maxw, min_favorites: p.fav, categories: p.cats, purity: p.purity, complete, missing_pages: missing, fetched_at: new Date().toISOString(), items });
+    res.status(200).json({ range: p.range, resolutions: p.atleast ? `>=${p.atleast}` : p.res, ratios: p.ratios, max_width: p.maxw, min_favorites: p.fav, categories: p.cats, purity: p.purity, topic: p.q, complete, missing_pages: missing, fetched_at: new Date().toISOString(), items });
   } catch (err) {
     res.setHeader('cache-control', 'no-store');
     res.status(502).json({ error: String(err.message || err) });

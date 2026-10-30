@@ -25,7 +25,8 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * The wallpaper list, kept on the TV. It's downloaded from the wallhaven-shuffle service's /api/list (with no time
+ * The toplist, kept on the TV. It's downloaded from the wallhaven-shuffle service's /api/list for this TV's filters
+ * (TvSettings.listQuery; with no time
  * limit to speak of: the service may need a couple of minutes to put a cold list together) and saved as a compact
  * file of just what this TV shows (pool.tsv, ~100 KB), so a request reads a small file in milliseconds instead of
  * waiting on the network or parsing 1.5 MB of JSON every minute. An old copy keeps working while a new one is
@@ -44,7 +45,18 @@ final class ListStore {
     static SharedPreferences prefs(Context c) { return c.getSharedPreferences(PREFS, Context.MODE_PRIVATE); }
     static File poolFile(Context c) { return new File(c.getFilesDir(), "pool.tsv"); }
 
-    /** The wallpapers this TV shows, from the saved list (empty until the first download). */
+    /** The service's address (https://<project>.vercel.app): set on its own, or the start of the old list address. */
+    static String server(Context c) {
+        SharedPreferences p = prefs(c);
+        String s = p.getString("server", "");
+        if (s.isEmpty()) {
+            android.net.Uri u = android.net.Uri.parse(p.getString("list_url", ""));
+            if (u.getScheme() != null && u.getHost() != null) s = u.getScheme() + "://" + u.getHost() + (u.getPort() > 0 ? ":" + u.getPort() : "");
+        }
+        return s.replaceAll("/+$", "");
+    }
+
+    /** The toplist this TV has, every width (the width limit is applied when the pool is put together). */
     static synchronized List<Shuffle.Item> pool(Context c) {
         File f = poolFile(c);
         long stamp = f.exists() ? f.lastModified() * 31 + f.length() : 0;   // time and size: a new file is never missed
@@ -71,8 +83,8 @@ final class ListStore {
         SharedPreferences p = prefs(c);
         long now = System.currentTimeMillis();
         long last = p.getLong("list_time", 0), tried = p.getLong("list_tried", 0);
-        boolean due = !poolFile(c).exists() || now - last > REFRESH_AFTER_MS;
-        if (!due || now - tried < RETRY_AFTER_MS || p.getString("list_url", "").isEmpty()) return;
+        boolean due = !poolFile(c).exists() || now - last > REFRESH_AFTER_MS || !p.getString("list_for", "").equals(Sync.settings(c).listQuery());
+        if (!due || now - tried < RETRY_AFTER_MS || server(c).isEmpty()) return;
         refreshNow(c, null);
     }
 
@@ -113,13 +125,13 @@ final class ListStore {
 
     private static String download(Context c, int gen) throws Exception {
         SharedPreferences p = prefs(c);
-        String url = p.getString("list_url", "");                  // read now: the latest settings
-        if (url.isEmpty()) throw new IllegalStateException("no list address set");
-        int maxWidth = p.getInt("max_width", 3840), minFav = p.getInt("min_favorites", 0);
+        String query = Sync.settings(c).listQuery(), server = server(c);   // read now: the latest settings
+        if (server.isEmpty()) throw new IllegalStateException("no service address set");
+        String url = server + "/api/list?" + query;
         HttpURLConnection http = (HttpURLConnection) new URL(url).openConnection();
         http.setConnectTimeout(30_000);
         http.setReadTimeout(300_000);                             // a cold list can take the service a few minutes
-        http.setRequestProperty("User-Agent", "WallhavenShuffle-Projectivy/1.0");
+        http.setRequestProperty("User-Agent", "WallhavenShuffle-Projectivy/" + Sync.VERSION);
         byte[] body;
         try {
             int code = http.getResponseCode();                     // first: a 404's own error only names the address
@@ -147,24 +159,24 @@ final class ListStore {
                 String id = o.optString("id"), image = o.optString("path");
                 int width = o.optInt("dimension_x"), fav = o.optInt("favorites");
                 if (!id.matches("[A-Za-z0-9_-]{1,40}") || !image.startsWith("http")) continue;
-                if ((maxWidth > 0 && width > maxWidth) || fav < minFav) continue;
                 w.write(id + "\t" + clean(image) + "\t" + clean(o.optString("url")) + "\t" + clean(o.optString("resolution")) + "\t" + width + "\t" + fav + "\n");
                 kept++;
             }
         }
-        if (kept == 0) { tmp.delete(); throw new IllegalStateException("the list had no wallpapers that fit"); }
+        if (kept == 0) { tmp.delete(); throw new IllegalStateException("no wallpapers match these filters"); }
 
         // The service marks a list it couldn't read in full (Wallhaven's rate limit) as incomplete; it's filled in a
         // few minutes later. Such a list never replaces a fuller saved one (another try comes after RETRY_AFTER_MS).
         int saved = pool(c).size();
-        if (!complete && kept < saved) {
+        boolean sameList = query.equals(p.getString("list_for", ""));
+        if (!complete && kept < saved && sameList) {
             tmp.delete();
             String r = "list partial (" + kept + "), kept the saved one (" + saved + ")";
             Log.i(TAG, r);
             return r;
         }
         synchronized (gate) {
-            if (gen != generation || !url.equals(p.getString("list_url", ""))) {   // settings changed meanwhile
+            if (gen != generation || !query.equals(Sync.settings(c).listQuery())) {   // the filters changed meanwhile
                 tmp.delete();
                 return "settings changed: getting the list again";
             }
@@ -172,7 +184,9 @@ final class ListStore {
             if (!tmp.renameTo(f)) { f.delete(); if (!tmp.renameTo(f)) throw new IllegalStateException("couldn't save the list"); }
         }
         // A partial list (when nothing fuller was saved) is used, but not counted as fresh: the next try fills it in.
-        p.edit().putLong("list_time", complete ? System.currentTimeMillis() : 0).putInt("list_size", kept).apply();
+        p.edit().putLong("list_time", complete ? System.currentTimeMillis() : 0).putInt("list_size", kept).putString("list_for", query).apply();
+        ShuffleService.poolMayHaveChanged(c);
+        Sync.statusChanged(c);
         String result = "list: " + kept + " wallpapers" + (complete ? "" : " (partial, filled in at the next try)");
         Log.i(TAG, result);
         return result;

@@ -2,7 +2,8 @@
 // Env vars (all optional): TOP_RANGE, RESOLUTIONS (exact) or ATLEAST (minimum, e.g. 3840x2160) with RATIOS
 // (e.g. 16x9,16x10), MAX_WIDTH (e.g. 3840: skip 5K/8K, which small TVs can't decode comfortably), MIN_FAVORITES,
 // CATEGORIES (e.g. 110 = no People), PURITY, SLOT_MINUTES, SET_SIZE, WALLHAVEN_API_KEY.
-// Each can also come from the request (?range=&res=&atleast=&ratios=&maxw=&fav=&cats=&purity=), which wins.
+// Each can also come from the request (?range=&res=&atleast=&ratios=&maxw=&fav=&cats=&purity=&q=), which wins.
+// q is an optional topic (Wallhaven's own search, e.g. "nature" or "night city"): the toplist of just those.
 
 // Wallpapers per set (one set per time window). The plugin asks for a set about once an hour and Projectivy keeps
 // it for that hour, showing a random one from it every "Update delay" minutes (not in order: random picks, with
@@ -34,14 +35,21 @@ export function listParams(query = {}) {
   // (sketchy/NSFW need an API key). Defaults match Wallhaven's site: all categories, SFW only.
   const cats = /^[01]{3}$/.test(query.cats || '') ? query.cats : (process.env.CATEGORIES || '111');
   const purity = /^[01]{3}$/.test(query.purity || '') ? query.purity : (process.env.PURITY || '100');
-  return { range, res, atleast, ratios, maxw, fav, cats, purity };
+  return { range, res, atleast, ratios, maxw, fav, cats, purity, q: normTopic(query.q) };
+}
+
+// A topic as every app writes it (lower case; letters, digits, spaces and hyphens; single spaces), so one topic is
+// one cached list whoever asks. Anything else means no topic.
+export function normTopic(q) {
+  const t = String(q || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  return /^[a-z0-9 -]{1,40}$/.test(t) ? t : '';
 }
 
 // What Wallhaven is asked for: the CDN cache key of /api/page. Commas stay as they are (res and ratios are checked
 // to be digits, x and commas), so the address is exactly the one people type, e.g. the Windows app's ListUrl, and
 // both share one cached copy.
 export const pageQuery = (p) => `range=${p.range}` + (p.atleast ? `&atleast=${p.atleast}` : `&res=${p.res}`) +
-  (p.ratios ? `&ratios=${p.ratios}` : '') + `&cats=${p.cats}&purity=${p.purity}`;
+  (p.ratios ? `&ratios=${p.ratios}` : '') + `&cats=${p.cats}&purity=${p.purity}` + (p.q ? `&q=${encodeURIComponent(p.q)}` : '');
 // ... plus the filters applied while putting the list together: the CDN cache key of /api/list.
 export const listQuery = (p) => `${pageQuery(p)}&fav=${p.fav}&maxw=${p.maxw}`;
 
@@ -74,7 +82,7 @@ export async function fetchToplistPage(p, page) {
   const url = 'https://wallhaven.cc/api/v1/search?sorting=toplist' +
     `&topRange=${p.range}` + (p.atleast ? `&atleast=${p.atleast}` : `&resolutions=${encodeURIComponent(p.res)}`) +
     (p.ratios ? `&ratios=${encodeURIComponent(p.ratios)}` : '') + `&categories=${p.cats}&purity=${p.purity}&page=${page}` +
-    (API_KEY ? `&apikey=${API_KEY}` : '');
+    (p.q ? `&q=${encodeURIComponent(p.q)}` : '') + (API_KEY ? `&apikey=${API_KEY}` : '');
   for (let attempt = 0; ; attempt++) {
     let r;
     try {

@@ -3,7 +3,7 @@
 A wallpaper plugin for [Projectivy Launcher](https://github.com/spocky/projectivy-plugin-wallpaper-provider) that shows
 a wallhaven-shuffle list on the TV **in shuffled order with no repeats**: every wallpaper once per round, and none
 comes back within 20 changes of itself, also across rounds. These are the same rules as the [Windows app](../windows).
-A 45 KB app in plain Java, with no libraries.
+A 70 KB app in plain Java, with no libraries.
 
 ![banner](res/drawable-xhdpi/banner.png)
 
@@ -24,17 +24,36 @@ plugin does it differently:
 ## Install
 
 1. Build it (below), or use a build you trust, and install it: `adb install -r WallhavenShuffle-Projectivy.apk`.
-2. Set the list address, either on the TV (**Wallhaven Shuffle** in the app list, or Projectivy's **Configure** for
-   the plugin) or over ADB:
+2. Set the service address, either on the TV (**Wallhaven Shuffle** in the app list, or Projectivy's **Configure**
+   for the plugin: Service > Address) or over ADB:
    ```powershell
-   adb shell am start -n io.github.muknan.wallhavenshuffle/.SettingsActivity --es list_url "https://<your-project>.vercel.app/api/list?range=1y&atleast=3840x2160&ratios=16x9,16x10&cats=110&purity=100&fav=50&maxw=0" --ei max_width 3840
+   adb shell am start -n io.github.muknan.wallhavenshuffle/.SettingsActivity --es server "https://<your-project>.vercel.app"
    ```
-   Use the same address as the Windows app, with `maxw=0`, and let the plugin apply the width limit (`max_width`).
-   Then both ask for the same list, which the PC keeps warm in the service's cache.
+   The plugin asks for `/api/list` with its own filters (below); with the same filters as the PC, both share one
+   cached list.
 3. In Projectivy: **Settings > Appearance > Wallpaper > Launcher wallpaper > Wallhaven Shuffle**. Its **Update delay**
    is how often the wallpaper changes.
 
 To go back, choose **Booru Wallpaper Provider** (or anything else) there. Uninstall: `adb uninstall io.github.muknan.wallhavenshuffle`.
+
+## Settings
+
+The settings screen shows the wallpaper on screen with **Next**, **Keep**, **Pause**, **Save to Favourites**, **Add
+to playlist** and **Hide**, and on the right a short list of rows, each opening a picker made for the remote:
+
+- **Shuffle from**: the toplist, Favourites and your playlists, in any mix (one round through all of them).
+- **Change**: how often. Projectivy's own **Update delay** is how often it asks; the plugin changes at its first ask
+  after this time has passed, so the TV can't change faster than Projectivy asks. Next skips the wait.
+- **Toplist**: quality, shape, period, popularity, categories, an optional topic, and the largest size (up to 4K is
+  lighter for a TV's decoder). The same choices as the Windows app and the remote.
+- **Sync**: **Pair with your phone or PC** shows a 6-digit code; type it in the remote (Devices > Pair a device) or on
+  the PC (Remote > Pair a device). Paired, the playlists, Favourites and Hidden are shared, the remote can change
+  everything here and send Next, Previous or a wallpaper, and Hide on any device leaves it out here too.
+- **Service**: the address, and **Get a fresh list now**.
+
+Paired, a background thread checks in every 30 s while the screen is on and the plugin is in use (every 3 s while
+a remote is open), with one small request. Settings made on the TV while offline go up at the next check-in.
+Coming from 1.7, the old list address and width carry over as the same filters.
 
 ## Panel reset (MediaTek TVs)
 
@@ -53,9 +72,9 @@ adb shell am start -n io.github.muknan.wallhavenshuffle/.PanelResetActivity
 adb shell am broadcast -a io.github.muknan.wallhavenshuffle.NEXT -n io.github.muknan.wallhavenshuffle/.NextReceiver
 ```
 
-Bind that to a button with Key Mapper (action: Shell command, ADB mode). Projectivy shows the next one right away,
-but it accepts a refresh only about every half minute, so a second press straight after does nothing. The settings
-screen has the same button.
+Bind that to a button with Key Mapper (action: Shell command, ADB mode). Projectivy shows the next one right away
+(whatever the **Change** interval), but it accepts a refresh only about every half minute, so a second press
+straight after does nothing. The settings screen and the remote have the same button.
 
 ## Build
 
@@ -64,7 +83,7 @@ Android Studio, no Gradle). By default, `build.ps1` looks for them in `%USERPROF
 `JAVA_HOME` and `ANDROID_SDK` override that.
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File build.ps1 -Test   # rotation tests on the PC, then bin\WallhavenShuffle-Projectivy.apk
+powershell -ExecutionPolicy Bypass -File build.ps1 -Test   # rotation and settings tests on the PC, then bin\WallhavenShuffle-Projectivy.apk
 ```
 
 The first build creates a signing key in `%USERPROFILE%\.whs-build\` (`whs-plugin.jks` and `.pass`). Keep both:
@@ -72,10 +91,12 @@ Android only installs an update that's signed with the same key. Neither ever go
 
 ## How it fits together
 
-- `src/.../Shuffle.java`: the rotation (plain Java, tested by `test/ShuffleTest.java` on the PC).
-- `src/.../ListStore.java`: downloads, compacts and reads the list.
+- `src/.../Shuffle.java`, `TvSettings.java`: the rotation and the settings with their list query (plain Java,
+  tested by `test/ShuffleTest.java` on the PC).
+- `src/.../ListStore.java`: downloads, compacts and reads the toplist for the current filters.
+- `src/.../Sync.java`: pairing, the check-in loop, the shared playlists (`doc.json`) and remote commands.
 - `src/.../ShuffleService.java`: what Projectivy calls (`getWallpapers` for TIME_ELAPSED; settings for
-  Projectivy's backup).
+  Projectivy's backup): the mixed pool, pause, keep, the Change interval, Next / Previous / Show from the remote.
 - `src/.../SettingsActivity.java`, `NextReceiver.java`: the settings screen and "next wallpaper".
 - `src/.../PanelResetActivity.java`: the 60 Hz panel reset (makes its clip on the TV with MediaCodec on first use).
 - `aidl/` and `src/tv/projectivy/...`: Projectivy's plugin interface, from

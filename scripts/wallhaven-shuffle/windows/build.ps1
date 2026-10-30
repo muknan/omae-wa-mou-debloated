@@ -9,12 +9,12 @@ if (-not (Test-Path $csc)) { $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framewo
 if (-not (Test-Path $csc)) { throw 'The .NET Framework 4 C# compiler was not found.' }
 $work = Join-Path $env:TEMP 'whs-build'
 New-Item -ItemType Directory -Force $work | Out-Null
-foreach ($f in 'WallhavenShuffle.cs', 'app.ico', 'app.manifest') { Copy-Item (Join-Path $here $f) $work -Force }
+foreach ($f in 'WallhavenShuffle.cs', 'Sync.cs', 'Library.cs', 'app.ico', 'app.manifest') { Copy-Item (Join-Path $here $f) $work -Force }
 Push-Location $work
 try {
     & $csc /nologo /target:winexe /optimize+ /platform:anycpu /codepage:65001 /win32icon:app.ico /win32manifest:app.manifest `
-        /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.Web.Extensions.dll `
-        /out:WallhavenShuffle.exe WallhavenShuffle.cs
+        /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.Web.Extensions.dll /reference:System.Web.dll `
+        /out:WallhavenShuffle.exe WallhavenShuffle.cs Sync.cs Library.cs
     if ($LASTEXITCODE -ne 0) { throw "Build failed ($LASTEXITCODE)" }
 } finally { Pop-Location }
 $out = Join-Path $here 'bin'

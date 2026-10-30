@@ -2,6 +2,17 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
     { "source": "/r/:range/:res/api/v1/search", "destination": "/api/v1/search?range=:range&res=:res" },
-    { "source": "/r/:range/:res/:fav/api/v1/search", "destination": "/api/v1/search?range=:range&res=:res&fav=:fav" }
+    { "source": "/r/:range/:res/:fav/api/v1/search", "destination": "/api/v1/search?range=:range&res=:res&fav=:fav" },
+    { "source": "/api/sync/:a", "destination": "/api/sync?a=:a" }
+  ],
+  "headers": [
+    { "source": "/(.*)", "headers": [
+      { "key": "x-content-type-options", "value": "nosniff" },
+      { "key": "referrer-policy", "value": "no-referrer" }
+    ] },
+    { "source": "/((?!api/).*)", "headers": [
+      { "key": "x-frame-options", "value": "DENY" },
+      { "key": "content-security-policy", "value": "default-src 'self'; img-src 'self' data: https://th.wallhaven.cc https://w.wallhaven.cc; connect-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'" }
+    ] }
   ]
 }

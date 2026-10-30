@@ -91,6 +91,8 @@ environment variables:
 | `PURITY` | `100` | SFW only |
 | `MIN_FAVORITES` | `0` | skip wallpapers with fewer favourites (the toplist is every upload, ranked) |
 | `SET_SIZE` | `200` | wallpapers per hourly set (at most 200). Projectivy keeps a set for an hour and shows a **random** one from it every *Update delay* minutes, not in order, so a bigger set means fewer repeats: at a 1-minute delay, ~20 repeats an hour with 70, ~2-8 with 200 |
+| `SYNC_KEY` | (none) | the remote and sync (below): a long password of your own that signs in the first device |
+| `KV_REST_API_URL`, `KV_REST_API_TOKEN` | (none) | added by Vercel's Upstash integration; the remote and sync keep their data there |
 
 The toplist is really every upload in the range, ranked, so the bottom half is weak (median ~16 favourites).
 Measured for General + Anime, SFW, 4K and up, 16:9 + 16:10, with at least 50 favourites:
@@ -133,6 +135,18 @@ Measured on the test TV: one request per change, on the minute ("1 of 677", "2 o
 through an app update and a refresh, and it used ~1.5 s of CPU in 6 minutes. See its
 [README](../scripts/wallhaven-shuffle/projectivy-plugin/README.md) for install and build. The Booru plugin can stay
 installed as a fallback.
+
+### A remote on your phone, and the same playlists everywhere (optional)
+With sync set up on the deployment (Upstash Redis and `SYNC_KEY`: see the
+[service README](../scripts/wallhaven-shuffle/README.md#the-remote-and-sync)), the deployment's address is a web remote
+for the TV and the PC: what each one shows, Next / Previous / Pause / Keep, what it shuffles and its toplist filters,
+the shared playlists, and a grid of a device's toplist to pick from. The plugin (1.8) and the Windows app (2.2)
+pair with a 6-digit code. Playlists, Favourites and Hidden are the same on every device; what each device shuffles
+stays its own (e.g. the TV on "Toplist + Cozy evenings", the PC on "Space" only).
+
+The plugin's filters replace the old list address: quality (Full HD and up … 8K, or exactly 4K), shape, period,
+popularity, categories, an optional topic and the largest size, as pickers on the TV's settings screen. They work
+without sync too.
 
 ### Ask for the next wallpaper over ADB
 With the Wallhaven Shuffle plugin, ask it (Projectivy shows the next one right away; at most about every half minute):

@@ -59,6 +59,20 @@ public class ShuffleTest {
         List<Shuffle.Item> one = pool(1);
         check("a list of one keeps showing it", "w0".equals(d.next(one).id) && "w0".equals(d.next(one).id), "w0");
 
+        // TV settings: the list address must match the service's listQueryFor exactly (one shared cached list).
+        TvSettings t = TvSettings.defaults();
+        check("default list query = the one the plugin always used", t.listQuery().equals("range=1y&atleast=3840x2160&ratios=16x9,16x10&cats=110&purity=100&fav=50&maxw=0"), t.listQuery());
+        t.quality = "4k"; t.q = "  Night   CITY "; t.ratio = ""; t.clean();
+        check("exact 4K, a topic, any shape", t.listQuery().equals("range=1y&res=3840x2160,3840x2400&cats=110&purity=100&q=night%20city&fav=50&maxw=0"), t.listQuery());
+        TvSettings bad = new TvSettings();
+        bad.quality = "9k"; bad.ratio = "3x1"; bad.range = "2y"; bad.cats = "000"; bad.fav = -3; bad.maxw = 1234; bad.every = 0; bad.q = "<script>";
+        bad.sources.addAll(List.of("toplist", "toplist", "fav", "p_ab12cd", "evil", "p_X"));
+        bad.clean();
+        check("clean() puts anything odd back to a valid value", bad.quality.equals("4k+") && bad.ratio.equals("16x9,16x10") && bad.range.equals("1y") && bad.cats.equals("110")
+            && bad.fav == 50 && bad.maxw == 3840 && bad.every == 1 && bad.q.isEmpty() && bad.sources.equals(List.of("toplist", "fav", "p_ab12cd")), bad.sources);
+        check("labels", TvSettings.everyLabel(1).equals("Every minute") && TvSettings.everyLabel(120).equals("Every 2 hours") && TvSettings.everyLabel(1440).equals("Once a day")
+            && TvSettings.favLabel(1000).equals("1,000+ favourites") && new TvSettings().catsLabel().equals("General, Anime"), TvSettings.everyLabel(45));
+
         System.out.println(fail == 0 ? "ALL PASSED" : fail + " FAILED");
         System.exit(fail == 0 ? 0 : 1);
     }

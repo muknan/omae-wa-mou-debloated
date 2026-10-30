@@ -29,7 +29,7 @@ foreach ($d in 'aidl', 'src', 'res', 'test') { Copy-Item (Join-Path $here $d) (J
 Copy-Item (Join-Path $here 'AndroidManifest.xml') $in
 
 if ($Test) {
-    Run $javac -d "$work\test" "$in\src\io\github\muknan\wallhavenshuffle\Shuffle.java" "$in\test\ShuffleTest.java"
+    Run $javac -encoding UTF-8 -d "$work\test" "$in\src\io\github\muknan\wallhavenshuffle\Shuffle.java" "$in\src\io\github\muknan\wallhavenshuffle\TvSettings.java" "$in\test\ShuffleTest.java"
     Run $java -cp "$work\test" io.github.muknan.wallhavenshuffle.ShuffleTest
 }
 

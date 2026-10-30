@@ -1,0 +1,15 @@
+{
+  "name": "Wallhaven Shuffle",
+  "short_name": "Shuffle",
+  "description": "Remote for Wallhaven Shuffle on your TV and PC: what's on screen, playlists and filters.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0d0e13",
+  "theme_color": "#0d0e13",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
