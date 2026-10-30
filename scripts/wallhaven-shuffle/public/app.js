@@ -130,10 +130,11 @@
     if (s < 86400) return `${Math.round(s / 3600)} h ago`;
     return `${Math.round(s / 86400)} days ago`;
   }
+  // the same words as the TV and the PC ("Change every" … "15 minutes")
   function everyLabel(m) {
-    if (m < 60) return m === 1 ? 'Every minute' : `Every ${m} minutes`;
-    if (m < 1440) return m === 60 ? 'Every hour' : `Every ${m / 60} hours`;
-    return 'Once a day';
+    if (m < 60) return m === 1 ? '1 minute' : `${m} minutes`;
+    if (m < 1440) return m === 60 ? '1 hour' : `${m / 60} hours`;
+    return '1 day';
   }
   const favLabel = (n) => (n ? `${nf.format(n)}+ favourites` : 'Any');
   const kindIcon = (k) => (k === 'tv' ? 'tv' : k === 'pc' ? 'pc' : 'web');
@@ -412,6 +413,8 @@
       const inLists = userPlaylists().filter((p) => p.items.some((x) => x.id === it.id)).map((p) => p.name);
       const hidden = inPl('hidden', it.id), fav = inPl('fav', it.id);
       const pl = ctx.pl && !['fav', 'hidden'].includes(ctx.pl) ? findPl(ctx.pl) : null;
+      const targets = devicesWithSettings().filter(([id]) => id !== ctx.device);   // not the one it's already on
+      const showOn = (id, d) => command(id, { type: 'show', item: it }, `Showing it on ${d.name}`);
       put(body, 
         h('div', { class: 'picture' }, img(thumb(it), '', true)),
         h('div', { class: 'pad' }, h('div', { class: 'facts' },
@@ -419,16 +422,20 @@
           it.fav ? h('span', { class: 'num' }, icon('heartOn', 'icon heart'), nf.format(it.fav)) : null,
           inLists.length ? h('span', {}, `In ${inLists.join(', ')}`) : null,
           hidden ? h('span', {}, 'Hidden') : null)),
-        group(devicesWithSettings().map(([id, d]) => item({ ic: 'cast', label: `Show on ${d.name}`, chev: false,
-          onclick: () => { close(); command(id, { type: 'show', item: it }, `Showing it on ${d.name}`); } }))),
         group(
           item({ ic: fav ? 'heartOn' : 'heart', label: fav ? 'Remove from Favourites' : 'Save to Favourites', chev: false, onclick: () => { toggleFav(it); close(); } }),
           item({ ic: 'playlists', label: 'Add to playlist', value: inLists.length ? plural(inLists.length, 'playlist') : null, onclick: () => { close(); addToSheet(it); } }),
           pl ? item({ ic: 'x', label: `Remove from ${pl.name}`, chev: false, onclick: () => {
             close();
             ops([{ op: 'remove', pl: pl.id, id: it.id }], { toast: `Removed from ${pl.name}`, undo: () => ops([{ op: 'add', pl: pl.id, item: it }]) });
-          } }) : null,
-          hidden ? item({ ic: 'show', label: 'Let it show again', chev: false, onclick: () => { close(); ops([{ op: 'remove', pl: 'hidden', id: it.id }], { toast: 'It can show up again' }); } })
+          } }) : null),
+        // to another device: one row each for one or two, otherwise one row that lists them
+        targets.length ? group(targets.length <= 2
+          ? targets.map(([id, d]) => item({ ic: 'cast', label: `Show on ${d.name}`, chev: false, onclick: () => { close(); showOn(id, d); } }))
+          : item({ ic: 'cast', label: 'Show on another device', onclick: () => { close(); sheet('Show on', (b2, close2) => put(b2, group(targets.map(([id, d]) =>
+              item({ ic: kindIcon(d.kind), label: d.name, chev: false, onclick: () => { close2(); showOn(id, d); } }))))); } })) : null,
+        group(
+          hidden ? item({ ic: 'show', label: 'Show it again', chev: false, onclick: () => { close(); ops([{ op: 'remove', pl: 'hidden', id: it.id }], { toast: 'It can show up again' }); } })
             : item({ ic: 'hide', label: 'Never show this one', chev: false, onclick: () => { close(); hide(it, ctx.device); } }),
           item({ ic: 'external', label: 'Open on Wallhaven', href: pageOf(it), external: true, chev: false })));
     });
@@ -441,17 +448,19 @@
     if (!devs.length) {
       return h('div', {}, h('div', { class: 'title pad' }, h('h1', {}, 'Now')),
         h('div', { class: 'empty' }, h('h2', {}, 'Pair your TV or PC'),
-          h('p', {}, 'On the TV, open Wallhaven Shuffle and choose Pair. In the Windows app, choose Remote. Then enter the code here.'),
+          h('p', {}, 'On the TV: Wallhaven Shuffle > Sync > Pair with your phone or PC. On the PC: tray icon > Remote > Pair with a code. Then type the code here.'),
           h('a', { class: 'btn primary', href: '#/devices' }, 'Pair a device')));
     }
     if (!S.doc.devices[UI.dev]?.settings) UI.dev = devs[0][0];
     const id = UI.dev;
-    const switcher = h('div', { class: 'switcher pad' },
-      h('div', { class: 'names', role: 'tablist' }, devs.map(([did, d]) => h('button', { class: 'name', role: 'tab', 'aria-selected': String(did === id),
-        onclick: () => { UI.dev = did; store.set('whs.dev', did); changed(); } }, d.name))),
+    const pick = (did) => { UI.dev = did; store.set('whs.dev', did); changed(); };
+    const names = devs.length <= 2
+      ? h('div', { class: 'names', role: 'tablist' }, devs.map(([did, d]) => h('button', { class: 'name', role: 'tab', 'aria-selected': String(did === id), onclick: () => pick(did) }, d.name)))
+      : h('button', { class: 'name picker', 'aria-label': 'Choose a device', onclick: () => sheet('Devices', (body, close) => put(body, group(devs.map(([did, d]) =>
+          item({ ic: kindIcon(d.kind), label: d.name, sub: S.status[did]?.online ? 'Online' : 'Offline', chev: false, cls: did === id ? 'accent' : '', onclick: () => { close(); pick(did); } }))))) },
+        h('span', { class: 'ellipsis' }, S.doc.devices[id].name), icon('updown', 'icon'));
+    const switcher = h('div', { class: 'switcher pad' }, names,
       h('button', { class: 'icon-btn', 'aria-label': `${S.doc.devices[id].name} settings`, onclick: () => deviceSheet(id) }, icon('more')));
-    // the chosen name in view, even when the names are wider than the phone
-    requestAnimationFrame(() => switcher.querySelector('[aria-selected="true"]')?.scrollIntoView({ inline: 'nearest', block: 'nearest' }));
     return h('div', {}, switcher, devicePage(id));
   }
 
@@ -497,20 +506,20 @@
           cur?.res ? h('span', { class: 'num' }, fmtRes(cur.res)) : null,
           cur?.fav ? h('span', { class: 'fav num' }, icon('heartOn'), nf.format(cur.fav)) : null),
         total ? h('span', { class: 'num' }, `${nf.format(shown)} / ${nf.format(total)}`) : null),
-      h('div', { class: 'track' }, h('i', { style: { width: total ? `${(shown / total) * 100}%` : '0' } })),
+      total ? h('div', { class: 'track' }, h('i', { style: { width: `${(shown / total) * 100}%` } })) : null,
       h('div', { class: 'status' }, h('span', { class: `dot ${online ? 'on' : ''}` }),
         online
           ? h('span', {}, paused ? 'Paused' : kept ? 'Keeping this wallpaper' : st.next ? h('span', { 'data-next': st.next }) : 'Online')
-          : h('span', {}, stat.seen ? `Offline since ${ago(stat.seen)}` : 'Hasn’t checked in yet')));
+          : h('span', {}, stat.seen ? `Offline · seen ${ago(stat.seen)}` : 'Hasn’t checked in yet')));
 
     const favOn = cur && !cur.local && inPl('fav', cur.id);
     const busy = (t) => pend && pend.type === t;
     const controls = h('div', { class: 'controls pad' },
       h('button', { class: `icon-btn ${kept ? 'on' : ''}`, 'aria-label': kept ? 'Stop keeping this wallpaper' : 'Keep this wallpaper', 'aria-pressed': String(kept), disabled: !cur && !kept,
         onclick: () => setSettings(id, { keep: kept ? '' : cur.key || cur.id }) }, icon(kept ? 'pinOn' : 'pin')),
-      h('button', { class: 'icon-btn', 'aria-label': 'Previous', onclick: () => command(id, { type: 'prev' }) }, busy('prev') ? h('span', { class: 'spin' }) : icon('prev')),
+      h('button', { class: 'icon-btn', 'aria-label': 'Previous', disabled: !online, onclick: () => command(id, { type: 'prev' }) }, busy('prev') ? h('span', { class: 'spin' }) : icon('prev')),
       h('button', { class: 'icon-btn main', 'aria-label': paused ? 'Resume' : 'Pause', onclick: () => setSettings(id, { paused: !paused }) }, icon(paused ? 'play' : 'pause')),
-      h('button', { class: 'icon-btn', 'aria-label': 'Next', onclick: () => command(id, { type: 'next' }) }, busy('next') ? h('span', { class: 'spin' }) : icon('next')),
+      h('button', { class: 'icon-btn', 'aria-label': 'Next', disabled: !online, onclick: () => command(id, { type: 'next' }) }, busy('next') ? h('span', { class: 'spin' }) : icon('next')),
       h('button', { class: `icon-btn heart ${favOn ? 'on' : ''}`, 'aria-label': favOn ? 'Remove from Favourites' : 'Save to Favourites', 'aria-pressed': String(!!favOn),
         disabled: !cur || cur.local, onclick: () => toggleFav(cur) }, icon(favOn ? 'heartOn' : 'heart')));
 
@@ -518,12 +527,15 @@
     const settings = group(
       item({ label: 'Shuffle from', value: sourcesSummary(id), onclick: () => sourcesSheet(id), cls: none ? 'warn' : '' }),
       item({ label: 'Toplist', value: filtersSummary(s.filters), onclick: () => filtersSheet(id) }),
-      selectItem({ label: 'Change', value: s.every, id: `every-${id}`, options: S.presets.every.map((m) => [m, everyLabel(m)]), onchange: (v) => setSettings(id, { every: Number(v) }) }));
+      selectItem({ label: 'Change every', value: s.every, id: `every-${id}`, options: S.presets.every.map((m) => [m, everyLabel(m)]), onchange: (v) => setSettings(id, { every: Number(v) }) }));
 
     const recent = Array.isArray(st.recent) ? st.recent.filter((r) => r && (r.id || r.local)).slice(0, 20) : [];
     const side = h('div', { class: 'side' },
       online || !stat.seen ? null : h('div', { class: 'offline pad' }, icon('alert'), h('span', {}, 'Changes apply when it’s back on.')),
       settings,
+      // a TV changes when Projectivy asks (its Update delay): say so when that is slower than the choice
+      d.kind === 'tv' && st.base > 70 && s.every * 60 < st.base
+        ? h('p', { class: 'hint pad' }, `Projectivy asks about every ${everyLabel(Math.round(st.base / 60))}, so the TV changes at most that often.`) : null,
       recent.length ? [groupLabel('Recently shown'), h('div', { class: 'strip pad' }, recent.map((r) => h('button', { 'aria-label': r.local ? r.name : 'Earlier wallpaper', onclick: () => preview(r, { device: id }) },
         r.local ? (r.thumb ? img(r.thumb) : h('div', { class: 'own' }, r.name)) : img(thumb(r, 'small')))))] : null);
 
@@ -623,7 +635,7 @@
       return h('a', { class: 'album', href: `#/playlists/${encodeURIComponent(p.id)}` },
         h('div', { class: 'cover' }, first ? img(thumb(first, 'small')) : icon(p.kind === 'fav' ? 'heart' : 'image')),
         h('div', {}, h('div', { class: 'name ellipsis' }, p.name),
-          h('div', { class: 'meta ellipsis' }, nf.format(p.items.length), used.length ? ` · ${used.join(', ')}` : '')));
+          h('div', { class: 'meta ellipsis' }, plural(p.items.length, 'wallpaper'), used.length ? ` · on ${used.join(', ')}` : '')));
     };
     const hiddenCount = findPl('hidden').items.length;
     return h('div', {},
@@ -650,7 +662,7 @@
         h('a', { class: 'icon-btn', href: '#/playlists', 'aria-label': 'Playlists', style: { marginLeft: '-10px' } }, icon('back')),
         h('h1', {}, p.name),
         p.kind === 'fav' || (isHidden && !p.items.length) ? null
-          : isHidden ? h('button', { class: 'text-btn', onclick: options }, 'Show all')
+          : isHidden ? h('button', { class: 'text-btn', onclick: options }, 'Show all again')
             : h('button', { class: 'icon-btn', 'aria-label': 'Playlist options', onclick: options }, icon('more'))),
       h('p', { class: 'lede pad' }, isHidden ? 'These never show on any device. Tap one to let it show again.' : plural(p.items.length, 'wallpaper')),
       !isHidden && devs.length ? [h('div', { class: 'group-label pad', style: { marginTop: '0' } }, 'Shuffled on'),
@@ -658,7 +670,7 @@
       isHidden ? null : group(item({ ic: 'link', label: 'Add from a Wallhaven link', cls: 'accent', chev: false, onclick: () => addLinkSheet(p) })),
       p.items.length ? h('div', { style: { marginTop: '28px' } }, photoGrid(p.items, { pl: p.id }))
         : h('div', { class: 'empty' }, h('h2', {}, isHidden ? 'Nothing hidden' : 'No wallpapers yet'),
-          h('p', {}, isHidden ? '“Never show this one”, on any device, puts a wallpaper here.' : 'Save one from Now, pick some in Browse, or add a Wallhaven link.'),
+          h('p', {}, isHidden ? 'Never show this one, on any device, puts a wallpaper here.' : 'Save one from Now, pick some in Browse, or add a Wallhaven link.'),
           isHidden ? null : h('a', { class: 'btn', href: '#/browse' }, 'Browse the toplist')));
   }
 
@@ -782,7 +794,7 @@
       groupLabel('Signed in'),
       group(all.map(([id, d]) => {
         const stat = S.status[id];
-        const sub = id === S.me ? 'This browser' : d.kind === 'web' ? `Added ${new Date(d.created).toLocaleDateString()}` : stat?.online ? 'Online' : stat?.seen ? `Offline since ${ago(stat.seen)}` : 'Hasn’t checked in yet';
+        const sub = id === S.me ? 'This browser' : d.kind === 'web' ? `Added ${new Date(d.created).toLocaleDateString()}` : stat?.online ? 'Online' : stat?.seen ? `Offline · seen ${ago(stat.seen)}` : 'Hasn’t checked in yet';
         return item({ ic: kindIcon(d.kind), label: d.name, sub, onclick: () => deviceSheet(id) });
       })),
       h('p', { class: 'lede pad', style: { marginTop: '28px', fontSize: '13.5px', color: 'var(--fg-3)' } }, 'Wallpapers from wallhaven.cc.'));
@@ -808,8 +820,8 @@
         } catch (x) { err.textContent = x.message; go.disabled = false; go.replaceChildren('Pair'); }
       } },
       h('ul', { class: 'how' },
-        h('li', {}, h('b', {}, 'TV: '), 'open Wallhaven Shuffle in the apps row and choose Pair.'),
-        h('li', {}, h('b', {}, 'PC: '), 'right-click the tray icon, then Remote > Pair this PC.'),
+        h('li', {}, h('b', {}, 'TV: '), 'open Wallhaven Shuffle, then Sync > Pair with your phone or PC.'),
+        h('li', {}, h('b', {}, 'PC: '), 'right-click the tray icon, then Remote > Pair with a code.'),
         h('li', {}, h('b', {}, 'Phone or another browser: '), 'open this page there.')),
       code, name, err,
       h('div', { class: 'foot' }, h('button', { class: 'btn', type: 'button', onclick: () => close() }, 'Cancel'), go)));

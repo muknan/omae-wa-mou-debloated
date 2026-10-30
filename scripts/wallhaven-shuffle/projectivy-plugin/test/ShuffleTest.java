@@ -70,7 +70,7 @@ public class ShuffleTest {
         bad.clean();
         check("clean() puts anything odd back to a valid value", bad.quality.equals("4k+") && bad.ratio.equals("16x9,16x10") && bad.range.equals("1y") && bad.cats.equals("110")
             && bad.fav == 50 && bad.maxw == 3840 && bad.every == 1 && bad.q.isEmpty() && bad.sources.equals(List.of("toplist", "fav", "p_ab12cd")), bad.sources);
-        check("labels", TvSettings.everyLabel(1).equals("Every minute") && TvSettings.everyLabel(120).equals("Every 2 hours") && TvSettings.everyLabel(1440).equals("Once a day")
+        check("labels", TvSettings.everyLabel(1).equals("1 minute") && TvSettings.everyLabel(120).equals("2 hours") && TvSettings.everyLabel(1440).equals("1 day")
             && TvSettings.favLabel(1000).equals("1,000+ favourites") && new TvSettings().catsLabel().equals("General, Anime"), TvSettings.everyLabel(45));
 
         System.out.println(fail == 0 ? "ALL PASSED" : fail + " FAILED");

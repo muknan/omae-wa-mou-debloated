@@ -32,7 +32,7 @@ namespace WallhavenShuffle
             new[] { "3M", "Past 3 months" }, new[] { "6M", "Past 6 months" }, new[] { "1y", "Past year" } };
         public static readonly int[] Favs = { 0, 10, 25, 50, 100, 250, 500, 1000 };
         public static readonly int[] Widths = { 0, 3840, 5120 };
-        public static readonly int[] Every = { 1, 2, 3, 5, 10, 15, 20, 30, 45, 60, 120, 180, 360, 720, 1440 };
+        public static readonly int[] Every = { 1, 2, 5, 10, 15, 30, 60, 120, 180, 360, 720, 1440 };
         public static readonly string[] Topics = { "nature", "landscape", "mountains", "forest", "ocean", "space", "city", "night", "sunset", "winter", "architecture", "minimalism", "abstract", "digital art", "cars" };
 
         public static string Label(string[][] table, string key) { var row = table.FirstOrDefault(r => r[0] == key); return row != null ? row[1] : key; }

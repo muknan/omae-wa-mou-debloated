@@ -109,7 +109,7 @@ export const RATIO = { '16x9,16x10': 'Widescreen', '16x9': '16:9 (TV)', '16x10':
 export const RANGE = { '1d': 'Past day', '3d': 'Past 3 days', '1w': 'Past week', '1M': 'Past month', '3M': 'Past 3 months', '6M': 'Past 6 months', '1y': 'Past year' };
 export const FAVS = [0, 10, 25, 50, 100, 250, 500, 1000];
 export const MAXW = { 0: 'Any', 3840: 'Up to 4K', 5120: 'Up to 5K' };
-export const EVERY = [1, 2, 3, 5, 10, 15, 20, 30, 45, 60, 120, 180, 360, 720, 1440];
+export const EVERY = [1, 2, 5, 10, 15, 30, 60, 120, 180, 360, 720, 1440];
 export const TOPICS = ['nature', 'landscape', 'mountains', 'forest', 'ocean', 'space', 'city', 'night', 'sunset', 'winter', 'architecture', 'minimalism', 'abstract', 'digital art', 'cars'];
 export const PRESETS = { quality: QUALITY, ratio: RATIO, range: RANGE, fav: FAVS, maxw: MAXW, every: EVERY, topics: TOPICS };
 

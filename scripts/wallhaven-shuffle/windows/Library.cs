@@ -758,12 +758,13 @@ namespace WallhavenShuffle
             }
             catch (SyncError ex)
             {
+                bool same = ex.Message == syncError;   // a lasting problem is logged once, not every minute
                 syncReachable = ex.Status != 0; syncError = ex.Message;
                 if (ex.Status == 401) Post(delegate { SignedOut("signed out on another device"); });
-                else Log("sync: " + ex.Message);
+                else if (!same) Log("sync: " + ex.Message);
                 wait = 60000;
             }
-            catch (Exception ex) { syncError = ex.Message; Log("sync: " + ex.Message); wait = 60000; }
+            catch (Exception ex) { if (ex.Message != syncError) Log("sync: " + ex.Message); syncError = ex.Message; wait = 60000; }
             finally
             {
                 Interlocked.Exchange(ref syncRunning, 0);

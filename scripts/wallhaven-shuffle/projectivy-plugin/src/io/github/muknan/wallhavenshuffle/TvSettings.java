@@ -19,7 +19,7 @@ final class TvSettings {
     static final Map<String, String> RANGE = new LinkedHashMap<>();
     static final int[] FAVS = {0, 10, 25, 50, 100, 250, 500, 1000};
     static final int[] MAXW = {0, 3840, 5120};
-    static final int[] EVERY = {1, 2, 3, 5, 10, 15, 20, 30, 45, 60, 120, 180, 360, 720, 1440};
+    static final int[] EVERY = {1, 2, 5, 10, 15, 30, 60, 120, 180, 360, 720, 1440};
     static final String[] TOPICS = {"nature", "landscape", "mountains", "forest", "ocean", "space", "city", "night", "sunset", "winter", "architecture", "minimalism", "abstract", "digital art", "cars"};
     static {
         quality("1080+", "Full HD and up", "1920x1080");
@@ -100,10 +100,11 @@ final class TvSettings {
 
     // ---- labels for the settings screen
 
+    // The same words as the PC and the remote ("Change every" … "15 minutes").
     static String everyLabel(int m) {
-        if (m < 60) return m == 1 ? "Every minute" : "Every " + m + " minutes";
-        if (m < 1440) return m == 60 ? "Every hour" : "Every " + (m / 60) + " hours";
-        return "Once a day";
+        if (m < 60) return m == 1 ? "1 minute" : m + " minutes";
+        if (m < 1440) return m == 60 ? "1 hour" : (m / 60) + " hours";
+        return "1 day";
     }
     static String favLabel(int n) { return n == 0 ? "Any" : String.format(Locale.US, "%,d+ favourites", n); }
     static String maxwLabel(int w) { return w == 0 ? "Any" : w == 3840 ? "Up to 4K" : "Up to 5K"; }

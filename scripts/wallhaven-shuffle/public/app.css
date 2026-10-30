@@ -337,3 +337,9 @@ dialog.sheet::backdrop { background: var(--scrim); animation: fade .25s; }
 .sheet .head h2:focus { outline: none; }
 .item .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (min-width: 960px) { .stage > div:first-child > .pad { padding-right: 0; } }
+.hint { margin: 10px 0 0; font-size: 13.5px; color: var(--fg-3); }
+/* the recently shown row keeps the page's margin when it snaps */
+.strip { scroll-padding-inline: max(var(--gutter), env(safe-area-inset-left, 0px)); }
+/* more than two devices: the name is a button that lists them */
+.switcher .picker { display: inline-flex; align-items: center; gap: 6px; color: var(--fg); min-width: 0; max-width: 100%; }
+.switcher .picker .icon { width: 18px; height: 18px; color: var(--fg-3); }

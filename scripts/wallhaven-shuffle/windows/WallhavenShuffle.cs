@@ -455,7 +455,7 @@ namespace WallhavenShuffle
             Chevron = "", More = "", Restore = "", Edit = "", View = "",
             Pin = "", PinFill = "", Add = "", Library = "", FolderOpen = "",
             NewFolder = "", Rename = "", Delete = "", Shuffle = "", Globe = "", Pictures = "",
-            Check = "", Phone = "", Sync = "", Send = "", Filter = "", Key = "", Clock = "";
+            Check = "", Phone = "", Sync = "", Send = "", Filter = "", Key = "", Clock = "", ChevronRight = "";
     }
 
     // ==================================================================================================== data
@@ -885,7 +885,7 @@ namespace WallhavenShuffle
             {
                 if (ToplistOn && walls.Count == 0) return listBusy || string.IsNullOrEmpty(lastError) ? "Loading the toplist…" : "Can't reach the service right now, retrying";
                 if (ToplistOn) return "No wallpapers match the toplist's filters";
-                return settings.Sources.SequenceEqual(new[] { "fav" }) ? "No favourites yet: ♡ saves the one on screen" : SourcesSummary + ": nothing in it yet";
+                return settings.Sources.SequenceEqual(new[] { "fav" }) ? "No Favourites yet: ♡ saves the one on screen" : SourcesSummary + ": nothing in it yet";
             }
             if (settings.Paused) return "Paused";
             if (busy) return "Changing…";
@@ -952,7 +952,7 @@ namespace WallhavenShuffle
             nextItem = menu.Add("Next wallpaper", Glyphs.Next, delegate { Next("menu"); });
             previousItem = menu.Add("Previous wallpaper", Glyphs.Previous, delegate { Previous(); });
             menu.AddSeparator();
-            favouriteItem = menu.Add("Save to favourites", Glyphs.Heart, delegate { Favourite(); });
+            favouriteItem = menu.Add("Save to Favourites", Glyphs.Heart, delegate { Favourite(); });
             addToItem = menu.AddSubmenu("Add to playlist", Glyphs.Add, sub => FillAddToMenu(sub, null));
             menu.AddSubmenu("Shuffle from", Glyphs.Shuffle, sub => FillSourceMenu(sub, null));
             menu.AddSeparator();
@@ -966,7 +966,7 @@ namespace WallhavenShuffle
                 keepItem.Enabled = current != null;
                 pauseItem.Text = settings.Paused ? "Resume" : "Pause";
                 pauseItem.Tag = settings.Paused ? Glyphs.Play : Glyphs.Pause;
-                favouriteItem.Text = IsFavourite ? "Remove from favourites" : "Save to favourites";
+                favouriteItem.Text = IsFavourite ? "Remove from Favourites" : "Save to Favourites";
                 favouriteItem.Tag = IsFavourite ? Glyphs.HeartFill : Glyphs.Heart;
                 favouriteItem.Enabled = addToItem.Enabled = current != null;
                 previousItem.Enabled = CanGoBack;
@@ -1000,7 +1000,8 @@ namespace WallhavenShuffle
             {
                 var src = all[i];
                 if (i == 2) sub.AddSeparator();   // after the toplist and favourites
-                sub.AddToggle(src.Name, IsOn(src.Key), on => ToggleSource(src.Key, on));
+                int count = src.Key.StartsWith("folder:") ? FolderPool(src.Folder).Count : src.Count;
+                sub.AddToggle(src.Name, IsOn(src.Key), on => ToggleSource(src.Key, on), count >= 0 ? count.ToString("N0") : null);
             }
             sub.AddSeparator();
             sub.Add("New playlist…", Glyphs.Add, delegate { NewPlaylist(false, owner); });
@@ -1012,18 +1013,18 @@ namespace WallhavenShuffle
         {
             var f = settings.Filters;
             Action<string, string[][], string, Action<Filters, string>> choices = (title, table, value, set) =>
-                sub.AddSubmenu(title + ": " + Filters.Label(table, value), null, m =>
+                sub.AddSubmenu(title, null, m =>
                 {
                     foreach (var row in table) { var r = row; m.Add(r[1], null, delegate { SetFilters(x => set(x, r[0])); }).Checked = r[0] == value; }
-                });
+                }, Filters.Label(table, value));
             choices("Quality", Filters.Qualities, f.Quality, (x, v) => x.Quality = v);
             choices("Shape", Filters.Ratios, f.Ratio, (x, v) => x.Ratio = v);
             choices("Period", Filters.Ranges, f.Range, (x, v) => x.Range = v);
-            sub.AddSubmenu("Popularity: " + Filters.FavLabel(f.Fav), null, m =>
+            sub.AddSubmenu("Popularity", null, m =>
             {
                 foreach (int n in Filters.Favs) { int k = n; m.Add(Filters.FavLabel(k), null, delegate { SetFilters(x => x.Fav = k); }).Checked = k == f.Fav; }
-            });
-            sub.AddSubmenu("Categories: " + f.CatsLabel, null, m =>
+            }, Filters.FavLabel(f.Fav));
+            sub.AddSubmenu("Categories", null, m =>
             {
                 var names = new[] { "General", "Anime", "People" };
                 for (int i = 0; i < 3; i++)
@@ -1036,8 +1037,8 @@ namespace WallhavenShuffle
                         SetFilters(x => x.Cats = new string(c));
                     });
                 }
-            });
-            sub.AddSubmenu("Topic: " + (f.Topic.Length > 0 ? f.Topic : "Any"), null, m =>
+            }, f.CatsLabel);
+            sub.AddSubmenu("Topic", null, m =>
             {
                 m.Add("Any", null, delegate { SetFilters(x => x.Topic = ""); }).Checked = f.Topic.Length == 0;
                 m.AddSeparator();
@@ -1049,11 +1050,11 @@ namespace WallhavenShuffle
                         v => v.Trim().Length == 0 || Filters.NormTopic(v).Length > 0 ? null : "Letters, digits, spaces and hyphens only");
                     if (q != null) SetFilters(x => x.Topic = q);
                 });
-            });
-            sub.AddSubmenu("Largest size: " + Filters.WidthLabel(f.MaxWidth), null, m =>
+            }, f.Topic.Length > 0 ? f.Topic : "Any");
+            sub.AddSubmenu("Largest size", null, m =>
             {
                 foreach (int w in Filters.Widths) { int k = w; m.Add(Filters.WidthLabel(k), null, delegate { SetFilters(x => x.MaxWidth = k); }).Checked = k == f.MaxWidth; }
-            });
+            }, Filters.WidthLabel(f.MaxWidth));
             if (!ToplistOn) { sub.AddSeparator(); sub.Add("Turn the toplist on", Glyphs.Globe, delegate { ToggleSource("toplist", true); }); }
         }
 
@@ -1855,19 +1856,19 @@ namespace WallhavenShuffle
         readonly Preview preview = new Preview();
         readonly TextLine status = new TextLine();
         readonly RoundButton pinBtn = new RoundButton(Glyphs.Pin, 40, "Keep this wallpaper  (Ctrl+Alt+Shift+K)");
-        readonly RoundButton favBtn = new RoundButton(Glyphs.Heart, 40, "Save to favourites  (Ctrl+Alt+Shift+F)");
+        readonly RoundButton favBtn = new RoundButton(Glyphs.Heart, 40, "Save to Favourites  (Ctrl+Alt+Shift+F)");
         readonly RoundButton prevBtn = new RoundButton(Glyphs.Previous, 44, "Previous  (Ctrl+Alt+Shift+←)");
         readonly RoundButton playBtn = new RoundButton(Glyphs.Pause, 56, "Pause  (Ctrl+Alt+Shift+P)") { Primary = true };
         readonly RoundButton nextBtn = new RoundButton(Glyphs.Next, 44, "Next wallpaper  (Ctrl+Alt+Shift+→)");
+        readonly RoundButton addBtn = new RoundButton(Glyphs.Add, 40, "Add to playlist");
         readonly RoundButton moreBtn = new RoundButton(Glyphs.More, 40, "More");
-        readonly MenuButton source = new MenuButton(), toplist = new MenuButton();
-        readonly DropDown every = new DropDown();
+        readonly MenuButton source = new MenuButton(), toplist = new MenuButton(), every = new MenuButton();
         readonly ToolTip tips = new ToolTip();
         readonly FluentMenu moreMenu = new FluentMenu();
+        bool addMenuOpen;
         readonly Size size;
-        ToolStripMenuItem hideItem, openItem, unhideItem, showItem, addToItem, showOnItem;
+        ToolStripMenuItem hideItem, openItem, unhideItem, showItem, showOnItem;
         string shownFile;
-        bool loading;
 
         public MainWindow(TrayApp owner)
         {
@@ -1887,10 +1888,10 @@ namespace WallhavenShuffle
             preview.Bounds = new Rectangle(Gutter, y, inner, inner * 9 / 16); y = preview.Bottom + 10;
             status.Bounds = new Rectangle(Gutter, y, inner, 22); y = status.Bottom + 10;
 
-            // Keep and favourite (about this wallpaper) | back, play/pause, next | more. The gaps around the middle group
-            // are wider, so the three groups read as such.
-            var transport = new RoundButton[] { pinBtn, favBtn, prevBtn, playBtn, nextBtn, moreBtn };
-            int[] gaps = { 6, 22, 14, 14, 22 };
+            // Keep and Favourite | back, play/pause, next | Add to playlist and more: the same widths either side, so
+            // play/pause sits exactly in the middle. The gaps around the middle group are wider, so the groups read as such.
+            var transport = new RoundButton[] { pinBtn, favBtn, prevBtn, playBtn, nextBtn, addBtn, moreBtn };
+            int[] gaps = { 6, 22, 14, 14, 22, 6 };
             int total = transport.Sum(b => b.Width) + gaps.Sum(), x = (W - total) / 2;
             for (int i = 0; i < transport.Length; i++) { var b = transport[i]; b.Location = new Point(x, y + (56 - b.Height) / 2); x += b.Width + (i < gaps.Length ? gaps[i] : 0); }
             y += 56 + 20;
@@ -1898,7 +1899,7 @@ namespace WallhavenShuffle
             var card = new Card { Bounds = new Rectangle(Gutter, y, inner, 0) };
             card.AddRow("Shuffle from", source);
             card.AddRow("Toplist", toplist);
-            card.AddRow("Change wallpaper every", every);
+            card.AddRow("Change every", every);
             y = card.Bottom + Gutter;
 
             Controls.AddRange(new Control[] { preview, status, card });
@@ -1907,8 +1908,8 @@ namespace WallhavenShuffle
             size = new Size((int)Math.Round(W * Theme.Scale), (int)Math.Round(y * Theme.Scale));
             Size = size;
 
-            // The "⋯" menu: the less common actions. About this wallpaper first, then playlists and the rest.
-            addToItem = moreMenu.AddSubmenu("Add to playlist", Glyphs.Add, sub => app.FillAddToMenu(sub, this));
+            // The "⋯" menu: the less common actions (Add to playlist has its own button). About this wallpaper first,
+            // then playlists and the rest.
             showOnItem = moreMenu.AddSubmenu("Show on", Glyphs.Send, sub => app.FillShowOnMenu(sub));
             showItem = moreMenu.Add("Show in folder", Glyphs.FolderOpen, delegate { app.ShowInFolder(); });
             openItem = moreMenu.Add("Open on Wallhaven", Glyphs.Open, delegate { app.OpenOnWallhaven(); });
@@ -1922,7 +1923,7 @@ namespace WallhavenShuffle
             moreMenu.Opening += delegate
             {
                 var w = app.Current;
-                hideItem.Enabled = addToItem.Enabled = w != null;
+                hideItem.Enabled = w != null;
                 showOnItem.Visible = app.Paired && app.OtherDevices().Count > 0;
                 showOnItem.Enabled = w != null && w.WallhavenId != null;
                 openItem.Enabled = w != null && w.Page != null;
@@ -1933,12 +1934,17 @@ namespace WallhavenShuffle
                 moreMenu.RefreshGlyphs();
             };
 
-            foreach (var m in Filters.Every) every.Items.Add(new KeyValuePair<string, object>(Filters.EveryLabel(m), m * 60));
             source.Fill += m => app.FillSourceMenu(m, this);
             toplist.Fill += m => app.FillToplistMenu(m, this);
+            every.Fill += m =>
+            {
+                foreach (int minutes in Filters.Every)
+                {
+                    int sec = minutes * 60;
+                    m.Add(Filters.EveryLabel(minutes), null, delegate { s.IntervalSeconds = sec; app.SettingsChanged(false, false); LoadValues(); }).Checked = sec == s.IntervalSeconds;
+                }
+            };
             LoadValues();
-
-            every.Changed += delegate { if (loading) return; s.IntervalSeconds = (int)every.Value; app.SettingsChanged(false, false); };
 
             pinBtn.Click += delegate { app.ToggleKeep(); };
             favBtn.Click += delegate { app.Favourite(); };
@@ -1946,6 +1952,15 @@ namespace WallhavenShuffle
             playBtn.Click += delegate { app.TogglePause(); };
             nextBtn.Click += delegate { app.Next("window"); };
             moreBtn.Click += delegate { moreMenu.Show(moreBtn, new Point(0, moreBtn.Height + (int)(4 * Theme.Scale))); };
+            addBtn.Click += delegate
+            {
+                var menu = new FluentMenu();
+                app.FillAddToMenu(menu, this);
+                menu.RefreshGlyphs();
+                menu.Closed += delegate { addMenuOpen = false; BeginInvoke(new Action(menu.Dispose)); };
+                addMenuOpen = true;
+                menu.Show(addBtn, new Point(0, addBtn.Height + (int)(4 * Theme.Scale)));
+            };
             preview.Click += delegate { var w = app.Current; if (w != null && w.Page != null) app.OpenOnWallhaven(); else app.ShowInFolder(); };
             foreach (var b in transport) tips.SetToolTip(b, b.Tip);
             tips.SetToolTip(status, "Each wallpaper is shown once per round, in random order: this is where you are in it");
@@ -1979,17 +1994,17 @@ namespace WallhavenShuffle
                 });
             }
             sub.AddSeparator();
-            sub.Add("Open playlists folder", Glyphs.Folder, delegate { app.OpenPlaylists(); });
-            sub.Add("Open favourites folder", Glyphs.Folder, delegate { app.OpenFavourites(); });
+            sub.Add("Open the playlists folder", Glyphs.Folder, delegate { app.OpenPlaylists(); });
+            sub.Add("Open the Favourites folder", Glyphs.Folder, delegate { app.OpenFavourites(); });
         }
 
         // "Settings ▸": how pictures fit, when to wait, the lock screen, starting with Windows, settings.ini.
         void FillSettingsMenu(FluentMenu sub)
         {
-            sub.AddSubmenu("Picture fit: " + s.Position, null, m =>
+            sub.AddSubmenu("Picture fit", null, m =>
             {
                 foreach (var pos in Settings.Positions) { var p = pos; m.Add(p, null, delegate { s.Position = p; app.SettingsChanged(false, true); }).Checked = p == s.Position; }
-            });
+            }, s.Position);
             sub.AddSeparator();
             sub.AddToggle("Pause during games and full screen", s.PauseFullScreen, on => { s.PauseFullScreen = on; app.SettingsChanged(false, false); });
             sub.AddToggle("Pause on battery", s.PauseOnBattery, on => { s.PauseOnBattery = on; app.SettingsChanged(false, false); });
@@ -2002,13 +2017,9 @@ namespace WallhavenShuffle
         // Shows the current settings (also after settings.ini was edited, or a change from another device).
         public void LoadValues()
         {
-            loading = true;
             source.Text = app.SourcesSummary;
             toplist.Text = s.Filters.Summary;
-            if (!every.Items.Any(i => (int)i.Value == s.IntervalSeconds))
-                every.Items.Add(new KeyValuePair<string, object>(IntervalText(s.IntervalSeconds), s.IntervalSeconds));
-            every.SelectValue(s.IntervalSeconds);
-            loading = false;
+            every.Text = IntervalText(s.IntervalSeconds);
         }
 
         protected override void WndProc(ref Message m)
@@ -2053,7 +2064,7 @@ namespace WallhavenShuffle
             base.OnDeactivate(e);
             BeginInvoke(new Action(delegate
             {
-                if (IsDisposed || !Visible || ActiveForm == this || moreMenu.Visible || every.MenuOpen || source.MenuOpen || toplist.MenuOpen || TrayApp.ModalOpen > 0) return;
+                if (IsDisposed || !Visible || ActiveForm == this || moreMenu.Visible || every.MenuOpen || source.MenuOpen || toplist.MenuOpen || addMenuOpen || TrayApp.ModalOpen > 0) return;
                 Hide();
             }));
         }
@@ -2099,8 +2110,8 @@ namespace WallhavenShuffle
             tips.SetToolTip(playBtn, s.Paused ? "Resume  (Ctrl+Alt+Shift+P)" : "Pause  (Ctrl+Alt+Shift+P)");
             favBtn.Glyph = app.IsFavourite ? Glyphs.HeartFill : Glyphs.Heart;
             favBtn.Active = app.IsFavourite;
-            tips.SetToolTip(favBtn, app.IsFavourite ? "Remove from favourites  (Ctrl+Alt+Shift+F)" : "Save to favourites  (Ctrl+Alt+Shift+F)");
-            favBtn.Enabled = w != null;
+            tips.SetToolTip(favBtn, app.IsFavourite ? "Remove from Favourites  (Ctrl+Alt+Shift+F)" : "Save to Favourites  (Ctrl+Alt+Shift+F)");
+            favBtn.Enabled = addBtn.Enabled = w != null;
             Tick();
             string file = app.CurrentFile;
             if ((picture || Visible) && (force || file != shownFile))
@@ -2360,83 +2371,6 @@ namespace WallhavenShuffle
         }
     }
 
-    // A compact dropdown: the choice and a chevron; opens a menu of the options.
-    class DropDown : FluentControl
-    {
-        public readonly List<KeyValuePair<string, object>> Items = new List<KeyValuePair<string, object>>();
-        public readonly List<KeyValuePair<string, Action>> Actions = new List<KeyValuePair<string, Action>>();   // below the choices ("New playlist…")
-        public event EventHandler Changed, BeforeOpen;
-        public bool StepWithKeys = true;     // Up / Down change the choice (off where each change does something big)
-        int index = -1;
-        public bool MenuOpen;
-        public object Value { get { return index >= 0 ? Items[index].Value : null; } }
-
-        public void SelectValue(object value)
-        {
-            index = Items.FindIndex(i => Equals(i.Value, value));
-            if (index < 0 && Items.Count > 0) index = 0;
-            Invalidate();
-        }
-
-        protected override void OnClick(EventArgs e) { Focus(); OpenMenu(); base.OnClick(e); }
-
-        // Up / Down step through the choices without opening the menu, as in Windows.
-        protected override bool IsInputKey(Keys key) { return (StepWithKeys && (key == Keys.Up || key == Keys.Down)) || base.IsInputKey(key); }
-        protected override void OnKeyDown(KeyEventArgs e)
-        {
-            int to = !StepWithKeys ? -1 : e.KeyCode == Keys.Up ? index - 1 : e.KeyCode == Keys.Down ? index + 1 : -1;
-            if (to >= 0 && to < Items.Count && to != index)
-            {
-                index = to; Invalidate();
-                if (Changed != null) Changed(this, EventArgs.Empty);
-                e.Handled = true;
-            }
-            base.OnKeyDown(e);
-        }
-
-        void OpenMenu()
-        {
-            if (BeforeOpen != null) BeforeOpen(this, EventArgs.Empty);
-            var menu = new FluentMenu { ShowImageMargin = false, ShowCheckMargin = true };
-            for (int i = 0; i < Items.Count; i++)
-            {
-                int n = i;
-                var item = new ToolStripMenuItem(Items[i].Key) { Checked = i == index, Padding = FluentMenu.Px(8, 9, 28, 9) };
-                item.Click += delegate { if (index == n) return; index = n; Invalidate(); if (Changed != null) Changed(this, EventArgs.Empty); };
-                menu.Items.Add(item);
-            }
-            if (Actions.Count > 0) menu.AddSeparator();
-            foreach (var a in Actions)
-            {
-                var act = a.Value;
-                var item = new ToolStripMenuItem(a.Key) { Padding = FluentMenu.Px(8, 9, 28, 9) };
-                item.Click += delegate { BeginInvoke(act); };   // after the menu has closed
-                menu.Items.Add(item);
-            }
-            menu.Closed += delegate { MenuOpen = false; BeginInvoke(new Action(menu.Dispose)); };
-            menu.MinimumSize = new Size(Width, 0);
-            MenuOpen = true;
-            menu.Show(this, new Point(0, Height + (int)(4 * K)));
-        }
-
-        protected override void Render(Graphics g)
-        {
-            var r = new RectangleF(0.5f, 0.5f, Width - 1, Height - 1);
-            using (var path = Theme.Rounded(r, 4 * K))
-            using (var fill = new SolidBrush(down ? Theme.FieldPressed : hover ? Theme.FieldHover : Theme.Field))
-            using (var pen = new Pen(Theme.FieldBorder))
-            {
-                g.FillPath(fill, path);
-                g.DrawPath(pen, path);
-            }
-            string text = index >= 0 ? Items[index].Key : "";
-            float chevron = (float)Math.Round(36 * K);
-            Theme.DrawText(g, text, Font, new RectangleF(12 * K, 0, Width - 12 * K - chevron, Height), Theme.Text, StringAlignment.Near);
-            Theme.DrawGlyph(g, Glyphs.Chevron, Theme.Px(g, 8f), new RectangleF(Width - chevron, 0, chevron - 6 * K, Height), Theme.TextSecondary);
-            FocusRing(g, r, 4 * K);
-        }
-    }
-
     // Looks like a dropdown (its value and a chevron) but opens a menu its owner fills: "Shuffle from" (switches, any
     // mix) and "Toplist" (a submenu per filter).
     class MenuButton : FluentControl
@@ -2458,8 +2392,9 @@ namespace WallhavenShuffle
             var menu = new FluentMenu();
             if (Fill != null) Fill(menu);
             menu.RefreshGlyphs();
+            menu.FitValues();
             menu.Closed += delegate { MenuOpen = false; Invalidate(); BeginInvoke(new Action(menu.Dispose)); };
-            menu.MinimumSize = new Size(Width, 0);
+            menu.MinimumSize = new Size(Math.Max(Width, menu.MinimumSize.Width), 0);
             MenuOpen = true;
             menu.Show(this, new Point(0, Height + (int)(4 * K)));
         }
@@ -2775,9 +2710,10 @@ namespace WallhavenShuffle
 
         // A switch: ticked when on. Clicking it flips it and leaves the menu open (several in a row, like a list of
         // checkboxes); the change runs straight away.
-        public ToolStripMenuItem AddToggle(string text, bool on, Action<bool> changed)
+        public ToolStripMenuItem AddToggle(string text, bool on, Action<bool> changed, string value = null)
         {
-            var i = new ToolStripMenuItem(text) { Padding = Px(8, 9, 28, 9), Tag = on ? Glyphs.Check : null };
+            var i = new ToolStripMenuItem(text) { Padding = Px(8, 9, 28, 9), Tag = on ? Glyphs.Check : null, Name = "toggle" };
+            ShowValue(i, value);
             i.Click += delegate
             {
                 keepOpen = true;
@@ -2801,10 +2737,34 @@ namespace WallhavenShuffle
         }
 
         // An item with a submenu, filled afresh each time it opens (playlists come and go).
-        public ToolStripMenuItem AddSubmenu(string text, string glyph, Action<FluentMenu> fill)
+        // A row's current value, on its right in the secondary colour ("Quality      4K and up  ›").
+        // The value is kept in AccessibleDescription (screen readers read it too) and drawn by the renderer; the menu
+        // makes itself wide enough for label, gap and value as it opens (FitValues).
+        static void ShowValue(ToolStripMenuItem i, string value)
+        {
+            if (string.IsNullOrEmpty(value)) return;
+            i.AccessibleDescription = value;
+            // the shortcut column makes Windows reserve the room (the renderer draws the value itself)
+            i.ShortcutKeyDisplayString = value + " ";
+            i.ShowShortcutKeys = true;
+        }
+
+        // Windows lays the rows out wide enough for a value (it reserves the shortcut column) but leaves the menu
+        // itself narrower; this makes the menu as wide as its rows.
+        public void FitValues()
+        {
+            PerformLayout();
+            int widest = 0;
+            foreach (ToolStripItem i in Items) widest = Math.Max(widest, i.Width);
+            int need = widest + Padding.Horizontal;
+            if (need > Width) MinimumSize = new Size(Math.Max(need, MinimumSize.Width), 0);
+        }
+
+        public ToolStripMenuItem AddSubmenu(string text, string glyph, Action<FluentMenu> fill, string value = null)
         {
             var sub = new FluentMenu();
-            var item = new ToolStripMenuItem(text) { Padding = Px(8, 9, 44, 9), Tag = glyph };   // room for the arrow
+            var item = new ToolStripMenuItem(text) { Padding = Px(8, 9, 28, 9), Tag = glyph };
+            ShowValue(item, value);
             item.DropDown = sub;
             sub.Items.Add(new ToolStripMenuItem("…"));   // a submenu shows its arrow (and opens) only with an item in it
             item.DropDownOpening += delegate
@@ -2813,6 +2773,7 @@ namespace WallhavenShuffle
                 sub.Items.Clear();
                 fill(sub);
                 sub.RefreshGlyphs();
+                sub.FitValues();
             };
             Items.Add(item);
             return item;
@@ -2826,6 +2787,11 @@ namespace WallhavenShuffle
 
         public void RefreshGlyphs()
         {
+            // An icon column only when there are icons (or switches, whose tick goes there): a list of choices starts
+            // its text at the normal inset, with the selection pill just before it.
+            bool icons = Items.Cast<ToolStripItem>().Any(i => i.Tag is string || i.Name == "toggle");
+            ShowImageMargin = icons;
+            ShowCheckMargin = !icons;
             int px = (int)Math.Round(16 * Theme.Scale);
             ImageScalingSize = new Size(px, px);
             foreach (ToolStripItem i in Items)
@@ -2837,6 +2803,27 @@ namespace WallhavenShuffle
         }
 
         protected override void OnHandleCreated(EventArgs e) { base.OnHandleCreated(e); Native.RoundCorners(Handle); }
+
+        // Rows as wide as the menu: Windows sizes them to the widest text, so a menu made wider (to match its button,
+        // or for values) would leave a dead strip on the right, and the highlight would stop short of the edge.
+        bool stretching;
+        protected override void OnLayout(LayoutEventArgs e)
+        {
+            base.OnLayout(e);
+            if (stretching) return;
+            stretching = true;
+            try
+            {
+                // rows start at the left edge, but Windows reports the inner width without the check/icon column
+                // (it counts that as padding), so they would stop that much short: stretch them to the real edge
+                foreach (ToolStripItem i in Items)
+                {
+                    int w = ClientSize.Width - Padding.Right - i.Bounds.X;
+                    if (w > 0 && i.Width != w) i.Width = w;
+                }
+            }
+            finally { stretching = false; }
+        }
         protected override void OnOpening(System.ComponentModel.CancelEventArgs e) { base.OnOpening(e); if (ShowImageMargin && Items.Count > 0 && Items[0].Image == null) RefreshGlyphs(); }
     }
 
@@ -2866,6 +2853,14 @@ namespace WallhavenShuffle
         protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
         {
             e.Graphics.TextRenderingHint = TextRenderingHint.ClearTypeGridFit; // the menu is opaque: ClearType is fine
+            var mi = e.Item as ToolStripMenuItem;
+            if (mi != null && e.Text != mi.Text) return;   // no shortcut texts in these menus
+            if (mi != null && !string.IsNullOrEmpty(mi.AccessibleDescription))
+            {
+                // the row's value: right-aligned (before the arrow of a submenu), a step quieter than the label
+                float right = e.Item.Width - (float)Math.Round((mi.HasDropDownItems ? 36 : 16) * Theme.Scale);
+                Theme.DrawText(e.Graphics, mi.AccessibleDescription, e.TextFont, new RectangleF(0, 0, right, e.Item.Height), e.Item.Enabled ? Theme.TextSecondary : Theme.TextDisabled, StringAlignment.Far);
+            }
             var color = e.Item.Enabled ? Theme.Text : Theme.TextDisabled;
             float x = TextLeft(e.Item);
             Theme.DrawText(e.Graphics, e.Text, e.TextFont, new RectangleF(x, 0, e.Item.Width - x, e.Item.Height), color, StringAlignment.Near);
@@ -2908,7 +2903,14 @@ namespace WallhavenShuffle
             if (img != null) g.DrawImage(img, (int)Math.Round(IconLeft * k), (e.Item.Height - img.Height) / 2, img.Width, img.Height);
         }
 
-        protected override void OnRenderArrow(ToolStripArrowRenderEventArgs e) { e.ArrowColor = Theme.Text; base.OnRenderArrow(e); }
+        // A submenu's arrow: a small chevron at the row's far edge, like Windows 11 menus (values sit just before it).
+        protected override void OnRenderArrow(ToolStripArrowRenderEventArgs e)
+        {
+            if (e.Item == null) { base.OnRenderArrow(e); return; }
+            float k = Theme.Scale;
+            var r = new RectangleF(e.Item.Width - 30 * k, 0, 20 * k, e.Item.Height);
+            Theme.DrawGlyph(e.Graphics, Glyphs.ChevronRight, Theme.Px(e.Graphics, 7f), r, e.Item.Enabled ? Theme.TextSecondary : Theme.TextDisabled);
+        }
 
         class FluentColors : ProfessionalColorTable
         {

@@ -120,14 +120,16 @@ public final class SettingsActivity extends Activity implements Sync.Listener {
         status.setPadding(0, dp(4), 0, dp(18));
         box.addView(status);
 
+        // the same order as the PC and the remote: Keep, Previous, Pause, Next; then Favourites, playlists, Never show
         LinearLayout row1 = new LinearLayout(this), row2 = new LinearLayout(this);
-        TextView next = pill("Next", v -> { ShuffleService.skipWait(this); toast("Next one coming up"); });
         keepBtn = pill("Keep", v -> toggleKeep());
+        TextView prev = pill("Previous", v -> { ShuffleService.previous(this); toast("Going back"); });
         pauseBtn = pill("Pause", v -> { TvSettings s = Sync.settings(this); s.paused = !s.paused; Sync.saveSettings(this, s, true); refresh(); });
-        row1.addView(next); row1.addView(keepBtn); row1.addView(pauseBtn);
+        TextView next = pill("Next", v -> { ShuffleService.skipWait(this); toast("Next one coming up"); });
+        row1.addView(keepBtn); row1.addView(prev); row1.addView(pauseBtn); row1.addView(next);
         favBtn = pill("Save to Favourites", v -> toggleFav());
         TextView add = pill("Add to playlist", v -> addToPlaylist());
-        TextView hide = pill("Hide", v -> hideCurrent());
+        TextView hide = pill("Never show", v -> hideCurrent());
         row2.addView(favBtn); row2.addView(add); row2.addView(hide);
         row2.setPadding(0, dp(10), 0, 0);
         box.addView(row1);
@@ -142,7 +144,7 @@ public final class SettingsActivity extends Activity implements Sync.Listener {
         if (s.keep.isEmpty() && cur == null) { toast("Nothing on screen yet"); return; }
         s.keep = s.keep.isEmpty() ? cur.id : "";
         Sync.saveSettings(this, s, true);
-        toast(s.keep.isEmpty() ? "Shuffling again" : "Keeping this one until you take it off");
+        toast(s.keep.isEmpty() ? "Stopped keeping it" : "Keeping this wallpaper");
         refresh();
     }
 
@@ -197,7 +199,7 @@ public final class SettingsActivity extends Activity implements Sync.Listener {
         space(box, 34);
         LinearLayout g1 = group(box, null);
         row(g1, "Shuffle from", () -> sourcesLabel(), v -> pickSources());
-        row(g1, "Change", () -> TvSettings.everyLabel(Sync.settings(this).every), v -> pickEvery());
+        row(g1, "Change every", () -> TvSettings.everyLabel(Sync.settings(this).every), v -> pickEvery());
 
         LinearLayout g2 = group(box, "Toplist");
         row(g2, "Quality", () -> TvSettings.QUALITY.get(Sync.settings(this).quality), v -> pickMap("Quality", TvSettings.QUALITY, Sync.settings(this).quality, (s, k) -> s.quality = k));
@@ -265,7 +267,7 @@ public final class SettingsActivity extends Activity implements Sync.Listener {
 
     private void pickEvery() {
         long base = ListStore.prefs(this).getLong("base_ms", 0);
-        pickInts("Change", TvSettings.EVERY, Sync.settings(this).every, TvSettings::everyLabel, (s, v) -> s.every = v);
+        pickInts("Change every", TvSettings.EVERY, Sync.settings(this).every, TvSettings::everyLabel, (s, v) -> s.every = v);
         if (base >= 90_000) toast("Projectivy asks about every " + Math.round(base / 60000.0) + " min, so the TV can’t change faster than that");
     }
     private void pickFav() { pickInts("Popularity", TvSettings.FAVS, Sync.settings(this).fav, TvSettings::favLabel, (s, v) -> s.fav = v); }
@@ -390,8 +392,8 @@ public final class SettingsActivity extends Activity implements Sync.Listener {
         TvSettings s = Sync.settings(this);
         Shuffle.Item cur = ShuffleService.current(this);
         keepBtn.setText(s.keep.isEmpty() ? "Keep" : "Stop keeping");
-        keepBtn.setTextColor(s.keep.isEmpty() ? FG : ACCENT);
         pauseBtn.setText(s.paused ? "Resume" : "Pause");
+        keepBtn.setTextColor(s.keep.isEmpty() ? FG : ACCENT);
         boolean fav = cur != null && Sync.contains(this, "fav", cur.id);
         favBtn.setText(fav ? "In Favourites" : "Save to Favourites");
         favBtn.setTextColor(fav ? HEART : FG);
