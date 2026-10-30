@@ -167,7 +167,13 @@ public final class ShuffleService extends Service {
 
     /** The current wallpaper, as the remote shows it ({id, ext, res, fav}), or null. */
     static Shuffle.Item current(Context c) {
-        try { return Sync.item(new JSONObject(ListStore.prefs(c).getString("current_json", ""))); } catch (Exception e) { return null; }
+        SharedPreferences p = ListStore.prefs(c);
+        try { return Sync.item(new JSONObject(p.getString("current_json", ""))); } catch (Exception ignored) { }
+        // shown by 1.7, which kept only its id: its details from the saved list
+        String id = p.getString("current", "");
+        if (id.isEmpty()) return null;
+        for (Shuffle.Item w : ListStore.pool(c)) if (w.id.equals(id)) return w;
+        return null;
     }
 
     /** What the remote shows for this TV. */

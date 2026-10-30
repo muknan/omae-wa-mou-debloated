@@ -62,18 +62,26 @@ public final class SettingsActivity extends Activity implements Sync.Listener {
         if (saved == null) applyExtras(getIntent());
         getWindow().getDecorView().setBackgroundColor(BG);
 
+        // the title over both columns, so the picture and the first rows start on the same line
+        LinearLayout page = new LinearLayout(this);
+        page.setOrientation(LinearLayout.VERTICAL);
+        page.setPadding(dp(56), dp(32), dp(56), 0);
+        title = text("Wallhaven Shuffle", 15, FG3, false);
+        page.addView(title);
+        space(page, 14);
         LinearLayout columns = new LinearLayout(this);
         columns.setOrientation(LinearLayout.HORIZONTAL);
-        columns.setPadding(dp(56), dp(36), dp(56), dp(40));
+        page.addView(columns, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
+        // the picture and its buttons stay put; only the list of settings scrolls
         columns.addView(leftColumn(), new LinearLayout.LayoutParams(dp(500), ViewGroup.LayoutParams.WRAP_CONTENT));
         View gap = new View(this);
         columns.addView(gap, new LinearLayout.LayoutParams(dp(44), 1));
-        columns.addView(rightColumn(), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(true);
-        scroll.addView(columns);
-        setContentView(scroll);
+        ScrollView list = new ScrollView(this);
+        list.setVerticalScrollBarEnabled(false);
+        list.setClipToPadding(false);
+        list.addView(rightColumn());
+        columns.addView(list, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
+        setContentView(page);
         refresh();
     }
 
@@ -90,9 +98,6 @@ public final class SettingsActivity extends Activity implements Sync.Listener {
     private View leftColumn() {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
-        title = text("Wallhaven Shuffle", 15, FG3, false);
-        box.addView(title);
-        space(box, 14);
 
         FrameLayout frame = new FrameLayout(this);
         frame.setBackground(round(RAISED, 14));
@@ -196,7 +201,6 @@ public final class SettingsActivity extends Activity implements Sync.Listener {
     private View rightColumn() {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
-        space(box, 34);
         LinearLayout g1 = group(box, null);
         row(g1, "Shuffle from", () -> sourcesLabel(), v -> pickSources());
         row(g1, "Change every", () -> TvSettings.everyLabel(Sync.settings(this).every), v -> pickEvery());
@@ -220,8 +224,9 @@ public final class SettingsActivity extends Activity implements Sync.Listener {
         });
 
         LinearLayout g4 = group(box, "Service");
-        row(g4, "Address", () -> ListStore.server(this).replaceFirst("^https?://", ""), v -> editServer());
+        rowBelow(g4, "Address", () -> ListStore.server(this).replaceFirst("^https?://", ""), v -> editServer());
         row(g4, "Get a fresh list now", () -> listLabel(), v -> { toast("Getting the list…"); ListStore.refreshNow(this, r -> ui.post(() -> { toast(r); refresh(); })); });
+        space(box, 40);   // the last row clear of the screen edge when the list is scrolled to the end
         return box;
     }
 
@@ -241,7 +246,10 @@ public final class SettingsActivity extends Activity implements Sync.Listener {
         TvSettings s = Sync.settings(this);
         for (Shuffle.Item w : ListStore.pool(this)) if (s.maxw == 0 || w.width <= s.maxw) n++;
         long t = ListStore.prefs(this).getLong("list_time", 0);
-        return n == 0 ? "" : String.format(Locale.US, "%,d", n) + (t > 0 ? " · " + android.text.format.DateFormat.format("d MMM, HH:mm", t) : "");
+        if (n == 0) return "";
+        // when it came: the time if today, otherwise the day
+        boolean today = android.text.format.DateUtils.isToday(t);
+        return String.format(Locale.US, "%,d", n) + (t > 0 ? " · " + android.text.format.DateFormat.format(today ? "HH:mm" : "d MMM", t) : "");
     }
 
     interface Apply<T> { void apply(TvSettings s, T value); }
@@ -404,8 +412,19 @@ public final class SettingsActivity extends Activity implements Sync.Listener {
             captionLeft.setText(""); captionRight.setText("");
         } else {
             pictureNote.setText("");
-            captionLeft.setText((cur.resolution.isEmpty() ? "" : cur.resolution.replace("x", " × ")) + (cur.favorites > 0 ? String.format(Locale.US, "   ♥ %,d", cur.favorites) : ""));
+            // the heart as text (not the red emoji), in the same pink as on the PC and in the remote
+            String res = cur.resolution.isEmpty() ? "" : cur.resolution.replace("x", " × ");
+            android.text.SpannableStringBuilder cap = new android.text.SpannableStringBuilder(res);
+            if (cur.favorites > 0) {
+                cap.append(res.isEmpty() ? "" : "     ");
+                int at = cap.length();
+                cap.append("♥︎");
+                cap.setSpan(new android.text.style.ForegroundColorSpan(HEART), at, cap.length(), 0);
+                cap.append(String.format(Locale.US, " %,d", cur.favorites));
+            }
+            captionLeft.setText(cap);
             int shown = ListStore.prefs(this).getInt("shown", 0), total = ListStore.prefs(this).getInt("total", 0);
+            if (total == 0) total = ShuffleService.pool(this, Sync.settings(this)).size();   // until the first change of 1.8
             captionRight.setText(total > 0 ? String.format(Locale.US, "%,d / %,d", Math.min(shown, total), total) : "");
             if (!cur.id.equals(pictureId)) loadPicture(cur);
         }
@@ -508,7 +527,7 @@ public final class SettingsActivity extends Activity implements Sync.Listener {
             TextView l = text(label, 15, FG2, false);
             l.setPadding(dp(4), dp(26), 0, dp(10));
             parent.addView(l);
-        } else space(parent, 4);
+        }
         LinearLayout g = new LinearLayout(this);
         g.setOrientation(LinearLayout.VERTICAL);
         g.setBackground(round(RAISED, 14));
@@ -518,6 +537,25 @@ public final class SettingsActivity extends Activity implements Sync.Listener {
     }
 
     private void row(LinearLayout group, String label, Text value, View.OnClickListener click) { row(group, () -> label, value, click); }
+
+    // A row whose value is too long for the right side (the address): the value on its own line under the label.
+    private void rowBelow(LinearLayout group, String label, Text value, View.OnClickListener click) {
+        LinearLayout r = new LinearLayout(this);
+        r.setOrientation(LinearLayout.VERTICAL);
+        r.setFocusable(true); r.setClickable(true);
+        r.setPadding(dp(16), dp(11), dp(16), dp(11));
+        StateListDrawable d = new StateListDrawable();
+        d.addState(new int[]{android.R.attr.state_focused}, round(FOCUS, 10));
+        d.addState(new int[]{}, round(Color.TRANSPARENT, 10));
+        r.setBackground(d);
+        TextView l = text(label, 17, FG, false), v = text("", 15, FG2, false);
+        v.setSingleLine(true); v.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
+        r.addView(l); r.addView(v);
+        r.setOnFocusChangeListener((x, has) -> v.setTextColor(has ? FG : FG2));
+        r.setOnClickListener(click);
+        group.addView(r);
+        refreshers.add(() -> v.setText(value.get()));
+    }
 
     // A row: label on the left, its current value on the right; lighter when the remote is on it.
     private void row(LinearLayout group, Text label, Text value, View.OnClickListener click) {
