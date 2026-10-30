@@ -46,6 +46,13 @@ public class ShuffleTest {
         check("after a restart the round carries on (no repeats of the first 15)", overlap.isEmpty() && after.size() == 25, "overlap " + overlap);
         check("counter after 40", b.shownThisRound(p) == 40, b.shownThisRound(p));
 
+        // The remote's preview of Next: the same state and seed pick the same one, again and again.
+        String round = b.roundState(), history = b.historyState();
+        String peek = new Shuffle(Shuffle.split(round), Shuffle.split(history), new Random(77)).next(p).id;
+        String again = new Shuffle(Shuffle.split(round), Shuffle.split(history), new Random(77)).next(p).id;
+        String real = new Shuffle(Shuffle.split(round), Shuffle.split(history), new Random(77)).next(p).id;
+        check("the preview of Next is the one Next shows", peek.equals(again) && peek.equals(real), peek + " " + real);
+
         // The list changes: new ones join the current round, dropped ones don't block a new round.
         Shuffle c = new Shuffle(List.of(), List.of(), new Random(4));
         for (int i = 0; i < 39; i++) c.next(p);

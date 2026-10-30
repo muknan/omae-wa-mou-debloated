@@ -39,6 +39,7 @@ public final class ShuffleService extends Service {
     private final IWallpaperProviderService.Stub binder = new IWallpaperProviderService.Stub() {
         @Override public List<Wallpaper> getWallpapers(Event event) {
             List<Wallpaper> out = new ArrayList<>();
+            Log.d(ListStore.TAG, "asked by Projectivy (event " + (event == null ? "none" : event.eventType) + ")");
             if (event == null || event.eventType != Event.TIME_ELAPSED) return out;   // empty = keep the current one
             try {
                 Wallpaper w = next(ShuffleService.this);
@@ -101,10 +102,10 @@ public final class ShuffleService extends Service {
         }
         List<Shuffle.Item> pool = pool(c, s);
         if (pool.isEmpty()) { p.edit().putBoolean("skip_wait", false).apply(); return null; }
-        Shuffle sh = new Shuffle(Shuffle.split(p.getString("round", "")), Shuffle.split(p.getString("history", "")), new SecureRandom());
+        Shuffle sh = new Shuffle(Shuffle.split(p.getString("round", "")), Shuffle.split(p.getString("history", "")), new java.util.Random(seed(p)));
         Shuffle.Item w = sh.next(pool);
         p.edit().putString("round", sh.roundState()).putString("history", sh.historyState()).putInt("shown", sh.shownThisRound(pool))
-            .putInt("total", pool.size()).putBoolean("skip_wait", false).apply();
+            .putInt("total", pool.size()).putBoolean("skip_wait", false).putLong("seed", new SecureRandom().nextLong() | 1).apply();
         Log.i(ListStore.TAG, "wallpaper " + w.id + " - " + sh.shownThisRound(pool) + " of " + pool.size());
         return shown(c, w, now, true);
     }
@@ -120,7 +121,7 @@ public final class ShuffleService extends Service {
             for (int i = 0; i < old.length() && recent.length() < RECENT; i++) if (!w.id.equals(old.optJSONObject(i).optString("id"))) recent.put(old.get(i));
         } catch (Exception ignored) { }
         p.edit().putString("current", w.id).putString("current_json", Sync.itemJson(w).toString()).putString("recent_json", recent.toString())
-            .putLong("changed_at", now).apply();
+            .putLong("changed_at", now).remove("change_eta").apply();
         Sync.statusChanged(c);
         return new Wallpaper(w.image, Wallpaper.TYPE_IMAGE, Wallpaper.MODE_CROP, null, w.page, "Wallhaven", null);
     }
@@ -133,24 +134,65 @@ public final class ShuffleService extends Service {
         askUntilChanged(c);
     }
 
-    // Projectivy ignores a refresh that comes within about 30 s of the one before, so a change asked for from the
-    // remote is asked for again (twice at most) until the wallpaper has actually changed.
+    // Projectivy ignores a refresh that comes within about 30 s of its last ask, so a change asked for from the remote
+    // is asked for now, and again once Projectivy listens (its last ask + 30 s, then every 31 s, three times at most)
+    // until the wallpaper has actually changed. When it's expected goes to the remote ("Changing in 0:12").
+    static final long THROTTLE = 30_500;
     private static final android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+    private static final Object RETRY = new Object();
+    private static long wantedAt, nextAsk;
+    private static int asks;
+
     private static void askUntilChanged(Context c) {
         final Context app = c.getApplicationContext();
-        final long asked = System.currentTimeMillis();
+        SharedPreferences p = ListStore.prefs(app);
+        long now = System.currentTimeMillis(), listens = p.getLong("asked_at", 0) + THROTTLE;
+        main.removeCallbacksAndMessages(RETRY);
+        wantedAt = now;
+        asks = 1;
         askProjectivyToRefresh(app, 1);
-        for (int i = 1; i <= 2; i++) {
-            final int n = i;
-            main.postDelayed(() -> {
-                SharedPreferences p = ListStore.prefs(app);
-                boolean waiting = p.getBoolean("skip_wait", false) || !p.getString("pending_json", "").isEmpty();
-                if (waiting && p.getLong("changed_at", 0) < asked) {
-                    Log.i(ListStore.TAG, "still waiting for Projectivy: asking again (" + n + ")");
-                    askProjectivyToRefresh(app, 1);
-                }
-            }, 31_000L * i);
-        }
+        nextAsk = now < listens ? listens : now + THROTTLE;
+        p.edit().putLong("change_eta", now < listens ? listens : now + 1_500).apply();
+        Sync.statusChanged(app);
+        tick(app);
+    }
+
+    private static void tick(Context app) {
+        main.postAtTime(() -> {
+            SharedPreferences p = ListStore.prefs(app);
+            boolean waiting = p.getBoolean("skip_wait", false) || !p.getString("pending_json", "").isEmpty();
+            if (!waiting || p.getLong("changed_at", 0) >= wantedAt) return;
+            long now = System.currentTimeMillis(), eta = p.getLong("change_eta", 0);
+            if (now >= nextAsk) {
+                if (asks >= 4) { p.edit().remove("change_eta").apply(); Sync.statusChanged(app); return; }   // Projectivy isn't listening
+                asks++;
+                Log.i(ListStore.TAG, "still waiting for Projectivy: asking again (" + (asks - 1) + ")");
+                askProjectivyToRefresh(app, 1);
+                nextAsk = now + THROTTLE + 500;
+                p.edit().putLong("change_eta", now + 1_500).apply();
+                Sync.statusChanged(app);
+            } else if (eta > 0 && eta + 2_000 < now && eta < nextAsk) {
+                p.edit().putLong("change_eta", nextAsk + 1_000).apply();   // that ask was ignored: the next one, then
+                Sync.statusChanged(app);
+            }
+            tick(app);
+        }, RETRY, android.os.SystemClock.uptimeMillis() + 1_000);
+    }
+
+    /** What Next would show: the same pick next() makes, as long as nothing changes meanwhile (the remote shows it
+     *  straight away when Next is pressed). */
+    static Shuffle.Item upcoming(Context c, List<Shuffle.Item> pool) {
+        SharedPreferences p = ListStore.prefs(c);
+        try { String pending = p.getString("pending_json", ""); if (!pending.isEmpty()) return Sync.item(new JSONObject(pending)); } catch (Exception ignored) { }
+        if (pool.isEmpty()) return null;
+        return new Shuffle(Shuffle.split(p.getString("round", "")), Shuffle.split(p.getString("history", "")), new java.util.Random(seed(p))).next(pool);
+    }
+
+    // The pick's random seed: the same for upcoming() and next() until a wallpaper is picked, then a new one.
+    private static long seed(SharedPreferences p) {
+        long seed = p.getLong("seed", 0);
+        if (seed == 0) { seed = new SecureRandom().nextLong() | 1; p.edit().putLong("seed", seed).apply(); }
+        return seed;
     }
 
     /** Back to the one before (out of this round again, as on the PC). */
@@ -214,13 +256,18 @@ public final class ShuffleService extends Service {
             }
             st.put("paused", s.paused).put("kept", !s.keep.isEmpty());
             st.put("recent", new JSONArray(p.getString("recent_json", "[]")));
+            List<Shuffle.Item> pool = pool(c, s);
+            Shuffle.Item up = upcoming(c, pool);
+            if (up != null) st.put("up", Sync.itemJson(up));
+            // the last command from the remote it has seen, and when the change it asked for is expected
+            st.put("ack", new JSONObject().put("seq", p.getInt("ack_seq", 0)).put("eta", p.getLong("change_eta", 0)));
             int toplist = 0;
             for (Shuffle.Item w : ListStore.pool(c)) if (s.maxw == 0 || w.width <= s.maxw) toplist++;
             st.put("counts", new JSONObject().put("toplist", toplist));
             st.put("list", p.getString("list_for", ""));
             st.put("base", base / 1000);
             if (s.sources.isEmpty()) st.put("note", "Nothing to shuffle: turn something on in Shuffle from");
-            else if (pool(c, s).isEmpty()) st.put("note", s.sources.contains("toplist") ? "Getting the list…" : "Those playlists are empty");
+            else if (pool.isEmpty()) st.put("note", s.sources.contains("toplist") ? "Getting the list…" : "Those playlists are empty");
         } catch (Exception e) { Log.w(ListStore.TAG, "status: " + e); }
         return st;
     }
@@ -228,6 +275,7 @@ public final class ShuffleService extends Service {
     /** Tells Projectivy to ask again now (settings changed, or "next wallpaper"). Projectivy acts on "settings changed"
      *  (reason 1) right away, but on "data changed" (2) only at its next change, so Next uses reason 1 as well. */
     static void askProjectivyToRefresh(Context c, int reason) {
+        Log.d(ListStore.TAG, "asking Projectivy to refresh (" + reason + ")");
         Intent i = new Intent(ACTION_UPDATED)
             .putExtra("tv.projectivy.plugin.extra.PROVIDER_ID", PROVIDER_ID)
             .putExtra("tv.projectivy.plugin.extra.UPDATE_REASON", reason)

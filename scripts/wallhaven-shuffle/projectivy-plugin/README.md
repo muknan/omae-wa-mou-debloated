@@ -51,12 +51,16 @@ to playlist** and **Hide**, and on the right a short list of rows, each opening 
   everything here and send Next, Previous or a wallpaper, and Hide on any device leaves it out here too.
 - **Service**: the address, and **Get a fresh list now**.
 
-Paired, a background thread checks in every 15 s while the screen is on and the plugin is in use (every 3 s while
-a remote is open), with one small request. Settings made on the TV while offline go up at the next check-in.
-A Next, Previous or Show from the remote is asked of Projectivy again (twice at most, 31 s apart) if it hasn't
-changed, since Projectivy ignores a refresh within about 30 s of the last. About a minute after Projectivy lets go
-of the plugin (another app opened), the remote is told "Not on the home screen" once, and checking stops until it
-binds again. Coming from 1.7, the old list address and width carry over as the same filters.
+Paired, a background thread checks in every 15 s while the screen is on and the plugin is in use (every 1.5 s
+while a remote is open), with one small request. Settings made on the TV while offline go up at the next check-in.
+
+A Next, Previous or Show from the remote is answered at once ("it arrived", and when the change is expected).
+Projectivy ignores a refresh within about 30 s of its last ask, so the plugin asks now and again when Projectivy
+listens (its last ask + 30 s, then every 31 s, three times at most) until the wallpaper has changed; the remote
+counts down to it ("Changing in 0:12"). The remote also shows what Next will bring before it's pressed: the
+plugin's pick is seeded, so the preview and the real pick are the same one. When Projectivy lets go of the plugin
+(another app opened), the remote is told "Not on the home screen" straight away and checking stops until it binds
+again. Coming from 1.7, the old list address and width carry over as the same filters.
 
 ## Panel reset (MediaTek TVs)
 

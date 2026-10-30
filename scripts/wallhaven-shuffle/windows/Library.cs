@@ -28,7 +28,7 @@ namespace WallhavenShuffle
         Dictionary<string, string> folderNames = new Dictionary<string, string>();                   // playlist id -> its folder's name last time
         Dictionary<string, HashSet<string>> folderFiles = new Dictionary<string, HashSet<string>>();  // playlist id -> wallpapers its folder had last time
         string syncToken = "", syncId = "", syncName = "", stHash = "";
-        int syncV = -1, cmdSeq;
+        int syncV = -1, cmdSeq, cmdAck;   // cmdAck: the last command from the remote seen here (the remote shows it arrived)
         bool settingsDirty, syncLive, syncReachable = true;
         string syncError = "";
         readonly Dictionary<string, Tuple<DateTime, List<Wall>>> folderCache = new Dictionary<string, Tuple<DateTime, List<Wall>>>(StringComparer.OrdinalIgnoreCase);
@@ -754,7 +754,7 @@ namespace WallhavenShuffle
                 object live;
                 syncLive = r.TryGetValue("live", out live) && live is bool && (bool)live;
                 syncReachable = true; syncError = "";
-                wait = syncLive ? 3000 : locked ? 60000 : 10000;
+                wait = syncLive ? 1500 : locked ? 60000 : 10000;
             }
             catch (SyncError ex)
             {
@@ -795,8 +795,11 @@ namespace WallhavenShuffle
             SaveLibrary();
             object nowObj;
             long now = r.TryGetValue("now", out nowObj) ? Convert.ToInt64(nowObj) : 0;
-            if (r.TryGetValue("cmds", out cmds) && cmds is object[])
+            if (r.TryGetValue("cmds", out cmds) && cmds is object[] && ((object[])cmds).Length > 0)
+            {
                 foreach (var c in (object[])cmds) Command(c as Dictionary<string, object>, now);
+                KickSync();   // tell the remote it arrived
+            }
             Changed();
         }
 
@@ -833,8 +836,9 @@ namespace WallhavenShuffle
         void Command(Dictionary<string, object> c, long now)
         {
             if (c == null) return;
-            object type, at;
+            object type, at, seq;
             c.TryGetValue("type", out type);
+            if (c.TryGetValue("seq", out seq)) try { cmdAck = Math.Max(cmdAck, Convert.ToInt32(seq)); } catch (Exception) { }
             // how long it took to get here, in the log ("next (remote, sent 2 s ago)")
             string from = "remote";
             if (now > 0 && c.TryGetValue("at", out at)) try { from += ", sent " + Math.Max(0, (now - Convert.ToInt64(at)) / 1000) + " s ago"; } catch (Exception) { }
@@ -873,7 +877,7 @@ namespace WallhavenShuffle
         Dictionary<string, object> StatusForRemote(out string thumbFor)
         {
             thumbFor = null;
-            var st = new Dictionary<string, object> { { "app", "pc 2.3" } };
+            var st = new Dictionary<string, object> { { "app", "pc 2.4" } };
             if (current != null)
             {
                 var item = ItemOf(current);
@@ -890,6 +894,11 @@ namespace WallhavenShuffle
             st["next"] = settings.Paused || IsKept || busy ? 0 : (long)(nextChange.ToUniversalTime() - new DateTime(1970, 1, 1)).TotalMilliseconds;
             st["paused"] = settings.Paused;
             st["kept"] = IsKept;
+            st["ack"] = new Dictionary<string, object> { { "seq", cmdAck } };
+            // what Next would show (the remote shows it as soon as Next is pressed)
+            var up = Upcoming();
+            var upItem = up != null ? ItemOf(up) : null;
+            if (upItem != null) st["up"] = new Dictionary<string, object> { { "key", up.Id }, { "id", upItem.Id }, { "ext", upItem.Ext }, { "res", upItem.Res.Length > 0 ? upItem.Res : up.Resolution }, { "fav", Math.Max(0, up.Favorites) } };
             var recent = new List<object>();
             for (int i = rot.History.Count - 2; i >= 0 && recent.Count < 20; i--)
             {
@@ -905,6 +914,14 @@ namespace WallhavenShuffle
             st["list"] = listFor;
             if (!HasSource || settings.Sources.Count == 0) st["note"] = "Nothing to shuffle: turn something on in Shuffle from";
             return st;
+        }
+
+        // The one Next shows: forward again after Previous, else the one downloaded ahead.
+        Wall Upcoming()
+        {
+            for (int i = rot.ForwardTarget(); i >= 0 && i < rot.History.Count; i++) { var w = FindWall(rot.History[i]); if (w != null) return w; }
+            if (prepared != null && (current == null || prepared.Id != current.Id) && InPool(prepared)) return prepared;
+            return null;
         }
 
         readonly Dictionary<string, string> thumbs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);

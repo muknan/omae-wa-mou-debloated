@@ -459,7 +459,8 @@ const ACTIONS = {
     return out;
   },
 
-  // Everything the web remote shows: the doc, each device's status, and the choices.
+  // Everything the web remote shows: the doc (left out when the remote already has this version: ?v=), each
+  // device's status, and the choices.
   async state(store, req) {
     const { id: me } = await authed(store, req);
     const doc = await readDoc(store), now = Date.now();
@@ -472,7 +473,9 @@ const ACTIONS = {
     });
     // Devices poll every few seconds while a remote is open and in use (an idle one asks with quiet=1).
     if (wake.length && req.query.quiet !== '1') await store.pipe(wake);
-    return { me, doc, status, now, presets: PRESETS };
+    const out = { me, v: doc.v, status, now, presets: PRESETS };
+    if (String(req.query.v ?? '') !== String(doc.v)) out.doc = doc;
+    return out;
   },
 
   async op(store, req) {

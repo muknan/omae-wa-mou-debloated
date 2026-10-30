@@ -72,28 +72,34 @@ server.listen(port, async () => {
     { op: 'add', pl: 'fav', item: pool[3] }, { op: 'add', pl: 'fav', item: pool[9] }, { op: 'add', pl: 'hidden', item: pool[40] || pool[0] },
   ] } });
 
-  // Two pretend devices: each shows a wallpaper and follows next / prev / show, as the real apps do.
+  // Two pretend devices: each shows a wallpaper and follows next / prev / show, as the real apps do: they say a
+  // command arrived (ack), the PC changes a second later, the TV when "Projectivy" listens again (30 s after its
+  // last change), and both say what Next would show (up).
   for (const [token, kind] of [[tv.token, 'tv'], [pc.token, 'pc']]) {
-    const me = { v: -1, cs: 0, recent: [], cur: null, shown: 37, next: 0, doc: null };
-    const pickNext = () => { if (me.cur) me.recent.unshift(me.cur); me.recent = me.recent.slice(0, 12); me.cur = { ...pool[Math.floor(Math.random() * pool.length)] }; me.cur.key = me.cur.id; me.shown++; };
-    pickNext();
+    const me = { v: -1, cs: 0, recent: [], cur: null, shown: 37, next: 0, doc: null, up: null, ack: 0, eta: 0, todo: null, changedAt: 0 };
+    const randomOne = () => ({ ...pool[Math.floor(Math.random() * pool.length)] });
+    const showIt = (w) => { if (me.cur) me.recent.unshift(me.cur); me.recent = me.recent.slice(0, 12); me.cur = { ...w, key: w.id }; me.shown++; me.changedAt = Date.now(); me.up = randomOne(); };
+    showIt(randomOne());
     const loop = async () => {
       const set = me.doc?.devices && Object.values(me.doc.devices).find((d) => d.kind === kind)?.settings;
       const everyMs = (set?.every || (kind === 'tv' ? 1 : 15)) * 60e3;
-      if (set && !set.paused && !set.keep && Date.now() > me.next) { pickNext(); me.next = Date.now() + everyMs; }
+      if (me.todo && Date.now() >= me.eta) { me.todo(); me.todo = null; me.eta = 0; me.next = Date.now() + everyMs; }
+      else if (!me.todo && set && !set.paused && !set.keep && Date.now() > me.next) { showIt(me.up); me.next = Date.now() + everyMs; }
       const r = await sync('poll', { token, body: { v: me.v, cs: me.cs, st: {
-        app: `${kind} dev`, away: kind === 'tv' && !!process.env.DEMO_AWAY || undefined, cur: me.cur, shown: me.shown, total: pool.length, next: set && !set.paused && !set.keep ? me.next : 0,
+        up: me.up, ack: { seq: me.ack, eta: me.eta }, app: `${kind} dev`, away: kind === 'tv' && !!process.env.DEMO_AWAY || undefined, cur: me.cur, shown: me.shown, total: pool.length, next: set && !set.paused && !set.keep ? me.next : 0,
         recent: me.recent, counts: { toplist: pool.length }, list: set ? listQueryFor(set.filters) : '', base: kind === 'tv' ? 60 : undefined,
         local: kind === 'pc' ? [{ key: 'folder:D:\\Photos\\Holidays', name: 'Holidays', count: 48, on: false }] : undefined,
       } } });
       if (r.doc) { me.doc = r.doc; me.v = r.v; }
       me.cs = r.cs ?? me.cs;
       for (const c of r.cmds || []) {
-        if (c.type === 'next') { pickNext(); me.next = Date.now() + everyMs; }
-        if (c.type === 'prev' && me.recent.length) { me.cur = me.recent.shift(); me.shown = Math.max(1, me.shown - 1); }
-        if (c.type === 'show') { if (me.cur) me.recent.unshift(me.cur); me.cur = { ...c.item, key: c.item.id }; }
+        me.ack = Math.max(me.ack, c.seq);
+        const at = kind === 'tv' ? Math.max(Date.now() + 1500, me.changedAt + 30e3) : Date.now() + 1000;
+        if (c.type === 'next') { me.todo = () => showIt(me.up); me.eta = at; }
+        if (c.type === 'prev' && me.recent.length) { me.todo = () => { me.cur = me.recent.shift(); me.shown = Math.max(1, me.shown - 1); me.changedAt = Date.now(); }; me.eta = at; }
+        if (c.type === 'show') { me.todo = () => showIt(c.item); me.eta = at; }
       }
-      setTimeout(loop, r.live ? 2000 : 8000);
+      setTimeout(loop, r.cmds?.length ? 100 : me.todo ? Math.max(100, Math.min(1500, me.eta - Date.now())) : r.live ? 1500 : 8000);
     };
     loop();
   }

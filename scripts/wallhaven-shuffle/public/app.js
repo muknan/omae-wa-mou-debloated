@@ -11,7 +11,7 @@
   };
   let token = store.get('whs.token');
   const S = { doc: null, status: {}, presets: null, me: null, online: true, inFlight: 0 };
-  const UI = { dev: store.get('whs.dev'), pending: {}, hero: {}, shown: {}, full: new Set(), browse: { dev: store.get('whs.browseDev'), sort: 'fav', withHidden: false } };
+  const UI = { dev: store.get('whs.dev'), pending: {}, localWant: {}, hero: {}, shown: {}, full: new Set(), browse: { dev: store.get('whs.browseDev'), sort: 'fav', withHidden: false } };
   const lists = new Map(); // list query -> { items, error, loading, at }
   const sheets = new Set(); // open sheets' refill functions, so they follow changes made elsewhere
 
@@ -139,6 +139,11 @@
   const favLabel = (n) => (n ? `${nf.format(n)}+ favourites` : 'Any');
   const kindIcon = (k) => (k === 'tv' ? 'tv' : k === 'pc' ? 'pc' : 'web');
   const kindName = (k) => (k === 'tv' ? 'TV' : k === 'pc' ? 'PC' : 'Browser');
+  function presence(id) {
+    const stat = S.status[id] || {};
+    if (stat.st?.away) return 'Not on the home screen';
+    return stat.online ? 'Online' : stat.seen ? `Offline · seen ${ago(stat.seen)}` : 'Hasn’t checked in yet';
+  }
 
   // ---------- the service
 
@@ -211,6 +216,7 @@
       return j;
     } catch (e) {
       toast(e.message, { err: true });
+      S.docStale = true;   // the change shown here didn't land: the next answer brings the whole doc back
       refresh(true);
     } finally {
       S.inFlight--;
@@ -224,59 +230,92 @@
     setSettings(device, { sources: s.sources.includes(key) ? s.sources.filter((x) => x !== key) : [...s.sources, key] });
   };
 
+  // A command for a device. Next, Previous and Show change its wallpaper: until it has, the picture shows the one
+  // that's coming (dimmed) and the status line says where it's at: Sending…, Waiting for X to check in…, then
+  // Changing in 0:12 (a TV waits for Projectivy) or Changing….
   async function command(device, cmd, label) {
-    const st = S.status[device]?.st;
-    UI.pending[device] = { type: cmd.type, from: st?.cur?.key || '', at: Date.now() };
-    changed();
-    try {
-      await api('cmd', { body: { device, cmd } });
-      if (label) toast(label);
-      setTimeout(() => {
-        const p = UI.pending[device];
-        if (p && p.at + 30e3 <= Date.now() + 50) {
-          delete UI.pending[device];
-          changed();
-          const d = S.doc?.devices[device];
-          if (d) toast(d.kind === 'tv' ? `${d.name} hasn’t changed yet. It changes only while its home screen is showing.` : `${d.name} hasn’t picked it up yet. It will at its next check-in.`);
-        }
-      }, 30e3);
-      schedule(1200);
-    } catch (e) {
-      delete UI.pending[device];
+    const st = S.status[device]?.st || {};
+    const changes = ['next', 'prev', 'show'].includes(cmd.type) && !(cmd.type === 'show' && st.cur?.id === cmd.item?.id);
+    if (changes) {
+      const ahead = cmd.type === 'next' ? st.up : cmd.type === 'prev' ? st.recent?.[0] : cmd.item;
+      UI.pending[device] = { type: cmd.type, from: st.cur?.key || '', at: Date.now(), ahead: ahead?.id ? { id: ahead.id, ext: ahead.ext, res: ahead.res, fav: ahead.fav } : null };
       changed();
+    }
+    try {
+      const j = await api('cmd', { body: { device, cmd } });
+      const p = UI.pending[device];
+      if (changes && p) { p.seq = j.seq; p.sent = Date.now(); changed(); }
+      if (label) toast(label);
+      schedule(600);
+    } catch (e) {
+      if (changes) { delete UI.pending[device]; changed(); }
       toast(e.message, { err: true });
     }
   }
 
+  // Where each press is at, from the latest statuses: done (the wallpaper changed), arrived (the device says so, with
+  // when it expects the change), or given up on (with why, in words that fit the device).
+  function settlePending() {
+    const now = Date.now();
+    for (const [id, p] of Object.entries(UI.pending)) {
+      const d = S.doc?.devices[id], st = S.status[id]?.st || {};
+      if (!d) { delete UI.pending[id]; continue; }
+      if (st.cur?.key && st.cur.key !== p.from) { delete UI.pending[id]; continue; }
+      if (p.seq && !p.acked && (st.ack?.seq || 0) >= p.seq) p.acked = now;
+      if (p.acked) p.eta = st.ack?.eta || 0;
+      let why = null;
+      if (st.away) why = `${d.name} isn’t on its home screen. It changes when it’s back there.`;
+      else if (p.acked && now > Math.max(p.eta || 0, p.acked) + 15e3) why = d.kind === 'tv' ? `Projectivy hasn’t shown it yet. It will at its next change.` : `${d.name} couldn’t change it just now.`;
+      else if (!p.acked && now > (p.sent || p.at) + 40e3) why = `${d.name} hasn’t checked in. It changes when it does.`;
+      if (why) { delete UI.pending[id]; toast(why); }
+    }
+  }
+  // the text for a press in progress, kept current by tick()
+  function pendingText(el) {
+    const now = Date.now(), sent = Number(el.dataset.sent) || 0;
+    if (el.dataset.acked) {
+      const left = Math.ceil((Number(el.dataset.eta) - now) / 1000);
+      return left > 1 ? `Changing in ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}` : 'Changing…';
+    }
+    return !sent || now - sent < 2500 ? 'Sending…' : `Waiting for ${el.dataset.name} to check in…`;
+  }
+  // the pictures a press would show, loaded ahead so the change on screen is instant
+  const warmed = new Set();
+  function warm(it) {
+    if (!it?.id || warmed.has(it.id)) return;
+    warmed.add(it.id);
+    new Image().src = thumb(it);
+  }
+
   // ---------- polling
 
-  let timer = null, lastTouch = Date.now(), soon = null;
+  let timer = null, lastTouch = Date.now();
   const idle = () => Date.now() - lastTouch > 10 * 60e3;
   async function refresh(force) {
     if (!token) return;
     try {
-      const j = await api('state', { query: idle() ? { quiet: '1' } : undefined });
+      const query = {};
+      if (idle()) query.quiet = '1';
+      if (S.doc && !force && !S.docStale) query.v = S.doc.v;   // the doc comes back only when it changed
+      const j = await api('state', { query });
       S.online = true;
       S.me = j.me; S.presets = j.presets; S.status = j.status;
-      if (force || (!S.inFlight && (!S.doc || j.doc.v >= S.doc.v))) S.doc = j.doc;
-      for (const [id, p] of Object.entries(UI.pending)) {
-        const cur = S.status[id]?.st?.cur?.key || '';
-        if (cur && cur !== p.from) delete UI.pending[id];
-      }
+      if (j.doc && (force || S.docStale || (!S.inFlight && (!S.doc || j.doc.v >= S.doc.v)))) { S.doc = j.doc; S.docStale = false; }
+      for (const st of Object.values(S.status)) { warm(st.st?.up); warm(st.st?.recent?.[0]); }
+      settlePending();
       if (!S.doc.devices[S.me]) return signedOut('This browser was signed out');
     } catch (e) {
       if (e.status !== 401) S.online = false;
     }
     changed();
   }
-  // every 4 s while in use, every 1.5 s while a device is changing, every 30 s when left alone
+  // every 4 s while in use, every second while a device is changing, every 30 s when left alone
   function schedule(first) {
     clearTimeout(timer);
     if (!token || document.hidden) return;
-    const every = Object.keys(UI.pending).length ? 1500 : idle() ? 30e3 : 4e3;
+    const every = Object.keys(UI.pending).length ? 1000 : idle() ? 30e3 : 4e3;
     timer = setTimeout(async () => { await refresh(); schedule(); }, first ?? every);
   }
-  function refreshSoon() { clearTimeout(soon); soon = setTimeout(() => refresh(), 1500); }
   document.addEventListener('visibilitychange', () => { if (!document.hidden) { lastTouch = Date.now(); refresh().then(schedule); } else clearTimeout(timer); });
   for (const ev of ['pointerdown', 'keydown']) addEventListener(ev, () => { const was = idle(); lastTouch = Date.now(); if (was) { refresh(); schedule(); } }, { passive: true });
 
@@ -377,7 +416,14 @@
   }
   function hide(it, device) {
     ops([{ op: 'add', pl: 'hidden', item: it }], { toast: 'Hidden on every device', undo: () => ops([{ op: 'remove', pl: 'hidden', id: it.id }]) });
-    if (device && S.status[device]?.st?.cur?.id === it.id) command(device, { type: 'next' });
+    // the one on screen: the device moves on by itself when it sees Hidden change; the page shows it coming meanwhile
+    const st = S.status[device]?.st;
+    if (device && st?.cur?.id === it.id) {
+      const up = st.up?.id && st.up.id !== it.id ? st.up : null;
+      UI.pending[device] = { type: 'next', from: st.cur.key || '', at: Date.now(), sent: Date.now(), acked: Date.now(), ahead: up ? { id: up.id, ext: up.ext, res: up.res, fav: up.fav } : null };
+      changed();
+      schedule(600);
+    }
   }
   async function newPlaylist(withItem, forDevice) {
     const name = await prompt('New playlist', { placeholder: 'Name', okLabel: 'Create', check: (v) => checkName(v),
@@ -459,17 +505,25 @@
     const names = devs.length <= 2
       ? h('div', { class: 'names', role: 'tablist' }, devs.map(([did, d]) => h('button', { class: 'name', role: 'tab', 'aria-selected': String(did === id), onclick: () => pick(did) }, d.name)))
       : h('button', { class: 'name picker', 'aria-label': 'Choose a device', onclick: () => sheet('Devices', (body, close) => put(body, group(devs.map(([did, d]) =>
-          item({ ic: kindIcon(d.kind), label: d.name, sub: S.status[did]?.online ? 'Online' : 'Offline', chev: false, cls: did === id ? 'accent' : '', onclick: () => { close(); pick(did); } }))))) },
+          item({ ic: kindIcon(d.kind), label: d.name, sub: presence(did), chev: false, cls: did === id ? 'accent' : '', onclick: () => { close(); pick(did); } }))))) },
         h('span', { class: 'ellipsis' }, S.doc.devices[id].name), icon('updown', 'icon'));
     const switcher = h('div', { class: 'switcher pad' }, names,
       h('button', { class: 'icon-btn', 'aria-label': `${S.doc.devices[id].name} settings`, onclick: () => deviceSheet(id) }, icon('more')));
     return h('div', {}, switcher, devicePage(id));
   }
 
+  // a PC's own folders, with a switch just flipped here shown as flipped until the PC says so
+  function localsOf(id) {
+    const st = S.status[id]?.st || {};
+    return (Array.isArray(st.local) ? st.local : []).map((l) => {
+      const want = UI.localWant[`${id}|${l.key}`];
+      return want && want.on !== l.on && Date.now() - want.at < 20e3 ? { ...l, on: want.on } : l;
+    });
+  }
   function sourcesSummary(id) {
-    const s = S.doc.devices[id].settings, st = S.status[id]?.st || {};
+    const s = S.doc.devices[id].settings;
     const names = s.sources.map((k) => (k === 'toplist' ? 'Toplist' : findPl(k)?.name)).filter(Boolean)
-      .concat((st.local || []).filter((l) => l.on).map((l) => l.name));
+      .concat(localsOf(id).filter((l) => l.on).map((l) => l.name));
     if (!names.length) return 'Nothing yet';
     return names.length <= 2 ? names.join(', ') : `${names[0]} + ${names.length - 1} more`;
   }
@@ -478,6 +532,11 @@
     return [pr.quality[f.quality]?.label, pr.range[f.range], f.q ? `“${f.q}”` : null].filter(Boolean).join(' · ');
   }
 
+  function pendingLabel(p, name) {
+    const el = h('span', { 'data-pending': '', 'data-sent': p.sent ? String(p.sent) : null, 'data-acked': p.acked ? '1' : null, 'data-eta': p.eta ? String(p.eta) : null, 'data-name': name });
+    el.textContent = pendingText(el);
+    return el;
+  }
   function devicePage(id) {
     const d = S.doc.devices[id], s = d.settings, stat = S.status[id] || {}, st = stat.st || {};
     const cur = st.cur && (st.cur.id || st.cur.local) ? st.cur : null;
@@ -485,19 +544,20 @@
     const online = !!stat.online && !away, pend = UI.pending[id];
     const kept = !!s.keep, paused = !!s.paused;
 
-    // the picture; the last one stays underneath while the next fades in
-    const heroSrc = cur ? (cur.local ? cur.thumb : thumb(cur)) : null;
+    // the picture (the coming one, dimmed, while it changes); the last one stays underneath while the next fades in
+    const pic0 = pend?.ahead || cur;
+    const heroSrc = pic0 ? (pic0.local ? pic0.thumb : thumb(pic0)) : null;
     const hero = h('div', { class: `hero ${pend ? 'pending' : ''}` });
     const prev = UI.hero[id];
     if (prev && prev !== heroSrc && !prev.startsWith('data:')) hero.style.backgroundImage = `url("${prev}")`;
     UI.hero[id] = heroSrc;
     if (heroSrc) {
-      const pic = img(UI.full.has(cur.id) ? fullOf(cur) : heroSrc, cur.local ? cur.name || 'Your picture' : 'The wallpaper on screen', true);
+      const pic = img(UI.full.has(pic0.id) ? fullOf(pic0) : heroSrc, pic0.local ? pic0.name || 'Your picture' : pend ? 'The wallpaper that’s coming' : 'The wallpaper on screen', true);
       hero.append(pic);
-      if (!cur.local) sharpen(pic, cur);
+      if (!pic0.local && !pend) sharpen(pic, pic0);
     }
     else hero.append(h('div', { class: 'blank' }, st.note || (online ? 'Nothing on screen yet' : `${d.name} will show here when it checks in`)));
-    if (cur) hero.append(h('button', { class: 'tap', 'aria-label': 'About this wallpaper', onclick: () => preview(cur, { device: id }) }));
+    if (pic0) hero.append(h('button', { class: 'tap', 'aria-label': 'About this wallpaper', onclick: () => preview(pic0, { device: id }) }));
     if (kept) hero.append(h('span', { class: 'flag' }, icon('pinOn'), 'Keeping'));
     else if (paused) hero.append(h('span', { class: 'flag' }, icon('pause'), 'Paused'));
 
@@ -505,29 +565,28 @@
     const caption = h('div', { class: 'pad' },
       h('div', { class: 'caption' },
         h('span', { class: 'what' },
-          cur?.local ? h('span', { class: 'ellipsis' }, cur.name || 'Your picture') : null,
-          cur?.res ? h('span', { class: 'num' }, fmtRes(cur.res)) : null,
-          cur?.fav ? h('span', { class: 'fav num' }, icon('heartOn'), nf.format(cur.fav)) : null),
+          pic0?.local ? h('span', { class: 'ellipsis' }, pic0.name || 'Your picture') : null,
+          pic0?.res ? h('span', { class: 'num' }, fmtRes(pic0.res)) : null,
+          pic0?.fav ? h('span', { class: 'fav num' }, icon('heartOn'), nf.format(pic0.fav)) : null),
         total ? h('span', { class: 'num' }, `${nf.format(shown)} / ${nf.format(total)}`) : null),
       total ? h('div', { class: 'track' }, h('i', { style: { width: `${(shown / total) * 100}%` } })) : null,
       h('div', { class: 'status' }, h('span', { class: `dot ${online ? 'on' : ''}` }),
-        pend ? h('span', {}, 'Changing…')
-        : away ? h('span', {}, 'Not on the home screen')
+        pend ? pendingLabel(pend, d.name)
         : online
           ? h('span', {}, paused ? 'Paused' : kept ? 'Keeping this wallpaper' : st.next ? h('span', { 'data-next': st.next }) : 'Online')
-          : h('span', {}, stat.seen ? `Offline · seen ${ago(stat.seen)}` : 'Hasn’t checked in yet')));
+          : h('span', {}, presence(id))));
 
     const favOn = cur && !cur.local && inPl('fav', cur.id);
     const controls = h('div', { class: 'controls pad' },
       h('button', { class: `icon-btn ${kept ? 'on' : ''}`, 'aria-label': kept ? 'Stop keeping this wallpaper' : 'Keep this wallpaper', 'aria-pressed': String(kept), disabled: !cur && !kept,
         onclick: () => setSettings(id, { keep: kept ? '' : cur.key || cur.id }) }, icon(kept ? 'pinOn' : 'pin')),
-      h('button', { class: 'icon-btn', 'aria-label': 'Previous', disabled: !online, onclick: () => command(id, { type: 'prev' }) }, icon('prev')),
+      h('button', { class: 'icon-btn', 'aria-label': 'Previous', disabled: !online || !!pend, onclick: () => command(id, { type: 'prev' }) }, icon('prev')),
       h('button', { class: 'icon-btn main', 'aria-label': paused ? 'Resume' : 'Pause', onclick: () => setSettings(id, { paused: !paused }) }, icon(paused ? 'play' : 'pause')),
-      h('button', { class: 'icon-btn', 'aria-label': 'Next', disabled: !online, onclick: () => command(id, { type: 'next' }) }, icon('next')),
+      h('button', { class: 'icon-btn', 'aria-label': 'Next', disabled: !online || !!pend, onclick: () => command(id, { type: 'next' }) }, icon('next')),
       h('button', { class: `icon-btn heart ${favOn ? 'on' : ''}`, 'aria-label': favOn ? 'Remove from Favourites' : 'Save to Favourites', 'aria-pressed': String(!!favOn),
         disabled: !cur || cur.local, onclick: () => toggleFav(cur) }, icon(favOn ? 'heartOn' : 'heart')));
 
-    const none = !s.sources.length && !(st.local || []).some((l) => l.on);
+    const none = !s.sources.length && !localsOf(id).some((l) => l.on);
     const settings = group(
       item({ label: 'Shuffle from', value: sourcesSummary(id), onclick: () => sourcesSheet(id), cls: none ? 'warn' : '' }),
       item({ label: 'Toplist', value: filtersSummary(s.filters), onclick: () => filtersSheet(id) }),
@@ -551,7 +610,7 @@
       const d = S.doc.devices[id];
       if (!d) return close();
       const s = d.settings, st = S.status[id]?.st || {};
-      const locals = Array.isArray(st.local) ? st.local : [];
+      const locals = localsOf(id);
       put(body, 
         h('div', { class: 'pad' }, h('p', { class: 'note' }, `Turn on any mix. ${d.name} goes through all of them in one round, with no repeats.`)),
         group(
@@ -562,7 +621,7 @@
         })))] : null,
         locals.length ? [groupLabel('Folders on this PC'), group(locals.map((l) => switchItem({
           label: l.name, sub: l.count != null ? plural(l.count, 'picture') : null, on: l.on, id: `src-${id}-${l.key}`,
-          onchange: (on) => { l.on = on; command(id, { type: 'local', key: l.key, on }); },
+          onchange: (on) => { UI.localWant[`${id}|${l.key}`] = { on, at: Date.now() }; changed(); command(id, { type: 'local', key: l.key, on }); },
         })))] : null,
         group(item({ ic: 'plus', label: 'New playlist', cls: 'accent', chev: false, onclick: () => { close(); newPlaylist(null, id); } })));
     });
@@ -593,7 +652,7 @@
         } }))),
         group(h('div', { class: 'item' }, h('span', { class: 'label' }, 'Topic'), topic, h('datalist', { id: `topics-${id}` }, pr.topics.map((t) => h('option', { value: t }))))),
         h('div', { class: 'pad', style: { marginTop: '-8px' } }, h('p', { class: 'note', style: { fontSize: '13.5px', color: 'var(--fg-3)' } }, 'Optional. A Wallhaven search, like nature or night city.')),
-        h('div', { class: 'pad' }, h('p', { class: 'note' }, matches ? `${plural(st.counts.toplist, 'wallpaper')} match on ${d.name}.` : stat.online ? `${d.name} is getting the list for these filters.` : `${d.name} gets the new list when it’s back on.`)),
+        h('div', { class: 'pad' }, h('p', { class: 'note' }, matches ? `${plural(st.counts.toplist, 'wallpaper')} match on ${d.name}.` : stat.online && !st.away ? `${d.name} is getting the list for these filters.` : `${d.name} gets the new list when it’s back${st.away ? ' on its home screen' : ' on'}.`)),
         group(item({ ic: 'browse', label: 'Browse them', onclick: () => { close(); UI.browse.dev = id; store.set('whs.browseDev', id); location.hash = '#/browse'; } })));
     });
   }
@@ -798,8 +857,7 @@
       group(item({ ic: 'plus', label: 'Pair a device', cls: 'accent', chev: false, onclick: pairSheet })),
       groupLabel('Signed in'),
       group(all.map(([id, d]) => {
-        const stat = S.status[id];
-        const sub = id === S.me ? 'This browser' : d.kind === 'web' ? `Added ${new Date(d.created).toLocaleDateString()}` : stat?.online ? 'Online' : stat?.seen ? `Offline · seen ${ago(stat.seen)}` : 'Hasn’t checked in yet';
+        const sub = id === S.me ? 'This browser' : d.kind === 'web' ? `Added ${new Date(d.created).toLocaleDateString()}` : presence(id);
         return item({ ic: kindIcon(d.kind), label: d.name, sub, onclick: () => deviceSheet(id) });
       })),
       h('p', { class: 'lede pad', style: { marginTop: '28px', fontSize: '13.5px', color: 'var(--fg-3)' } }, 'Wallpapers from wallhaven.cc.'));
@@ -883,6 +941,7 @@
 
   // countdowns ("Next in 2:41") without drawing the page again
   function tick() {
+    for (const el of document.querySelectorAll('[data-pending]')) { const t = pendingText(el); if (el.textContent !== t) el.textContent = t; }
     for (const el of document.querySelectorAll('[data-next]')) {
       const left = Math.round((Number(el.dataset.next) - Date.now()) / 1000);
       el.textContent = left <= 0 ? 'Changing now' : left >= 3600 ? `Next in ${Math.floor(left / 3600)} h ${Math.round((left % 3600) / 60)} min` : `Next in ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;

@@ -176,3 +176,17 @@ test('settings: patch merges, defaults per kind, the same list query the apps us
   assert.equal(listQuery(p), 'range=1y&atleast=3840x2160&ratios=16x9,16x10&cats=110&purity=100&q=night%20city&fav=50&maxw=0');
   assert.equal(applyOp(emptyDoc(), { op: 'weird' }), 'Unknown change');
 });
+
+test('state leaves the doc out when the remote already has that version', async () => {
+  const { store, pc } = await setup();
+  const full = await call(store, 'state', { token: pc.token });
+  assert.ok(full.doc && full.v === full.doc.v);
+  const same = await call(store, 'state', { token: pc.token, query: { v: String(full.v) } });
+  assert.equal(same.code, 200);
+  assert.equal(same.doc, undefined);
+  assert.equal(same.v, full.v);
+  assert.ok(same.status);
+  await call(store, 'op', { token: pc.token, body: { ops: [{ op: 'create', id: 'p_abc12345', name: 'Night' }] } });
+  const after = await call(store, 'state', { token: pc.token, query: { v: String(full.v) } });
+  assert.ok(after.doc && after.v === full.v + 1);
+});

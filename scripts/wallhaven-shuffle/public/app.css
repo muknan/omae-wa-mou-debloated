@@ -341,8 +341,10 @@ dialog.sheet::backdrop { background: var(--scrim); animation: fade .25s; }
 .switcher .picker { display: inline-flex; align-items: center; gap: 6px; color: var(--fg); min-width: 0; max-width: 100%; }
 .switcher .picker .icon { width: 18px; height: 18px; color: var(--fg-3); }
 
-/* a device that's changing: its picture steps back until the new one arrives (no spinner) */
-.hero.pending img { opacity: .45; transition: opacity .3s; }
+/* a device that's changing: the coming picture, held back and breathing slowly until the device shows it */
+.hero.pending img:not(.loading) { opacity: .55; animation: waiting 2.4s ease-in-out infinite; }
+@keyframes waiting { 50% { opacity: .7; } }
+@media (prefers-reduced-motion: reduce) { .hero.pending img, .ghost, .ghost-line { animation: none; } }
 /* placeholders while something loads: the shape of what's coming, breathing slowly */
 .ghost, .ghost-line { background: var(--raised); animation: breathe 1.6s ease-in-out infinite; }
 .ghost-line { height: 14px; border-radius: 7px; }
