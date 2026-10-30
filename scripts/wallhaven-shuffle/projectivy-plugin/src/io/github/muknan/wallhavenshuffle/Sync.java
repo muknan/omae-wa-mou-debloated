@@ -33,7 +33,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * is open), with one small request; the playlists come down only when they changed.
  */
 final class Sync {
-    static final String VERSION = "1.8";
+    static final String VERSION = "1.9";
 
     // ---- settings (always local; mirrored to the service when paired)
 
@@ -282,6 +282,34 @@ final class Sync {
         synchronized (loop) { users = Math.max(0, users - 1); loop.notifyAll(); }
     }
 
+    // Projectivy keeps the wallpaper service bound while its home screen shows. When it lets go (another app opened),
+    // the loop carries on for a short while in case it's back soon, then tells the remote "not on the home screen"
+    // once, so Next isn't pressed into the void, and stops.
+    private static final long AWAY_GRACE = 75_000;
+    private static boolean serviceHeld;
+    private static long awaySince;      // 0 while the home screen shows
+    private static volatile boolean away;
+
+    static boolean away() { return away; }
+
+    static void serviceUp(Context c) {
+        boolean wasAway;
+        synchronized (loop) {
+            wasAway = away;
+            awaySince = 0;
+            away = false;
+            if (serviceHeld) { poke = true; loop.notifyAll(); }
+        }
+        Log.i(ListStore.TAG, "home screen: bound");
+        if (!serviceHeld) { serviceHeld = true; hold(c); }
+        else if (wasAway) kick(c);
+    }
+
+    static void serviceDown() {
+        synchronized (loop) { awaySince = System.currentTimeMillis(); loop.notifyAll(); }
+        Log.i(ListStore.TAG, "home screen: unbound");
+    }
+
     /** Check in now (a change to send, a new wallpaper, a command to answer). */
     static void kick(Context c) {
         synchronized (loop) { poke = true; loop.notifyAll(); }
@@ -297,12 +325,20 @@ final class Sync {
                 if (users == 0) { thread = null; return; }
                 poke = false;
             }
+            // the home screen has been gone a while: say so (in the status checkIn sends) and let the service's hold go
+            boolean goingAway;
+            synchronized (loop) { goingAway = awaySince > 0 && System.currentTimeMillis() - awaySince >= AWAY_GRACE; }
+            if (goingAway) away = true;
             if (paired(c) && (pm == null || pm.isInteractive())) {
                 try { checkIn(c); reachable = true; lastError = ""; }
                 catch (Exception e) { reachable = false; lastError = e.getMessage(); Log.w(ListStore.TAG, "sync: " + e.getMessage()); }
-                wait = live ? 3_000 : reachable ? 30_000 : 60_000;
+                wait = live ? 3_000 : reachable ? 15_000 : 60_000;
             } else {
                 wait = 60_000;
+            }
+            synchronized (loop) {
+                if (goingAway && awaySince > 0) { awaySince = 0; serviceHeld = false; users = Math.max(0, users - 1); }
+                else if (awaySince > 0) wait = Math.min(wait, Math.max(1_000, awaySince + AWAY_GRACE - System.currentTimeMillis()));
             }
             synchronized (loop) {
                 long until = System.currentTimeMillis() + wait;
@@ -331,13 +367,16 @@ final class Sync {
         JSONObject r = call(c, "poll", body, true);
         SharedPreferences.Editor e = p.edit();
         if (sendSt) e.putString("st_hash", hash);
+        boolean wasLive = live;
         live = r.optBoolean("live");
+        if (live != wasLive) Log.i(ListStore.TAG, live ? "remote open: checking every 3 s" : "remote closed: checking every 15 s");
+        long now = r.optLong("now", System.currentTimeMillis());
         JSONObject d = r.optJSONObject("doc");
         if (d != null) { saveDoc(c, d); e.putInt("doc_v", r.optInt("v")); }
         e.putInt("cmd_seq", r.optInt("cs", p.getInt("cmd_seq", 0))).apply();
         if (d != null) afterDoc(c);
         JSONArray cmds = r.optJSONArray("cmds");
-        if (cmds != null) for (int i = 0; i < cmds.length(); i++) command(c, cmds.optJSONObject(i));
+        if (cmds != null) for (int i = 0; i < cmds.length(); i++) command(c, cmds.optJSONObject(i), now);
     }
 
     // A new document: take this TV's settings from it (unless a change made here is still on its way up).
@@ -358,8 +397,9 @@ final class Sync {
         notifyListeners();
     }
 
-    private static void command(Context c, JSONObject cmd) {
+    private static void command(Context c, JSONObject cmd, long now) {
         if (cmd == null) return;
+        Log.i(ListStore.TAG, cmd.optString("type") + " (remote, sent " + Math.max(0, (now - cmd.optLong("at", now)) / 1000) + " s ago)");
         switch (cmd.optString("type")) {
             case "next": ShuffleService.skipWait(c); break;
             case "prev": ShuffleService.previous(c); break;

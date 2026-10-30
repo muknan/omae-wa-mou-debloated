@@ -2,6 +2,7 @@
 // store, and passes /api/list on to a real deployment (LIST_ORIGIN). With --demo it also pairs a pretend TV and PC
 // that show wallpapers from that list and follow the remote's commands.
 //   LIST_ORIGIN=https://<your-project>.vercel.app node test/dev-server.mjs --demo     # then open the printed link
+//   DEMO_AWAY=1 … --demo     # the pretend TV is in another app (not on its home screen)
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -81,7 +82,7 @@ server.listen(port, async () => {
       const everyMs = (set?.every || (kind === 'tv' ? 1 : 15)) * 60e3;
       if (set && !set.paused && !set.keep && Date.now() > me.next) { pickNext(); me.next = Date.now() + everyMs; }
       const r = await sync('poll', { token, body: { v: me.v, cs: me.cs, st: {
-        app: `${kind} dev`, cur: me.cur, shown: me.shown, total: pool.length, next: set && !set.paused && !set.keep ? me.next : 0,
+        app: `${kind} dev`, away: kind === 'tv' && !!process.env.DEMO_AWAY || undefined, cur: me.cur, shown: me.shown, total: pool.length, next: set && !set.paused && !set.keep ? me.next : 0,
         recent: me.recent, counts: { toplist: pool.length }, list: set ? listQueryFor(set.filters) : '', base: kind === 'tv' ? 60 : undefined,
         local: kind === 'pc' ? [{ key: 'folder:D:\\Photos\\Holidays', name: 'Holidays', count: 48, on: false }] : undefined,
       } } });

@@ -36,7 +36,8 @@ Open the deployment's address on a phone (or any browser) for the remote:
 - **Devices**: pair a TV, PC or browser with the 6-digit code it shows; rename or sign out any of them.
 
 It works as an app on the phone's home screen (Add to Home screen). Changes reach a device within its next check-in:
-seconds while the remote is open, otherwise about 20 s (PC) or 30 s (TV, while its screen is on).
+a few seconds while the remote is open, otherwise about 10 s (PC) or 15 s (TV). The TV changes wallpapers only on
+Projectivy's home screen: in another app the remote says "Not on the home screen" and waits.
 
 **Set it up**
 1. In the Vercel project: **Storage > Create Database > Upstash for Redis** (free plan, in the functions' region,

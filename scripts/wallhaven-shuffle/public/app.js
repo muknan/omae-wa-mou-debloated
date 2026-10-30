@@ -233,14 +233,14 @@
       if (label) toast(label);
       setTimeout(() => {
         const p = UI.pending[device];
-        if (p && p.at + 25e3 <= Date.now() + 50) {
+        if (p && p.at + 30e3 <= Date.now() + 50) {
           delete UI.pending[device];
           changed();
           const d = S.doc?.devices[device];
-          if (d) toast(`${d.name} will do it when it next checks in`);
+          if (d) toast(d.kind === 'tv' ? `${d.name} hasn’t changed yet. It changes only while its home screen is showing.` : `${d.name} hasn’t picked it up yet. It will at its next check-in.`);
         }
-      }, 25e3);
-      refreshSoon();
+      }, 30e3);
+      schedule(1200);
     } catch (e) {
       delete UI.pending[device];
       changed();
@@ -269,10 +269,12 @@
     }
     changed();
   }
-  function schedule() {
+  // every 4 s while in use, every 1.5 s while a device is changing, every 30 s when left alone
+  function schedule(first) {
     clearTimeout(timer);
     if (!token || document.hidden) return;
-    timer = setTimeout(async () => { await refresh(); schedule(); }, idle() ? 30e3 : 4e3);
+    const every = Object.keys(UI.pending).length ? 1500 : idle() ? 30e3 : 4e3;
+    timer = setTimeout(async () => { await refresh(); schedule(); }, first ?? every);
   }
   function refreshSoon() { clearTimeout(soon); soon = setTimeout(() => refresh(), 1500); }
   document.addEventListener('visibilitychange', () => { if (!document.hidden) { lastTouch = Date.now(); refresh().then(schedule); } else clearTimeout(timer); });
@@ -479,12 +481,13 @@
   function devicePage(id) {
     const d = S.doc.devices[id], s = d.settings, stat = S.status[id] || {}, st = stat.st || {};
     const cur = st.cur && (st.cur.id || st.cur.local) ? st.cur : null;
-    const online = !!stat.online, pend = UI.pending[id];
+    const away = !!st.away;                           // a TV in another app: wallpapers change only on its home screen
+    const online = !!stat.online && !away, pend = UI.pending[id];
     const kept = !!s.keep, paused = !!s.paused;
 
     // the picture; the last one stays underneath while the next fades in
     const heroSrc = cur ? (cur.local ? cur.thumb : thumb(cur)) : null;
-    const hero = h('div', { class: 'hero' });
+    const hero = h('div', { class: `hero ${pend ? 'pending' : ''}` });
     const prev = UI.hero[id];
     if (prev && prev !== heroSrc && !prev.startsWith('data:')) hero.style.backgroundImage = `url("${prev}")`;
     UI.hero[id] = heroSrc;
@@ -508,18 +511,19 @@
         total ? h('span', { class: 'num' }, `${nf.format(shown)} / ${nf.format(total)}`) : null),
       total ? h('div', { class: 'track' }, h('i', { style: { width: `${(shown / total) * 100}%` } })) : null,
       h('div', { class: 'status' }, h('span', { class: `dot ${online ? 'on' : ''}` }),
-        online
+        pend ? h('span', {}, 'Changing…')
+        : away ? h('span', {}, 'Not on the home screen')
+        : online
           ? h('span', {}, paused ? 'Paused' : kept ? 'Keeping this wallpaper' : st.next ? h('span', { 'data-next': st.next }) : 'Online')
           : h('span', {}, stat.seen ? `Offline · seen ${ago(stat.seen)}` : 'Hasn’t checked in yet')));
 
     const favOn = cur && !cur.local && inPl('fav', cur.id);
-    const busy = (t) => pend && pend.type === t;
     const controls = h('div', { class: 'controls pad' },
       h('button', { class: `icon-btn ${kept ? 'on' : ''}`, 'aria-label': kept ? 'Stop keeping this wallpaper' : 'Keep this wallpaper', 'aria-pressed': String(kept), disabled: !cur && !kept,
         onclick: () => setSettings(id, { keep: kept ? '' : cur.key || cur.id }) }, icon(kept ? 'pinOn' : 'pin')),
-      h('button', { class: 'icon-btn', 'aria-label': 'Previous', disabled: !online, onclick: () => command(id, { type: 'prev' }) }, busy('prev') ? h('span', { class: 'spin' }) : icon('prev')),
+      h('button', { class: 'icon-btn', 'aria-label': 'Previous', disabled: !online, onclick: () => command(id, { type: 'prev' }) }, icon('prev')),
       h('button', { class: 'icon-btn main', 'aria-label': paused ? 'Resume' : 'Pause', onclick: () => setSettings(id, { paused: !paused }) }, icon(paused ? 'play' : 'pause')),
-      h('button', { class: 'icon-btn', 'aria-label': 'Next', disabled: !online, onclick: () => command(id, { type: 'next' }) }, busy('next') ? h('span', { class: 'spin' }) : icon('next')),
+      h('button', { class: 'icon-btn', 'aria-label': 'Next', disabled: !online, onclick: () => command(id, { type: 'next' }) }, icon('next')),
       h('button', { class: `icon-btn heart ${favOn ? 'on' : ''}`, 'aria-label': favOn ? 'Remove from Favourites' : 'Save to Favourites', 'aria-pressed': String(!!favOn),
         disabled: !cur || cur.local, onclick: () => toggleFav(cur) }, icon(favOn ? 'heartOn' : 'heart')));
 
@@ -531,7 +535,7 @@
 
     const recent = Array.isArray(st.recent) ? st.recent.filter((r) => r && (r.id || r.local)).slice(0, 20) : [];
     const side = h('div', { class: 'side' },
-      online || !stat.seen ? null : h('div', { class: 'offline pad' }, icon('alert'), h('span', {}, 'Changes apply when it’s back on.')),
+      online || !stat.seen ? null : h('div', { class: 'offline pad' }, icon('alert'), h('span', {}, away ? 'Wallpapers change only on its home screen. What you change here applies when it’s back there.' : 'Changes apply when it’s back on.')),
       settings,
       // a TV changes when Projectivy asks (its Update delay): say so when that is slower than the choice
       d.kind === 'tv' && st.base > 70 && s.every * 60 < st.base
@@ -683,7 +687,7 @@
         e.preventDefault();
         const m = /(?:wallhaven\.cc\/w\/|whvn\.cc\/|wallhaven-)?([a-z0-9]{6})(?:\.\w+)?\/?$/i.exec(input.value.trim());
         if (!m) { err.textContent = 'Paste a link like wallhaven.cc/w/abc123'; return; }
-        go.disabled = true; go.replaceChildren(h('span', { class: 'spin' }));
+        go.disabled = true; go.textContent = 'Adding…';
         try {
           const j = await api('wall', { query: { id: m[1].toLowerCase() } });
           close();
@@ -719,7 +723,7 @@
     const favs = new Set(findPl('fav').items.map((x) => x.id)), hidden = new Set(findPl('hidden').items.map((x) => x.id));
     const key = ctx.key || ctx.pl || 'grid';
     let shown = 0;
-    const sentinel = h('div', { class: 'more' }, h('span', { class: 'spin' }));
+    const sentinel = h('div', { class: 'more', 'aria-hidden': 'true' });
     const more = () => {
       const end = Math.min(items.length, Math.max(shown + 60, UI.shown[key] || 0));
       for (; shown < end; shown++) {
@@ -779,7 +783,8 @@
         switchItem({ label: 'Show hidden ones', on: B.withHidden, id: 'browse-hidden', onchange: (on) => { B.withHidden = on; changed(); } })),
       h('p', { class: 'lede pad', style: { margin: '14px 0 16px' } }, filtersSummary(f), L.items ? ` · ${plural(total, 'wallpaper')}` : ''),
       L.error && !L.items ? h('div', { class: 'empty' }, h('h2', {}, 'Couldn’t get the list'), h('p', {}, L.error), h('button', { class: 'btn', onclick: () => { lists.delete(query); changed(); } }, 'Try again'))
-        : !L.items ? h('div', { class: 'empty' }, h('span', { class: 'spin', style: { width: '26px', height: '26px', marginBottom: '16px' } }), h('p', {}, 'Getting the toplist. One nobody asked for lately can take a minute.'))
+        : !L.items ? h('div', {}, h('p', { class: 'lede pad' }, 'Getting the toplist. One nobody asked for lately can take a minute.'),
+            h('div', { class: 'photos', 'aria-hidden': 'true' }, Array.from({ length: 12 }, () => h('div', { class: 'photo ghost' }))))
           : items.length ? photoGrid(items, { key: `browse-${B.dev}-${B.sort}` })
             : h('div', { class: 'empty' }, h('h2', {}, 'Nothing matches'), h('p', {}, `Loosen ${d.name}’s toplist filters on the Now page.`)));
   }
@@ -811,7 +816,7 @@
         e.preventDefault();
         const c = code.value.replace(/\D/g, '');
         if (c.length !== 6) { err.textContent = 'The code has 6 digits'; return; }
-        go.disabled = true; go.replaceChildren(h('span', { class: 'spin' }));
+        go.disabled = true; go.textContent = 'Pairing…';
         try {
           const j = await api('approve', { body: { code: c, name: name.value } });
           close();
@@ -853,7 +858,15 @@
     if (!shell) buildShell();
     const r = route();
     for (const a of shell.nav.querySelectorAll('a')) { if (a.dataset.tab === r.name) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); }
-    if (!S.doc) { shell.main.replaceChildren(h('div', { class: 'loading-page' }, h('span', { class: 'spin' }))); return; }
+    if (!S.doc) {
+      // the page's shape while the first answer comes: a title line, the picture and three rows, all quiet
+      shell.main.replaceChildren(h('div', { 'aria-busy': 'true', 'aria-label': 'Loading' },
+        h('div', { class: 'switcher pad' }, h('div', { class: 'ghost-line', style: { width: '45%', height: '28px' } })),
+        h('div', { class: 'hero ghost' }),
+        h('div', { class: 'pad', style: { paddingTop: '18px' } }, h('div', { class: 'ghost-line', style: { width: '60%' } })),
+        h('div', { class: 'group ghost', style: { height: '156px', marginTop: '86px' } })));
+      return;
+    }
     const roundedStatus = Object.fromEntries(Object.entries(S.status).map(([k, v]) => [k, { ...v, seen: Math.round(v.seen / 60e3) }]));
     const sig = JSON.stringify([r, S.online, S.doc, roundedStatus, UI.pending, UI.dev, UI.browse, [...lists.entries()].map(([k, v]) => [k, !!v.items, v.loading, v.error])]);
     if (sig === lastSig) return;

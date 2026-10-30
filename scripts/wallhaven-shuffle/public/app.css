@@ -64,8 +64,6 @@ a { color: inherit; text-decoration: none; }
 .num { font-variant-numeric: tabular-nums; }
 .ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .icon { width: 22px; height: 22px; flex: none; }
-.spin { width: 18px; height: 18px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: spin .7s linear infinite; display: inline-block; flex: none; opacity: .8; }
-@keyframes spin { to { transform: rotate(360deg); } }
 
 /* ---------- frame: content, tab bar */
 
@@ -275,7 +273,6 @@ dialog.sheet::backdrop { background: var(--scrim); animation: fade .25s; }
 @keyframes rise { from { transform: translateY(12px); opacity: 0; } }
 @keyframes sink { to { transform: translateY(8px); opacity: 0; } }
 
-.loading-page { padding-top: 80px; display: grid; justify-items: center; color: var(--fg-3); }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
@@ -343,3 +340,10 @@ dialog.sheet::backdrop { background: var(--scrim); animation: fade .25s; }
 /* more than two devices: the name is a button that lists them */
 .switcher .picker { display: inline-flex; align-items: center; gap: 6px; color: var(--fg); min-width: 0; max-width: 100%; }
 .switcher .picker .icon { width: 18px; height: 18px; color: var(--fg-3); }
+
+/* a device that's changing: its picture steps back until the new one arrives (no spinner) */
+.hero.pending img { opacity: .45; transition: opacity .3s; }
+/* placeholders while something loads: the shape of what's coming, breathing slowly */
+.ghost, .ghost-line { background: var(--raised); animation: breathe 1.6s ease-in-out infinite; }
+.ghost-line { height: 14px; border-radius: 7px; }
+@keyframes breathe { 50% { opacity: .55; } }

@@ -74,7 +74,7 @@ toplist, the same one the TV uses. It is one exe with no installer and no .NET S
   address…**, and **Sign out of sync**. Signed out, the PC keeps its playlists and carries on on its own.
 - ⋯ > **Show on ▸** sends the wallpaper on screen to the TV (or another PC) right away.
 - Connecting merges: playlists with the same name become one, and Favourites and Hidden are combined.
-- It checks in every 20 seconds, every 3 while a remote is open, with one small request; playlists download only
+- It checks in every 10 seconds, every 3 while a remote is open, with one small request; playlists download only
   when they changed.
 
 **⋯ menu**: Add to playlist, Show on, Show in folder, Open on Wallhaven, Never show this one, Playlists, Show hidden

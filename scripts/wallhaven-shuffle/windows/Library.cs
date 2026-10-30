@@ -754,7 +754,7 @@ namespace WallhavenShuffle
                 object live;
                 syncLive = r.TryGetValue("live", out live) && live is bool && (bool)live;
                 syncReachable = true; syncError = "";
-                wait = syncLive ? 3000 : locked ? 60000 : 20000;
+                wait = syncLive ? 3000 : locked ? 60000 : 10000;
             }
             catch (SyncError ex)
             {
@@ -793,8 +793,10 @@ namespace WallhavenShuffle
                 if (current != null && current.WallhavenId != null && doc.Hidden.Contains(current.WallhavenId) && !busy) { prepared = null; Next("hidden on another device"); }
             }
             SaveLibrary();
+            object nowObj;
+            long now = r.TryGetValue("now", out nowObj) ? Convert.ToInt64(nowObj) : 0;
             if (r.TryGetValue("cmds", out cmds) && cmds is object[])
-                foreach (var c in (object[])cmds) Command(c as Dictionary<string, object>);
+                foreach (var c in (object[])cmds) Command(c as Dictionary<string, object>, now);
             Changed();
         }
 
@@ -828,15 +830,18 @@ namespace WallhavenShuffle
             if (window != null && !window.IsDisposed) window.LoadValues();
         }
 
-        void Command(Dictionary<string, object> c)
+        void Command(Dictionary<string, object> c, long now)
         {
             if (c == null) return;
-            object type;
+            object type, at;
             c.TryGetValue("type", out type);
+            // how long it took to get here, in the log ("next (remote, sent 2 s ago)")
+            string from = "remote";
+            if (now > 0 && c.TryGetValue("at", out at)) try { from += ", sent " + Math.Max(0, (now - Convert.ToInt64(at)) / 1000) + " s ago"; } catch (Exception) { }
             switch (Convert.ToString(type))
             {
-                case "next": Next("remote"); break;
-                case "prev": Previous(); break;
+                case "next": Next(from); break;
+                case "prev": Log("previous (" + from + ")"); Previous(); break;
                 case "refresh": nextListRefresh = DateTime.MinValue; Log("a fresh list (asked from the remote)"); break;
                 case "local":
                 {
@@ -868,7 +873,7 @@ namespace WallhavenShuffle
         Dictionary<string, object> StatusForRemote(out string thumbFor)
         {
             thumbFor = null;
-            var st = new Dictionary<string, object> { { "app", "pc 2.2" } };
+            var st = new Dictionary<string, object> { { "app", "pc 2.3" } };
             if (current != null)
             {
                 var item = ItemOf(current);

@@ -53,8 +53,8 @@ public final class ShuffleService extends Service {
         @Override public void setPreferences(String params) { importPrefs(ShuffleService.this, params); }
     };
 
-    @Override public void onCreate() { super.onCreate(); Sync.hold(this); }
-    @Override public void onDestroy() { Sync.release(); super.onDestroy(); }
+    @Override public void onCreate() { super.onCreate(); Sync.serviceUp(this); }
+    @Override public void onDestroy() { Sync.serviceDown(); super.onDestroy(); }
     @Override public IBinder onBind(Intent intent) { return binder; }
 
     // ---- what to show
@@ -130,7 +130,27 @@ public final class ShuffleService extends Service {
     /** Next, right away. */
     static void skipWait(Context c) {
         ListStore.prefs(c).edit().putBoolean("skip_wait", true).apply();
-        askProjectivyToRefresh(c, 1);
+        askUntilChanged(c);
+    }
+
+    // Projectivy ignores a refresh that comes within about 30 s of the one before, so a change asked for from the
+    // remote is asked for again (twice at most) until the wallpaper has actually changed.
+    private static final android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+    private static void askUntilChanged(Context c) {
+        final Context app = c.getApplicationContext();
+        final long asked = System.currentTimeMillis();
+        askProjectivyToRefresh(app, 1);
+        for (int i = 1; i <= 2; i++) {
+            final int n = i;
+            main.postDelayed(() -> {
+                SharedPreferences p = ListStore.prefs(app);
+                boolean waiting = p.getBoolean("skip_wait", false) || !p.getString("pending_json", "").isEmpty();
+                if (waiting && p.getLong("changed_at", 0) < asked) {
+                    Log.i(ListStore.TAG, "still waiting for Projectivy: asking again (" + n + ")");
+                    askProjectivyToRefresh(app, 1);
+                }
+            }, 31_000L * i);
+        }
     }
 
     /** Back to the one before (out of this round again, as on the PC). */
@@ -150,13 +170,13 @@ public final class ShuffleService extends Service {
                 .putInt("shown", Math.max(0, p.getInt("shown", 1) - 1)).putString("recent_json", rest.toString())
                 .putString("current_json", "").putString("pending_json", prev.toString()).apply();
         } catch (Exception e) { Log.w(ListStore.TAG, "previous failed: " + e); return; }
-        askProjectivyToRefresh(c, 1);
+        askUntilChanged(c);
     }
 
     /** This wallpaper, now ("Show on TV" from the remote or the PC). */
     static void show(Context c, Shuffle.Item w) {
         ListStore.prefs(c).edit().putString("pending_json", Sync.itemJson(w).toString()).apply();
-        askProjectivyToRefresh(c, 1);
+        askUntilChanged(c);
     }
 
     /** The playlists or the toplist changed: if what's on screen was hidden meanwhile, move on. */
@@ -183,6 +203,7 @@ public final class ShuffleService extends Service {
         JSONObject st = new JSONObject();
         try {
             st.put("app", "tv " + Sync.VERSION);
+            if (Sync.away()) st.put("away", true);
             Shuffle.Item cur = current(c);
             if (cur != null) st.put("cur", Sync.itemJson(cur).put("key", cur.id));
             st.put("shown", p.getInt("shown", 0)).put("total", p.getInt("total", 0));
