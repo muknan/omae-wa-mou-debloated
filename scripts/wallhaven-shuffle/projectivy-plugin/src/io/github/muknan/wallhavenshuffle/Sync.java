@@ -1,5 +1,6 @@
 package io.github.muknan.wallhavenshuffle;
 
+import android.app.ActivityManager;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.net.Uri;
@@ -33,7 +34,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * is open), with one small request; the playlists come down only when they changed.
  */
 final class Sync {
-    static final String VERSION = "1.13";
+    static final String VERSION = "1.15";
 
     // ---- settings (always local; mirrored to the service when paired)
 
@@ -282,37 +283,59 @@ final class Sync {
         synchronized (loop) { users = Math.max(0, users - 1); loop.notifyAll(); }
     }
 
-    // Projectivy keeps the wallpaper service bound while its home screen shows. When it lets go (another app opened),
-    // the remote is told "not on the home screen" straight away (Android ends this app soon after, so it can't wait),
-    // and the loop stops once that's sent.
-    private static boolean serviceHeld, sayAway;
+    // Whether Projectivy's home screen is showing. Projectivy connects to the plugin only to ask for a wallpaper and
+    // lets go a moment later, so being connected isn't it. What is: while its home screen shows, Android ranks this
+    // app as bound to the app on screen (and it isn't frozen); in another app that rank drops. Gone for 5 s (or, should
+    // that ever mislead, no ask from Projectivy for two of its intervals) means another app: the remote is told "not on
+    // the home screen" once, and checking pauses (the screen is still looked at every 3 s, no network) until the
+    // rank comes back or Projectivy asks again.
+    private static boolean serviceHeld;
     private static volatile boolean away;
+    private static long notOnTopSince;
 
     static boolean away() { return away; }
 
     static void serviceUp(Context c) {
-        boolean held;
+        boolean held, was;
         synchronized (loop) {
+            was = away;
             away = false;
-            sayAway = false;
+            notOnTopSince = 0;
             held = serviceHeld;
             serviceHeld = true;
             poke = true;
+            pokedAt = System.currentTimeMillis();
             loop.notifyAll();
         }
-        Log.i(ListStore.TAG, "home screen: bound");
+        if (was || !held) Log.i(ListStore.TAG, "home screen: showing");
         if (!held) hold(c);
     }
 
-    static void serviceDown() {
-        synchronized (loop) { away = true; sayAway = true; poke = true; loop.notifyAll(); }
-        Log.i(ListStore.TAG, "home screen: unbound");
+    static void serviceDown() { }   // Projectivy lets go between asks too: that says nothing about the screen
+
+    private static int lastImportance;
+    private static boolean onTop() {
+        ActivityManager.RunningAppProcessInfo me = new ActivityManager.RunningAppProcessInfo();
+        ActivityManager.getMyMemoryState(me);
+        if (me.importance != lastImportance) { lastImportance = me.importance; Log.d(ListStore.TAG, "importance " + me.importance); }
+        return me.importance <= ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND_SERVICE;
+    }
+
+    // Another app has been on screen for a while (checked each round of the loop).
+    private static boolean leftHomeScreen(Context c) {
+        long now = System.currentTimeMillis();
+        if (onTop()) notOnTopSince = 0;
+        else if (notOnTopSince == 0) notOnTopSince = now;
+        long lastAsk = ListStore.prefs(c).getLong("asked_at", 0);
+        boolean quiet = lastAsk > 0 && now - lastAsk > 2 * Math.max(60_000, ShuffleService.base(c)) + 30_000;
+        return (notOnTopSince > 0 && now - notOnTopSince >= 5_000) || quiet;
     }
 
     /** Check in now (a change to send, a new wallpaper, a command to answer). */
     static void kick(Context c) {
-        synchronized (loop) { poke = true; loop.notifyAll(); }
+        synchronized (loop) { poke = true; pokedAt = System.currentTimeMillis(); loop.notifyAll(); }
     }
+    private static long lastCheck, pokedAt, interval = 10_000;
 
     static void statusChanged(Context c) { kick(c); }
 
@@ -324,19 +347,25 @@ final class Sync {
                 if (users == 0) { thread = null; return; }
                 poke = false;
             }
-            boolean goingAway;
-            synchronized (loop) { goingAway = sayAway; }
-            if (paired(c) && (pm == null || pm.isInteractive())) {
-                try { checkIn(c); reachable = true; lastError = ""; }
-                catch (Exception e) { reachable = false; lastError = e.getMessage(); Log.w(ListStore.TAG, "sync: " + e.getMessage()); }
-                wait = live ? 1_500 : reachable ? 10_000 : 60_000;
-            } else {
-                wait = 60_000;
-            }
+            boolean changed = false, due;
             synchronized (loop) {
-                // "not on the home screen" is sent (or can't be): the service's hold goes, unless it's back meanwhile
-                if (goingAway && sayAway && away) { sayAway = false; serviceHeld = false; users = Math.max(0, users - 1); }
+                if (serviceHeld && !away && leftHomeScreen(c)) { away = true; changed = true; Log.i(ListStore.TAG, "home screen: another app"); }
+                else if (away && onTop()) { away = false; notOnTopSince = 0; changed = true; Log.i(ListStore.TAG, "home screen: showing"); }
+                due = changed || pokedAt >= lastCheck || (!away && System.currentTimeMillis() - lastCheck >= interval);
             }
+            if (due) {
+                lastCheck = System.currentTimeMillis();
+                if (paired(c) && (pm == null || pm.isInteractive())) {
+                    try { checkIn(c); reachable = true; lastError = ""; }
+                    catch (Exception e) { reachable = false; lastError = e.getMessage(); Log.w(ListStore.TAG, "sync: " + e.getMessage()); }
+                    interval = live ? 1_500 : reachable ? 10_000 : 60_000;
+                } else {
+                    interval = 60_000;
+                }
+            }
+            // the next check-in is due after `interval`; meanwhile the screen is looked at every 2 s (3 s in another app)
+            wait = away ? 3_000 : Math.max(200, Math.min(lastCheck + interval - System.currentTimeMillis(), serviceHeld ? 2_000 : Long.MAX_VALUE));
+            if (pm != null && !pm.isInteractive()) wait = 60_000;
             synchronized (loop) {
                 long until = System.currentTimeMillis() + wait;
                 while (!poke && users > 0) {

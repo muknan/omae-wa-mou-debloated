@@ -42,6 +42,7 @@ public final class ShuffleService extends Service {
         @Override public List<Wallpaper> getWallpapers(Event event) {
             List<Wallpaper> out = new ArrayList<>();
             Log.d(ListStore.TAG, "asked by Projectivy (event " + (event == null ? "none" : event.eventType) + ")");
+            Sync.serviceUp(ShuffleService.this);   // Projectivy asking: its home screen is showing
             if (event == null || event.eventType != Event.TIME_ELAPSED) return out;   // empty = keep the current one
             try {
                 Wallpaper w = next(ShuffleService.this);
