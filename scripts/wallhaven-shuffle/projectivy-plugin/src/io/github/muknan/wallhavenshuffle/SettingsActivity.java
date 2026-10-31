@@ -440,7 +440,7 @@ public final class SettingsActivity extends Activity implements Sync.Listener {
         if (st.has("note")) { status.setText(st.optString("note")); status.setTextColor(WARN); return; }
         status.setTextColor(FG3);
         long next = st.optLong("next", 0), left = (next - System.currentTimeMillis()) / 1000;
-        status.setText(next == 0 ? "" : left <= 0 ? "Changing at Projectivy’s next turn" : String.format(Locale.US, "Next in %d:%02d", left / 60, left % 60));
+        status.setText(next == 0 ? "" : left <= 0 ? "Changing…" : String.format(Locale.US, "Next in %d:%02d", left / 60, left % 60));
     }
 
     private void loadPicture(Shuffle.Item w) {

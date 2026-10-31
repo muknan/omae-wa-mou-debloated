@@ -11,7 +11,7 @@
   };
   let token = store.get('whs.token');
   const S = { doc: null, status: {}, presets: null, me: null, online: true, inFlight: 0 };
-  const UI = { dev: store.get('whs.dev'), pending: {}, localWant: {}, heroes: {}, shown: {}, browse: { dev: store.get('whs.browseDev'), sort: 'fav', withHidden: false } };
+  const UI = { dev: store.get('whs.dev'), pending: {}, settleAt: {}, localWant: {}, heroes: {}, shown: {}, browse: { dev: store.get('whs.browseDev'), sort: 'fav', withHidden: false } };
   const lists = new Map(); // list query -> { items, error, loading, at }
   const sheets = new Set(); // open sheets' refill functions, so they follow changes made elsewhere
 
@@ -329,7 +329,14 @@
     }
     return null;
   }
-  const setSettings = (device, patch) => ops([{ op: 'settings', device, patch }]);
+  // Changes that move a device's countdown (Pause, Keep, Change every): the remote waits for the device's next status,
+  // newer than this, before it shows a countdown again (see devicePage).
+  const setSettings = (device, patch) => {
+    const moves = 'paused' in patch || 'keep' in patch || 'every' in patch;
+    // the word shown meanwhile follows what was asked: going again after Pause or Keep, or a new interval
+    if (moves) UI.settleAt[device] = { at: Date.now(), word: patch.paused === false || patch.keep === '' ? 'Resuming…' : 'Updating…' };
+    return ops([{ op: 'settings', device, patch }]).then((j) => { if (moves) schedule(800); return j; });
+  };
   const toggleSource = (device, key) => {
     const s = S.doc.devices[device].settings;
     setSettings(device, { sources: s.sources.includes(key) ? s.sources.filter((x) => x !== key) : [...s.sources, key] });
@@ -367,13 +374,25 @@
       if (!d) { delete UI.pending[id]; continue; }
       if (st.cur?.key && st.cur.key !== p.from) { delete UI.pending[id]; continue; }
       if (p.seq && !p.acked && (st.ack?.seq || 0) >= p.seq) p.acked = now;
-      if (p.acked) p.eta = st.ack?.eta || 0;
+      if (p.acked) p.eta = localTime(st, st.ack?.eta || 0);
       let why = null;
       if (st.away) why = `${d.name} isn’t on its home screen. It changes when it’s back there.`;
       else if (p.acked && now > Math.max(p.eta || 0, p.acked) + 15e3) why = d.kind === 'tv' ? `Projectivy hasn’t shown it yet. It will at its next change.` : `${d.name} couldn’t change it just now.`;
       else if (!p.acked && now > (p.sent || p.at) + 40e3) why = `${d.name} hasn’t checked in. It changes when it does.`;
       if (why) { delete UI.pending[id]; toast(why); }
     }
+  }
+  // A device has answered a settings change made here: its status came after it (st.at, on the service's clock), or
+  // nothing came in 10 s (it saw no change, e.g. Pause then Resume before it looked: its countdown never moved).
+  function settleCountdowns() {
+    for (const [id, { at }] of Object.entries(UI.settleAt)) {
+      const st = S.status[id]?.st, s = S.doc?.devices[id]?.settings;
+      if (Date.now() - at > 10e3 || (st?.at && st.at - (S.skew || 0) > at && s && inStep(st, s))) delete UI.settleAt[id];
+    }
+  }
+  // the device's status says it has these settings (older apps don't say: taken as yes)
+  function inStep(st, s) {
+    return st.every == null || (st.paused === !!s.paused && st.kept === !!s.keep && st.every === s.every);
   }
   // the text for a press in progress, kept current by tick()
   function pendingText(el) {
@@ -408,14 +427,20 @@
       const query = {};
       if (idle()) query.quiet = '1';
       if (S.doc && !force && !S.docStale) query.v = S.doc.v;   // the doc comes back only when it changed
+      const t0 = Date.now();
       const j = await api('state', { query });
+      const t1 = Date.now();
       if (mine < applied) return;
       applied = mine;
       S.online = true;
+      // the service's clock against this one, from the quickest answer so far (the most exact; the next ones only
+      // replace it when about as quick, so a countdown doesn't wobble by a second from one answer to the next)
+      if (S.rtt == null || t1 - t0 <= S.rtt + 20) { S.rtt = Math.min(S.rtt ?? Infinity, t1 - t0); S.skew = j.now - Math.round((t0 + t1) / 2); }
       S.me = j.me; S.presets = j.presets; S.status = j.status;
       if (j.doc && (force || S.docStale || (!S.inFlight && (!S.doc || j.doc.v >= S.doc.v)))) { S.doc = j.doc; S.docStale = false; }
       for (const st of Object.values(S.status)) { warm(st.st?.up); warm(st.st?.recent?.[0]); if (st.st?.cur?.id) sharpen(st.st.cur); sharpen(st.st?.up); }
       settlePending();
+      settleCountdowns();
       if (!S.doc.devices[S.me]) return signedOut('This browser was signed out');
     } catch (e) {
       if (mine < applied) return;
@@ -430,7 +455,7 @@
   function schedule(first) {
     clearTimeout(timer);
     if (!token || document.hidden) return;
-    const every = Object.keys(UI.pending).length ? 1000 : idle() ? 30e3 : 4e3;
+    const every = Object.keys(UI.pending).length || Object.keys(UI.settleAt).length ? 1000 : idle() ? 30e3 : 4e3;
     timer = setTimeout(async () => { await refresh(); schedule(); }, first ?? every);
   }
   document.addEventListener('visibilitychange', () => { if (!document.hidden) { lastTouch = Date.now(); refresh().then(schedule); } else clearTimeout(timer); });
@@ -678,6 +703,12 @@
     const away = !!st.away;                           // a TV in another app: wallpapers change only on its home screen
     const online = !!stat.online && !away, pend = UI.pending[id];
     const kept = !!s.keep, paused = !!s.paused;
+    // The device hasn't taken the latest settings yet (Resume, Keep, Change every just changed here, or elsewhere): its
+    // countdown is from before, so it isn't shown until the device sends a status newer than the change and in step
+    // with it (no number that then jumps). See settleCountdowns for when that wait ends.
+    const settling = !!UI.settleAt[id] || !inStep(st, s);
+    const resuming = (st.paused && !paused) || (st.kept && !kept);
+    const next = localTime(st, st.next);
 
     // the picture: the coming one, held back, while it changes (see heroOf)
     const pic0 = pend?.ahead || cur;
@@ -704,7 +735,8 @@
       h('div', { class: 'status' }, h('span', { class: `dot ${online ? 'on' : ''}` }),
         pend ? pendingLabel(pend, d.name)
         : online
-          ? h('span', {}, paused ? 'Paused' : kept ? 'Keeping this wallpaper' : st.next ? h('span', { 'data-next': st.next }, nextText(st.next)) : 'Online')
+          ? h('span', {}, paused ? 'Paused' : kept ? 'Keeping this wallpaper' : settling ? (UI.settleAt[id]?.word || (resuming ? 'Resuming…' : 'Updating…'))
+            : next ? h('span', { 'data-next': next }, nextText(next)) : 'Online')
           : h('span', {}, presence(id))));
 
     const favOn = cur && !cur.local && inPl('fav', cur.id);
@@ -1057,7 +1089,7 @@
       return;
     }
     const roundedStatus = Object.fromEntries(Object.entries(S.status).map(([k, v]) => [k, { ...v, seen: Math.round(v.seen / 60e3) }]));
-    const sig = JSON.stringify([r, S.online, S.doc, roundedStatus, UI.pending, UI.dev, UI.browse, [...lists.entries()].map(([k, v]) => [k, !!v.items, v.loading, v.error])]);
+    const sig = JSON.stringify([r, S.online, S.doc, roundedStatus, UI.pending, Object.keys(UI.settleAt), UI.dev, UI.browse, [...lists.entries()].map(([k, v]) => [k, !!v.items, v.loading, v.error])]);
     if (sig === lastSig && !force) return;
     lastSig = sig;
     const view = r.name === 'playlists' ? (r.arg ? viewPlaylist(r.arg) : viewPlaylists()) : r.name === 'browse' ? viewBrowse() : r.name === 'devices' ? viewDevices() : viewNow();
@@ -1092,6 +1124,9 @@
   addEventListener('hashchange', () => { lastSig = ''; render(); scrollTo(0, 0); });
 
   // countdowns ("Next in 2:41") without drawing the page again
+  // A time a device gave (on its clock) on this browser's clock: by the device's offset from the service (st.skew,
+  // worked out when it sent it) and this browser's (S.skew). Devices' and phones' clocks can be seconds apart.
+  const localTime = (st, t) => (t ? Math.round(t + (st?.skew || 0) - (S.skew || 0)) : t);
   function nextText(at) {
     const left = Math.round((at - Date.now()) / 1000);
     return left <= 0 ? 'Changing…' : left >= 3600 ? `Next in ${Math.floor(left / 3600)} h ${Math.round((left % 3600) / 60)} min` : `Next in ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;

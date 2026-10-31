@@ -205,3 +205,13 @@ test('a warm server reads the version, not the whole doc, and still sees every c
   const after = await call(store, 'state', { token: pc.token });
   assert.ok(after.doc.playlists.some((p) => p.name === 'Fresh'));
 });
+
+test('a device\'s clock offset is kept with its status (its own clock is not)', async () => {
+  const { store, pc } = await setup();
+  await call(store, 'poll', { token: pc.token, body: { v: -1 } });
+  await call(store, 'poll', { token: pc.token, body: { v: -1, st: { next: 1, t: Date.now() - 5000 } } });
+  const web = await call(store, 'redeem', { body: { code: (await call(store, 'link', { token: pc.token, body: {} })).code } });
+  const st = (await call(store, 'state', { token: web.token })).status[pc.id].st;
+  assert.equal(st.t, undefined);
+  assert.ok(st.skew >= 4900 && st.skew < 6000, `skew ${st.skew}`);
+});

@@ -176,7 +176,7 @@ button.item:active, a.item:active, label.item:active { background: var(--raised-
 .item.accent { color: var(--accent); }
 .item.accent > .icon { color: var(--accent); }
 .item select { position: absolute; inset: 0; opacity: 0; width: 100%; cursor: pointer; font-size: 16px; }
-.item input.inline { flex: 1; min-width: 0; text-align: right; background: transparent; border: 0; padding: 6px 0; font-size: 16px; color: var(--fg-2); }
+.item input.inline { flex: 1; min-width: 0; text-align: right; background: transparent; border: 0; padding: 6px 30px 6px 0; font-size: 16px; color: var(--fg-2); }   /* ends where the other rows' values do (before their 16 px arrow and 14 px gap) */
 .item input.inline:focus { outline: none; color: var(--fg); }
 .item input.inline::placeholder { color: var(--fg-3); }
 

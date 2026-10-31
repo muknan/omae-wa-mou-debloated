@@ -269,7 +269,8 @@ public final class ShuffleService extends Service {
             long base = base(c), changed = p.getLong("changed_at", 0), lastAsk = p.getLong("asked_at", 0);
             if (!s.paused && s.keep.isEmpty() && changed > 0 && lastAsk > 0)
                 st.put("next", Shuffle.nextChange(lastAsk, base, changed, s.every * 60_000L, System.currentTimeMillis()));
-            st.put("paused", s.paused).put("kept", !s.keep.isEmpty());
+            // the settings as this TV has them (the remote shows "Updating…" until they match what it asked for)
+            st.put("paused", s.paused).put("kept", !s.keep.isEmpty()).put("every", s.every);
             st.put("recent", new JSONArray(p.getString("recent_json", "[]")));
             List<Shuffle.Item> pool = pool(c, s);
             Shuffle.Item up = upcoming(c, pool);

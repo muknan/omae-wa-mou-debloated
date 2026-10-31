@@ -63,7 +63,7 @@ server.listen(port, async () => {
 
   let pool = [];
   if (origin) {
-    const j = await fetch(`${origin}/api/list?${listQueryFor({ quality: '4k+', ratio: '16x9,16x10', range: '1y', fav: 50, cats: '110', q: '' })}`).then((r) => r.json()).catch(() => ({}));
+    const j = await fetch(`${origin}/api/list?${listQueryFor({ quality: '4k+', ratio: '16x9,16x10', range: '1y', fav: 50, cats: '110', q: '' })}`, { signal: AbortSignal.timeout(60e3) }).then((r) => r.json()).catch(() => ({}));
     pool = (j.items || []).map((w) => ({ id: w.id, ext: /png$/.test(w.path) ? 'png' : 'jpg', res: w.resolution, fav: w.favorites, w: w.dimension_x }));
   }
   if (!pool.length) pool = [{ id: 'demo01', ext: 'jpg', res: '3840x2160', fav: 100 }];
@@ -84,10 +84,14 @@ server.listen(port, async () => {
     const loop = async () => {
       const set = me.doc?.devices && Object.values(me.doc.devices).find((d) => d.kind === kind)?.settings;
       const everyMs = (set?.every || (kind === 'tv' ? 1 : 15)) * 60e3;
+      const held = !!(set?.paused || set?.keep);
+      if (me.held && !held) me.next = Date.now() + everyMs;   // resumed: the interval starts again, as on the real ones
+      if (set && me.every && set.every !== me.every && !held) me.next = Math.min(me.next, Date.now() + everyMs);
+      me.held = held; me.every = set?.every;
       if (me.todo && Date.now() >= me.eta) { me.todo(); me.todo = null; me.eta = 0; me.next = Date.now() + everyMs; }
       else if (!me.todo && set && !set.paused && !set.keep && Date.now() > me.next) { showIt(me.up); me.next = Date.now() + everyMs; }
       const r = await sync('poll', { token, body: { v: me.v, cs: me.cs, st: {
-        up: me.up, ack: { seq: me.ack, eta: me.eta }, app: `${kind} dev`, away: kind === 'tv' && !!process.env.DEMO_AWAY || undefined, cur: me.cur, shown: me.shown, total: pool.length, next: set && !set.paused && !set.keep ? me.next : 0,
+        up: me.up, ack: { seq: me.ack, eta: me.eta }, paused: !!set?.paused, kept: !!set?.keep, every: set?.every, t: Date.now(), app: `${kind} dev`, away: kind === 'tv' && !!process.env.DEMO_AWAY || undefined, cur: me.cur, shown: me.shown, total: pool.length, next: set && !set.paused && !set.keep ? me.next : 0,
         recent: me.recent, counts: { toplist: pool.length }, list: set ? listQueryFor(set.filters) : '', base: kind === 'tv' ? 60 : undefined,
         local: kind === 'pc' ? [{ key: 'folder:D:\\Photos\\Holidays', name: 'Holidays', count: 48, on: false }] : undefined,
       } } });

@@ -34,7 +34,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * is open), with one small request; the playlists come down only when they changed.
  */
 final class Sync {
-    static final String VERSION = "1.16";
+    static final String VERSION = "1.17";
 
     // ---- settings (always local; mirrored to the service when paired)
 
@@ -72,8 +72,11 @@ final class Sync {
         if (!a.listQuery().equals(b.listQuery()) || !ListStore.server(c).isEmpty() && !ListStore.prefs(c).getString("list_for", "").equals(b.listQuery()))
             ListStore.refreshNow(c, null);
         boolean newPool = !a.sources.equals(b.sources) || a.maxw != b.maxw;
+        // Resuming, or no longer keeping one, starts the interval again from now (as on the PC): the next change is a
+        // whole "Change every" away, not due at once because the last one was long ago.
+        if ((a.paused && !b.paused) || (!a.keep.isEmpty() && b.keep.isEmpty())) ListStore.prefs(c).edit().putLong("changed_at", System.currentTimeMillis()).apply();
         if (newPool && !b.paused && b.keep.isEmpty()) ShuffleService.skipWait(c);
-        if (newPool || a.paused != b.paused || !a.keep.equals(b.keep)) statusChanged(c);
+        if (newPool || a.paused != b.paused || !a.keep.equals(b.keep) || a.every != b.every) statusChanged(c);
         notifyListeners();
     }
 
@@ -389,7 +392,8 @@ final class Sync {
         JSONObject st = ShuffleService.status(c);
         String hash = Integer.toHexString(st.toString().hashCode());
         boolean sendSt = !hash.equals(p.getString("st_hash", ""));
-        if (sendSt) body.put("st", st);
+        // this TV's clock goes with it (not part of the hash), so the remote can count down on one clock
+        if (sendSt) body.put("st", new JSONObject(st.toString()).put("t", System.currentTimeMillis()));
         JSONObject r = call(c, "poll", body, true);
         SharedPreferences.Editor e = p.edit();
         if (sendSt) e.putString("st_hash", hash);

@@ -457,7 +457,11 @@ const ACTIONS = {
     const { id, h } = await authed(store, req);
     const b = body(req), now = Date.now();
     if (b.st && typeof b.st === 'object') {
-      const st = JSON.stringify(b.st);
+      // the device's clock against this one (st.t, when it sent this): the remote turns its times into its own clock
+      const { t, ...rest } = b.st;
+      if (Number.isFinite(t)) rest.skew = now - t;
+      rest.at = now;   // when it came (the remote waits for one newer than a change it just made)
+      const st = JSON.stringify(rest);
       if (st.length > 60000) fail(413, 'Status too big');
       await store.cmd('HSET', K.dev(id), 'st', st, 'seen', now);
     } else if (now - (Number(h.seen) || 0) > 60e3) {

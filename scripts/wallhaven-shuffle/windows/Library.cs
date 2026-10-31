@@ -747,7 +747,12 @@ namespace WallhavenShuffle
                 }
                 string hash = Json.Write(st).GetHashCode().ToString("x");
                 var body = new Dictionary<string, object> { { "v", sent != null ? -1 : v }, { "cs", cs } };
-                if (hash != stHash) body["st"] = st;
+                if (hash != stHash)
+                {
+                    var withClock = new Dictionary<string, object>(st);   // this PC's clock goes with it (not hashed): one clock for the countdown
+                    withClock["t"] = (long)(DateTime.UtcNow - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalMilliseconds;
+                    body["st"] = withClock;
+                }
                 var r = SyncClient.Call(server, "poll", body, syncToken);
                 int sentOps = ops.Count - (patch != null ? 1 : 0);
                 Post(delegate { AfterPoll(r, sentOps, patch != null, hash); });
@@ -877,7 +882,7 @@ namespace WallhavenShuffle
         Dictionary<string, object> StatusForRemote(out string thumbFor)
         {
             thumbFor = null;
-            var st = new Dictionary<string, object> { { "app", "pc 2.5" } };
+            var st = new Dictionary<string, object> { { "app", "pc 2.6" } };
             if (current != null)
             {
                 var item = ItemOf(current);
@@ -894,6 +899,7 @@ namespace WallhavenShuffle
             st["next"] = settings.Paused || IsKept || busy ? 0 : (long)(nextChange.ToUniversalTime() - new DateTime(1970, 1, 1)).TotalMilliseconds;
             st["paused"] = settings.Paused;
             st["kept"] = IsKept;
+            st["every"] = settings.IntervalSeconds / 60;   // the settings as applied here (the remote waits for them to match)
             st["ack"] = new Dictionary<string, object> { { "seq", cmdAck } };
             // what Next would show (the remote shows it as soon as Next is pressed)
             var up = Upcoming(ids);
