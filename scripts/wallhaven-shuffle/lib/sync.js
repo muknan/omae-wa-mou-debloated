@@ -78,7 +78,7 @@ export function storeFromEnv(env = process.env) {
 }
 
 export const K = {
-  doc: 'whs:doc', lock: 'whs:lock',
+  doc: 'whs:doc', ver: 'whs:ver', lock: 'whs:lock',
   dev: (id) => `whs:dev:${id}`, pair: (code) => `whs:pair:${code}`, claim: (hash) => `whs:claim:${hash}`, link: (code) => `whs:link:${code}`,
   limit: (what) => `whs:limit:${what}`, cmdLock: (id) => `whs:cmdlock:${id}`,
 };
@@ -305,6 +305,18 @@ async function readDoc(store) {
   try { return upgrade(raw ? JSON.parse(raw) : null); } catch { return emptyDoc(); }
 }
 
+// For reading only (the remote's state, a command): a warm server keeps the last document it saw and reads just its
+// version number (whs:ver, a few bytes) to know it's still the latest, instead of the whole document each time. Still one
+// request; much less to send. Changes always read it fresh, under the lock (withDoc).
+const docMemo = new WeakMap();   // store -> { v, raw }
+async function readDocQuick(store) {
+  const memo = docMemo.get(store);
+  if (memo && String(await store.cmd('GET', K.ver)) === String(memo.v)) return upgrade(JSON.parse(memo.raw));
+  const doc = await readDoc(store);
+  docMemo.set(store, { v: doc.v, raw: JSON.stringify(doc) });
+  return doc;
+}
+
 // Runs fn on the document under the lock; if it changed, saves it with the next version and tells every device's
 // hash (so their next poll sees it). Returns { doc, result }.
 export async function withDoc(store, fn) {
@@ -314,7 +326,9 @@ export async function withDoc(store, fn) {
     const result = await fn(doc);
     if (JSON.stringify(doc) !== before) {
       doc.v += 1;
-      const cmds = [['SET', K.doc, JSON.stringify(doc)]];
+      const raw = JSON.stringify(doc);
+      const cmds = [['SET', K.doc, raw], ['SET', K.ver, String(doc.v)]];
+      docMemo.set(store, { v: doc.v, raw });
       for (const [id, d] of Object.entries(doc.devices)) if (d.kind !== 'web') cmds.push(['HSET', K.dev(id), 'v', doc.v]);
       await store.pipe(cmds);
     }
@@ -450,7 +464,7 @@ const ACTIONS = {
       await store.cmd('HSET', K.dev(id), 'seen', now);
     }
     const out = { v: Number(h.v) || 0, now, live: (Number(h.live) || 0) > now };
-    if (String(b.v ?? '') !== String(out.v)) { out.doc = await readDoc(store); out.v = out.doc.v; }
+    if (String(b.v ?? '') !== String(out.v)) { out.doc = await readDocQuick(store); out.v = out.doc.v; }
     let cmds = [];
     try { cmds = JSON.parse(h.cmds || '[]'); } catch { /* none */ }
     out.cs = cmds.reduce((m, c) => Math.max(m, c.seq), Number(b.cs) || 0);
@@ -463,7 +477,7 @@ const ACTIONS = {
   // device's status, and the choices.
   async state(store, req) {
     const { id: me } = await authed(store, req);
-    const doc = await readDoc(store), now = Date.now();
+    const doc = await readDocQuick(store), now = Date.now();
     const ids = Object.keys(doc.devices).filter((i) => doc.devices[i].kind !== 'web');
     const hashes = (await store.pipe(ids.map((i) => ['HGETALL', K.dev(i)]))).map(hashObj);
     const status = {}, wake = [];
@@ -490,7 +504,7 @@ const ACTIONS = {
   async cmd(store, req) {
     await authed(store, req);
     const b = body(req), c = b.cmd && typeof b.cmd === 'object' ? b.cmd : {};
-    const doc = await readDoc(store), d = doc.devices[b.device];
+    const doc = await readDocQuick(store), d = doc.devices[b.device];
     if (!d || d.kind === 'web') fail(404, 'That device is gone');
     const entry = { type: c.type, at: Date.now() };
     if (c.type === 'show') { entry.item = normItem(c.item); if (!entry.item) fail(400, 'Only Wallhaven wallpapers can be sent'); }

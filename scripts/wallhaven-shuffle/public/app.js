@@ -248,10 +248,11 @@
 
   async function api(a, { body, query, method } = {}) {
     let r;
+    const used = token;   // a "signed out" answer counts only for the sign-in it was sent with (not one made since)
     try {
       r = await fetch(`/api/sync/${a}${query ? `?${new URLSearchParams(query)}` : ''}`, {
         method: method || (body ? 'POST' : 'GET'),
-        headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), ...(body ? { 'content-type': 'application/json' } : {}) },
+        headers: { ...(used ? { authorization: `Bearer ${used}` } : {}), ...(body ? { 'content-type': 'application/json' } : {}) },
         body: body ? JSON.stringify(body) : undefined,
         cache: 'no-store',
       });
@@ -260,7 +261,7 @@
     }
     let j = {};
     try { j = await r.json(); } catch { /* not JSON */ }
-    if (r.status === 401 && token && a !== 'redeem' && a !== 'register') signedOut(j.error || 'This browser was signed out');
+    if (r.status === 401 && used && used === token && a !== 'redeem' && a !== 'register') signedOut(j.error || 'This browser was signed out');
     if (!r.ok) throw Object.assign(new Error(j.error || `The service answered ${r.status}`), { status: r.status });
     return j;
   }
@@ -429,7 +430,8 @@
   }
   document.addEventListener('visibilitychange', () => { if (!document.hidden) { lastTouch = Date.now(); refresh().then(schedule); } else clearTimeout(timer); });
   // A newer remote deployed while this tab stayed open (phones keep tabs for days): it reloads when it's brought back.
-  const appTag = () => fetch('/app.js', { method: 'HEAD', cache: 'no-store' }).then((r) => r.headers.get('etag')).catch(() => null);
+  const appTag = () => Promise.all(['/app.js', '/app.css'].map((u) => fetch(u, { method: 'HEAD', cache: 'no-store' }).then((r) => r.headers.get('etag'))))
+    .then((t) => (t.every(Boolean) ? t.join() : null)).catch(() => null);
   let loadedTag = null;
   appTag().then((t) => { loadedTag = t; });
   document.addEventListener('visibilitychange', async () => {
@@ -1097,7 +1099,7 @@
     shell = null; lastSig = '';
     stopPairing();
     render();
-    refresh().then(schedule);
+    refresh(true).then(schedule);
     if (msg) setTimeout(() => toast(msg), 50);
   }
   function signedOut(msg) {
@@ -1170,17 +1172,25 @@
 
   // ---------- start
 
-  async function boot() {
+  // A sign-in link (#link=…): used once, signs this browser in, replacing any earlier sign-in. It may come with the
+  // page or, on a phone that opens links in the tab already showing the remote, as a change to the open page's address.
+  async function redeemLink() {
     const m = /[#&]link=([a-z2-9]{16})/.exec(location.hash);
-    if (m) {
-      history.replaceState(null, '', location.pathname); // used up either way; never left in the history
-      try {
-        const j = await api('redeem', { body: { code: m[1], name: deviceName() } });
-        return signedIn(j.token, 'Signed in');
-      } catch (e) {
-        if (!token) return showSignIn(e.message);
-      }
+    if (!m) return false;
+    history.replaceState(null, '', location.pathname); // used up either way; never left in the history
+    try {
+      const j = await api('redeem', { body: { code: m[1], name: deviceName() } });
+      if (token) { token = null; S.doc = null; shell = null; lastSig = ''; }   // the earlier sign-in, if any, is replaced
+      signedIn(j.token, 'Signed in');
+    } catch (e) {
+      if (!token) showSignIn(e.message); else toast(e.message, { err: true });
     }
+    return true;
+  }
+  addEventListener('hashchange', () => { if (/[#&]link=/.test(location.hash)) redeemLink(); });
+
+  async function boot() {
+    if (await redeemLink()) return;
     if (!token) return showSignIn();
     render();
     await refresh();

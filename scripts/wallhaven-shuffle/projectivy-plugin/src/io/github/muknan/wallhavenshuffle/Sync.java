@@ -34,7 +34,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * is open), with one small request; the playlists come down only when they changed.
  */
 final class Sync {
-    static final String VERSION = "1.15";
+    static final String VERSION = "1.16";
 
     // ---- settings (always local; mirrored to the service when paired)
 
@@ -291,7 +291,7 @@ final class Sync {
     // rank comes back or Projectivy asks again.
     private static boolean serviceHeld;
     private static volatile boolean away;
-    private static long notOnTopSince;
+    private static long notOnTopSince, upAt;
 
     static boolean away() { return away; }
 
@@ -301,11 +301,10 @@ final class Sync {
             was = away;
             away = false;
             notOnTopSince = 0;
+            upAt = System.currentTimeMillis();
             held = serviceHeld;
             serviceHeld = true;
-            poke = true;
-            pokedAt = System.currentTimeMillis();
-            loop.notifyAll();
+            if (was || !held) { poke = true; pokedAt = System.currentTimeMillis(); loop.notifyAll(); }   // news for the remote
         }
         if (was || !held) Log.i(ListStore.TAG, "home screen: showing");
         if (!held) hold(c);
@@ -326,8 +325,9 @@ final class Sync {
         long now = System.currentTimeMillis();
         if (onTop()) notOnTopSince = 0;
         else if (notOnTopSince == 0) notOnTopSince = now;
-        long lastAsk = ListStore.prefs(c).getLong("asked_at", 0);
-        boolean quiet = lastAsk > 0 && now - lastAsk > 2 * Math.max(60_000, ShuffleService.base(c)) + 30_000;
+        // Projectivy's last ask, or this start (an ask from before Android ended the app says nothing about now)
+        long lastAsk = Math.max(upAt, ListStore.prefs(c).getLong("asked_at", 0));
+        boolean quiet = now - lastAsk > 2 * Math.max(60_000, ShuffleService.base(c)) + 30_000;
         return (notOnTopSince > 0 && now - notOnTopSince >= 5_000) || quiet;
     }
 

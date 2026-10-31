@@ -190,3 +190,18 @@ test('state leaves the doc out when the remote already has that version', async 
   const after = await call(store, 'state', { token: pc.token, query: { v: String(full.v) } });
   assert.ok(after.doc && after.v === full.v + 1);
 });
+
+test('a warm server reads the version, not the whole doc, and still sees every change', async () => {
+  const { store, pc } = await setup();
+  const gets = [];
+  const cmd = store.cmd.bind(store);
+  store.cmd = (...c) => { if (c[0] === 'GET') gets.push(c[1]); return cmd(...c); };
+  await call(store, 'state', { token: pc.token });
+  gets.length = 0;
+  const again = await call(store, 'state', { token: pc.token });
+  assert.ok(again.doc);
+  assert.ok(!gets.includes(K.doc), `read ${gets.join(', ')}`);
+  await call(store, 'op', { token: pc.token, body: { ops: [{ op: 'create', id: 'p_ver00001', name: 'Fresh' }] } });
+  const after = await call(store, 'state', { token: pc.token });
+  assert.ok(after.doc.playlists.some((p) => p.name === 'Fresh'));
+});

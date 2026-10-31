@@ -358,7 +358,7 @@ namespace WallhavenShuffle
     // One request to /api/sync/<action>. Throws SyncError with the service's own words (Status 0 = no connection).
     static class SyncClient
     {
-        public const string UserAgent = "WallhavenShuffle-Windows/2.4";
+        public const string UserAgent = "WallhavenShuffle-Windows/2.5";
 
         public static Dictionary<string, object> Call(string server, string action, Dictionary<string, object> body, string token)
         {

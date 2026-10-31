@@ -877,7 +877,7 @@ namespace WallhavenShuffle
         Dictionary<string, object> StatusForRemote(out string thumbFor)
         {
             thumbFor = null;
-            var st = new Dictionary<string, object> { { "app", "pc 2.4" } };
+            var st = new Dictionary<string, object> { { "app", "pc 2.5" } };
             if (current != null)
             {
                 var item = ItemOf(current);
@@ -896,7 +896,7 @@ namespace WallhavenShuffle
             st["kept"] = IsKept;
             st["ack"] = new Dictionary<string, object> { { "seq", cmdAck } };
             // what Next would show (the remote shows it as soon as Next is pressed)
-            var up = Upcoming();
+            var up = Upcoming(ids);
             var upItem = up != null ? ItemOf(up) : null;
             if (upItem != null) st["up"] = new Dictionary<string, object> { { "key", up.Id }, { "id", upItem.Id }, { "ext", upItem.Ext }, { "res", upItem.Res.Length > 0 ? upItem.Res : up.Resolution }, { "fav", Math.Max(0, up.Favorites) } };
             var recent = new List<object>();
@@ -917,10 +917,10 @@ namespace WallhavenShuffle
         }
 
         // The one Next shows: forward again after Previous, else the one downloaded ahead.
-        Wall Upcoming()
+        Wall Upcoming(HashSet<string> pool)
         {
             for (int i = rot.ForwardTarget(); i >= 0 && i < rot.History.Count; i++) { var w = FindWall(rot.History[i]); if (w != null) return w; }
-            if (prepared != null && (current == null || prepared.Id != current.Id) && InPool(prepared)) return prepared;
+            if (prepared != null && (current == null || prepared.Id != current.Id) && pool.Contains(prepared.Id)) return prepared;
             return null;
         }
 
