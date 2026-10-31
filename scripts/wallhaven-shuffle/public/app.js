@@ -183,6 +183,9 @@
       H = UI.heroes[id] = { el: h('div', { class: 'hero', 'data-slot': `hero-${id}` }), pics: h('div', { class: 'pics', role: 'img' }), over: h('div'), src: null, pending: false };
       H.el.append(H.pics, H.over);
       slots[`hero-${id}`] = H.el;
+      // a whole number of points tall (16:9, rounded down): at 390 wide 16:9 is 219.375, and iPhone Safari draws the
+      // part-pixel row at such an edge on its own, undimmed, a bright line under the picture. A whole point can't split.
+      new ResizeObserver(([e]) => { const ht = `${Math.floor(e.contentRect.width * 9 / 16)}px`; if (H.el.style.height !== ht) H.el.style.height = ht; }).observe(H.el);
       let x0 = null, y0 = 0;
       H.el.addEventListener('touchstart', (e) => { x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; }, { passive: true });
       H.el.addEventListener('touchend', (e) => {

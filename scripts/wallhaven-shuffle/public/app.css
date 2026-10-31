@@ -119,8 +119,8 @@ main {
 .switcher .name { font: 700 24px/1.2 var(--font-display); letter-spacing: -.02em; color: var(--fg-3); white-space: nowrap; transition: color .2s; padding: 4px 0; }
 .switcher .name[aria-selected="true"] { color: var(--fg); }
 
-/* The picture is one element's own background, filling it exactly, never repeated, dimmed by a filter on itself:
-   nothing layered that could end a pixel short and show a line along an edge (see heroShow). */
+/* The picture is one element's own background, filling it exactly, never repeated, dimmed by a filter on itself, in a
+   frame a whole number of points tall (heroOf): no part-pixel edge for a phone to draw on its own. */
 .hero { position: relative; aspect-ratio: 16 / 9; overflow: hidden; max-width: 100%; isolation: isolate; }
 .hero .pics { position: absolute; inset: 0; background: center / cover no-repeat; opacity: 0; transition: opacity .45s var(--ease), filter .45s var(--ease), background-image .45s var(--ease); }
 .hero .pics.shown { opacity: 1; }

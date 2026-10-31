@@ -36,11 +36,12 @@ const server = http.createServer(async (req, res) => {
     const vres = { setHeader: (k, v) => res.setHeader(k, v), status(c) { res.statusCode = c; return this; }, json(j) { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(j)); } };
     return handle(store, { method: req.method, query, headers: req.headers, body }, vres);
   }
-  if (url.pathname === '/api/list') {
+  if (url.pathname === '/api/list' || url.pathname === '/_vercel/image') {
+    // the list, and the screen-sized pictures (the deployment's image resizing), from the real deployment
     if (!origin) { res.statusCode = 502; return res.end('{"error":"set LIST_ORIGIN to use the list"}'); }
-    const r = await fetch(`${origin}/api/list${url.search}`, { signal: AbortSignal.timeout(90e3) }).catch(() => null);
+    const r = await fetch(`${origin}${url.pathname}${url.search}`, { signal: AbortSignal.timeout(90e3), headers: { accept: req.headers.accept || '*/*' } }).catch(() => null);
     res.statusCode = r ? r.status : 502;
-    res.setHeader('content-type', 'application/json');
+    res.setHeader('content-type', r?.headers.get('content-type') || 'application/json');
     return res.end(r ? Buffer.from(await r.arrayBuffer()) : '{"error":"no answer"}');
   }
   const file = path.join(root, url.pathname === '/' ? 'index.html' : path.normalize(url.pathname).replace(/^([/\\])+/, ''));
