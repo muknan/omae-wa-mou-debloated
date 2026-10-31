@@ -180,7 +180,7 @@
   function heroOf(id) {
     let H = UI.heroes[id];
     if (!H) {
-      H = UI.heroes[id] = { el: h('div', { class: 'hero', 'data-slot': `hero-${id}` }), pics: h('div', { class: 'pics' }), over: h('div'), src: null, pending: false };
+      H = UI.heroes[id] = { el: h('div', { class: 'hero', 'data-slot': `hero-${id}` }), pics: h('div', { class: 'pics', role: 'img' }), over: h('div'), src: null, pending: false };
       H.el.append(H.pics, H.over);
       slots[`hero-${id}`] = H.el;
       let x0 = null, y0 = 0;
@@ -194,18 +194,20 @@
     }
     return H;
   }
+  // The picture is the frame's own background (one element, no <img>): iPhone Safari can paint a 1 px sliver along the
+  // edge of a cropped <img> (object-fit) in a box that isn't a whole number of pixels tall, and a background drawn to
+  // fill its own box can't. Safari and Chrome cross-fade one background into the next by themselves.
   function heroShow(H, src, alt) {
-    if (src === H.src) { if (H.pics.lastElementChild) H.pics.lastElementChild.alt = alt; return; }
+    H.pics.setAttribute('aria-label', alt);
+    if (src === H.src) return;
     H.src = src;
-    if (!src) { H.pics.replaceChildren(); return; }
-    const pic = h('img', { alt, draggable: 'false' });
+    if (!src) { H.pics.style.backgroundImage = ''; H.pics.classList.remove('shown'); return; }
+    const pic = new Image();
     pic.src = src;
     const show = () => {
       if (H.src !== src) return;   // a newer one came meanwhile
-      H.pics.append(pic);
-      void pic.offsetWidth;        // drawn at 0 first, so it fades
-      pic.classList.add('in');
-      setTimeout(() => { const top = H.pics.lastElementChild; for (const el of [...H.pics.children]) if (el !== top) el.remove(); }, 500);
+      H.pics.style.backgroundImage = `url("${src}")`;
+      if (!H.pics.classList.contains('shown')) { void H.pics.offsetWidth; H.pics.classList.add('shown'); }   // the first one fades in
     };
     // loaded, then decoded (but never wait on decoding long: a tab in the background may not decode at all)
     new Promise((ok) => { if (pic.complete) ok(); else pic.onload = pic.onerror = () => ok(); })
