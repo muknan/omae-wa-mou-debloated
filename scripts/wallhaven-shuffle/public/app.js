@@ -180,12 +180,9 @@
   function heroOf(id) {
     let H = UI.heroes[id];
     if (!H) {
-      H = UI.heroes[id] = { el: h('div', { class: 'hero', 'data-slot': `hero-${id}` }), pics: h('div', { class: 'pics', role: 'img' }), over: h('div'), src: null, pending: false };
-      H.el.append(H.pics, H.over);
+      H = UI.heroes[id] = { el: h('div', { class: 'hero', 'data-slot': `hero-${id}` }), pics: h('div', { class: 'pics', role: 'img' }, h('div', { class: 'pic' }), h('div', { class: 'pic' })), over: h('div'), src: null, top: null, pending: false };
+      H.el.append(h('div', { class: 'frame' }, H.pics, H.over));   // its height: app.css (.hero .frame)
       slots[`hero-${id}`] = H.el;
-      // a whole number of points tall (16:9, rounded down): at 390 wide 16:9 is 219.375, and iPhone Safari draws the
-      // part-pixel row at such an edge on its own, undimmed, a bright line under the picture. A whole point can't split.
-      new ResizeObserver(([e]) => { const ht = `${Math.floor(e.contentRect.width * 9 / 16)}px`; if (H.el.style.height !== ht) H.el.style.height = ht; }).observe(H.el);
       let x0 = null, y0 = 0;
       H.el.addEventListener('touchstart', (e) => { x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; }, { passive: true });
       H.el.addEventListener('touchend', (e) => {
@@ -197,20 +194,28 @@
     }
     return H;
   }
-  // The picture is the frame's own background (one element, no <img>): iPhone Safari can paint a 1 px sliver along the
-  // edge of a cropped <img> (object-fit) in a box that isn't a whole number of pixels tall, and a background drawn to
-  // fill its own box can't. Safari and Chrome cross-fade one background into the next by themselves.
+  // The picture: two layers, each a background that fills the frame exactly (no <img>: iPhone Safari can paint a sliver
+  // along the edge of a cropped one). A new picture goes on top and fades in fully over the old one (which stays as it
+  // is, so nothing dips or changes size mid-fade), then the old layer is let go.
+  // (Letting the browser fade one background-image into the next draws the new one at its own size mid-fade: it zooms.)
   function heroShow(H, src, alt) {
     H.pics.setAttribute('aria-label', alt);
     if (src === H.src) return;
     H.src = src;
-    if (!src) { H.pics.style.backgroundImage = ''; H.pics.classList.remove('shown'); return; }
+    const [a, b] = H.pics.children;
+    if (!src) { for (const l of [a, b]) { l.classList.remove('on'); l.style.backgroundImage = ''; } H.top = null; return; }
     const pic = new Image();
     pic.src = src;
     const show = () => {
       if (H.src !== src) return;   // a newer one came meanwhile
-      H.pics.style.backgroundImage = `url("${src}")`;
-      if (!H.pics.classList.contains('shown')) { void H.pics.offsetWidth; H.pics.classList.add('shown'); }   // the first one fades in
+      const old = H.top, next = old === a ? b : a;
+      next.style.backgroundImage = `url("${src}")`;
+      next.style.zIndex = '2';
+      if (old) old.style.zIndex = '1';
+      void next.offsetWidth;       // drawn at 0 first, so it fades
+      next.classList.add('on');
+      H.top = next;
+      if (old) setTimeout(() => { if (H.top !== old) old.classList.remove('on'); }, 500);
     };
     // loaded, then decoded (but never wait on decoding long: a tab in the background may not decode at all)
     new Promise((ok) => { if (pic.complete) ok(); else pic.onload = pic.onerror = () => ok(); })
@@ -580,11 +585,12 @@
     if (!it) return;
     if (it.local) {
       sheet(it.name || 'Your picture', (body) => {
-        put(body, it.thumb ? h('div', { class: 'picture' }, img(it.thumb, '', true)) : null,
+        put(body, it.thumb ? h('div', { class: 'picture', role: 'img', 'aria-label': it.name || 'Your picture', style: { backgroundImage: `url("${it.thumb}")` } }) : null,
           h('div', { class: 'pad' }, h('p', { class: 'note' }, 'One of your own pictures on the PC. It stays there: playlists only sync Wallhaven wallpapers.')));
       });
       return;
     }
+    sharpen(it);
     sheet('Wallpaper', (body, close) => {
       const inLists = userPlaylists().filter((p) => p.items.some((x) => x.id === it.id)).map((p) => p.name);
       const hidden = inPl('hidden', it.id), fav = inPl('fav', it.id);
@@ -592,7 +598,8 @@
       const targets = devicesWithSettings().filter(([id]) => id !== ctx.device);   // not the one it's already on
       const showOn = (id, d) => command(id, { type: 'show', item: it }, `Showing it on ${d.name}`);
       put(body, 
-        h('div', { class: 'picture' }, img(thumb(it), '', true)),
+        // the screen-sized copy once it's there (the sheet is drawn again then), the thumbnail until
+        h('div', { class: 'picture', role: 'img', 'aria-label': 'The wallpaper', style: { backgroundImage: `url("${sharp.get(it.id) || thumb(it)}")` } }),
         h('div', { class: 'pad' }, h('div', { class: 'facts' },
           it.res ? h('span', { class: 'num' }, fmtRes(it.res)) : null,
           it.fav ? h('span', { class: 'num' }, icon('heartOn', 'icon heart'), nf.format(it.fav)) : null,
@@ -1056,7 +1063,17 @@
     const view = r.name === 'playlists' ? (r.arg ? viewPlaylist(r.arg) : viewPlaylists()) : r.name === 'browse' ? viewBrowse() : r.name === 'devices' ? viewDevices() : viewNow();
     const fresh = h('div', {}, S.online ? null : h('div', { class: 'offline pad', style: { paddingTop: '16px' } }, icon('alert'), h('span', {}, 'Can’t reach the service. Retrying…')),
       h('div', { 'data-key': `view:${r.name}/${r.arg || ''}` }, view));
+    // "Recently shown" gains one at the front after a change: the others slide over and the new one fades in, rather
+    // than all jumping a place (positions noted before the page is brought up to date, eased from after)
+    const was = new Map([...shell.main.querySelectorAll('.strip > [data-key]')].map((b) => [b.dataset.key, b.getBoundingClientRect().left]));
     morphKids(shell.main, fresh);
+    if (was.size && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      for (const b of shell.main.querySelectorAll('.strip > [data-key]')) {
+        const x0 = was.get(b.dataset.key);
+        if (x0 == null) b.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 400, easing: 'ease-out' });
+        else if (Math.abs(x0 - b.getBoundingClientRect().left) > 1) b.animate([{ transform: `translateX(${x0 - b.getBoundingClientRect().left}px)` }, { transform: 'none' }], { duration: 400, easing: 'cubic-bezier(.2, .8, .2, 1)' });
+      }
+    }
     watchMore();
     // a new one at the front of "Recently shown": back to the start, where it is
     for (const st of shell.main.querySelectorAll('.strip')) {
