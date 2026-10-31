@@ -423,6 +423,15 @@
     timer = setTimeout(async () => { await refresh(); schedule(); }, first ?? every);
   }
   document.addEventListener('visibilitychange', () => { if (!document.hidden) { lastTouch = Date.now(); refresh().then(schedule); } else clearTimeout(timer); });
+  // A newer remote deployed while this tab stayed open (phones keep tabs for days): it reloads when it's brought back.
+  const appTag = () => fetch('/app.js', { method: 'HEAD', cache: 'no-store' }).then((r) => r.headers.get('etag')).catch(() => null);
+  let loadedTag = null;
+  appTag().then((t) => { loadedTag = t; });
+  document.addEventListener('visibilitychange', async () => {
+    if (document.hidden || !loadedTag) return;
+    const t = await appTag();
+    if (t && t !== loadedTag) location.reload();
+  });
   addEventListener('keydown', (e) => {
     if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || route().name !== 'now' || document.querySelector('dialog[open]')) return;
     if (e.target.closest?.('input, select, textarea, button, a')) { if (e.key === ' ' || !e.target.closest('button, a')) return; }
