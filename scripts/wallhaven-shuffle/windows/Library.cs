@@ -304,11 +304,20 @@ namespace WallhavenShuffle
         // Adds the one on screen to a playlist (Favourites too), or takes it out if it's in it. Its folder follows at
         // once: a link to the same file when on the same drive (no extra space), a copy otherwise; taken out, to the
         // Recycle Bin. A picture of your own (not from Wallhaven) only goes into the folder, and stays on this PC.
+        // The playlist last added to (the window's + adds there), while it still exists.
+        public SourceInfo LastPlaylist
+        {
+            get { var p = settings.LastPlaylist.Length > 0 ? SourceByKey(settings.LastPlaylist) : null; return p != null && p.Own ? p : null; }
+        }
+        public bool InLastPlaylist { get { var p = LastPlaylist; return p != null && current != null && InPlaylist(p, current); } }
+        public void ToggleLastPlaylist() { TogglePlaylist(LastPlaylist); }
+
         public void TogglePlaylist(SourceInfo p)
         {
             if (current == null || p == null || p.Folder == null) return;
             var w = current;
             bool inIt = InPlaylist(p, w);
+            if (!inIt && p.Own && settings.LastPlaylist != p.Key) { settings.LastPlaylist = p.Key; settings.Save(); }   // + adds here next
             var item = ItemOf(w);
             var pl = doc.Find(p.Key);
             try
@@ -882,7 +891,7 @@ namespace WallhavenShuffle
         Dictionary<string, object> StatusForRemote(out string thumbFor)
         {
             thumbFor = null;
-            var st = new Dictionary<string, object> { { "app", "pc 2.6" } };
+            var st = new Dictionary<string, object> { { "app", "pc 2.7" } };
             if (current != null)
             {
                 var item = ItemOf(current);

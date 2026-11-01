@@ -52,6 +52,8 @@ toplist, the same one the TV uses. It is one exe with no installer and no .NET S
   them elsewhere); Favourites are `Pictures\Wallhaven Favourites` (`FavouritesDir` to change it). Make one with
   **New playlist…** (Shuffle from, Add to playlist, or ⋯ > Playlists).
 - **Add to playlist** (tray menu, or ⋯) puts the wallpaper on screen into a playlist; a ✓ marks the ones it's in.
+  In the window, **+** adds it to the playlist you last added to (✓ when it's in; click again to take it out), like the
+  heart beside it; right-click **+** (or click it the first time) to choose another playlist or make a new one.
   Pictures are added as **hard links** to the downloaded original: the picture shows up in the folder like any
   file, but takes no extra space, and stays there if the cache later drops it. On another drive it's copied instead.
 - The folders and the playlists stay in step both ways: a picture copied into a playlist's folder in Explorer joins
@@ -85,6 +87,7 @@ my original wallpaper (a copy of it is kept next to the app at the first run).
 **Build and install**
 ```powershell
 powershell -ExecutionPolicy Bypass -File build.ps1      # -> bin\WallhavenShuffle.exe
+powershell -ExecutionPolicy Bypass -File build.ps1 -Test   # also runs test\Tests.cs (logic, sync, playlists, menu clicks)
 ```
 1. Copy `bin\WallhavenShuffle.exe` to a folder you own, for example `%USERPROFILE%\WallhavenShuffle`, and run it.
 2. In Advanced settings, set `Server` to your deployment (`https://<your-project>.vercel.app`), or ⋯ > Remote >

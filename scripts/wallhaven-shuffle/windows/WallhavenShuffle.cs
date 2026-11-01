@@ -23,7 +23,7 @@ using Microsoft.Win32;
 
 [assembly: System.Reflection.AssemblyTitle("Wallhaven Shuffle")]
 [assembly: System.Reflection.AssemblyProduct("Wallhaven Shuffle")]
-[assembly: System.Reflection.AssemblyVersion("2.6.0.0")]
+[assembly: System.Reflection.AssemblyVersion("2.7.0.0")]
 
 namespace WallhavenShuffle
 {
@@ -540,6 +540,7 @@ namespace WallhavenShuffle
         public string KeepId = "";           // "Keep this wallpaper": the one kept on screen (no automatic changes); "" = none
         public string PlaylistsDir = "";     // where playlists are made; empty = "Playlists" next to the cache folder (same drive: linked, not copied)
         public string FavouritesDir = "";    // where favourites go; empty = Pictures\Wallhaven Favourites
+        public string LastPlaylist = "";     // the playlist last added to: the window's + adds there (right-click to choose)
 
         public static readonly string Dir = Path.GetDirectoryName(Application.ExecutablePath);
         public static string FilePath { get { return Path.Combine(Dir, "settings.ini"); } }
@@ -605,6 +606,7 @@ namespace WallhavenShuffle
                     case "KeepId": s.KeepId = v; break;
                     case "PlaylistsDir": s.PlaylistsDir = v; break;
                     case "FavouritesDir": s.FavouritesDir = v; break;
+                    case "LastPlaylist": s.LastPlaylist = v; break;
                 }
             }
             // From 2.1: the list address becomes the service and the filters; the one source becomes the mix.
@@ -642,6 +644,7 @@ namespace WallhavenShuffle
                     "PlaylistsDir=" + PlaylistsDir,
                     "# FavouritesDir: where favourites go (empty = Pictures\\Wallhaven Favourites).",
                     "FavouritesDir=" + FavouritesDir,
+                    "LastPlaylist=" + LastPlaylist,
                     "# SyncKey: the service's SYNC_KEY, to connect this PC once (cleared after it worked). Or: right-click the tray icon > Remote.",
                     "SyncKey=" + SyncKey }) + Environment.NewLine);
                 Stamp = File.GetLastWriteTimeUtc(FilePath);
@@ -1952,14 +1955,15 @@ namespace WallhavenShuffle
             playBtn.Click += delegate { app.TogglePause(); };
             nextBtn.Click += delegate { app.Next("window"); };
             moreBtn.Click += delegate { moreMenu.Show(moreBtn, new Point(0, moreBtn.Height + (int)(4 * Theme.Scale))); };
+            // +: into the playlist last added to, or out of it again (ticked when it's in), like the heart beside it;
+            // right-click (or the first time, with none yet) chooses the playlist or makes a new one
+            bool addRight = false;
+            addBtn.MouseDown += (o, e) => { addRight = e.Button == MouseButtons.Right; };
+            addBtn.MouseUp += (o, e) => { if (e.Button == MouseButtons.Right) ShowAddMenu(); };
             addBtn.Click += delegate
             {
-                var menu = new FluentMenu();
-                app.FillAddToMenu(menu, this);
-                menu.RefreshGlyphs();
-                menu.Closed += delegate { addMenuOpen = false; BeginInvoke(new Action(menu.Dispose)); };
-                addMenuOpen = true;
-                menu.Show(addBtn, new Point(0, addBtn.Height + (int)(4 * Theme.Scale)));
+                if (addRight) return;
+                if (app.LastPlaylist != null) app.ToggleLastPlaylist(); else ShowAddMenu();
             };
             preview.Click += delegate { var w = app.Current; if (w != null && w.Page != null) app.OpenOnWallhaven(); else app.ShowInFolder(); };
             foreach (var b in transport) tips.SetToolTip(b, b.Tip);
@@ -1968,6 +1972,16 @@ namespace WallhavenShuffle
             app.StateChanged += OnStateChanged;
             ApplyTheme();
             UpdateView(true, false);   // the picture is loaded when it opens
+        }
+
+        void ShowAddMenu()
+        {
+            var menu = new FluentMenu();
+            app.FillAddToMenu(menu, this);
+            menu.RefreshGlyphs();
+            menu.Closed += delegate { addMenuOpen = false; BeginInvoke(new Action(menu.Dispose)); };
+            addMenuOpen = true;
+            menu.Show(addBtn, new Point(0, addBtn.Height + (int)(4 * Theme.Scale)));
         }
 
         static string IntervalText(int sec) { return sec % 60 == 0 ? Filters.EveryLabel(sec / 60) : sec + " seconds"; }
@@ -2112,6 +2126,11 @@ namespace WallhavenShuffle
             favBtn.Active = app.IsFavourite;
             tips.SetToolTip(favBtn, app.IsFavourite ? "Remove from Favourites  (Ctrl+Alt+Shift+F)" : "Save to Favourites  (Ctrl+Alt+Shift+F)");
             favBtn.Enabled = addBtn.Enabled = w != null;
+            var last = app.LastPlaylist;
+            bool inLast = app.InLastPlaylist;
+            addBtn.Glyph = inLast ? Glyphs.Check : Glyphs.Add;
+            addBtn.Active = inLast;
+            tips.SetToolTip(addBtn, last == null ? "Add to a playlist" : (inLast ? "Remove from " : "Add to ") + last.Name + "  (right-click: another playlist)");
             Tick();
             string file = app.CurrentFile;
             if ((picture || Visible) && (force || file != shownFile))
@@ -2424,7 +2443,7 @@ namespace WallhavenShuffle
         public readonly string Tip;
         public string Glyph { get { return glyph; } set { if (glyph == value) return; glyph = value; Invalidate(); } }
 
-        public RoundButton(string glyph, int size, string tip) { this.glyph = glyph; Tip = tip; Size = new Size(size, size); }
+        public RoundButton(string glyph, int size, string tip) { this.glyph = glyph; Tip = tip; Size = new Size(size, size); AccessibleName = tip; AccessibleRole = AccessibleRole.PushButton; }   // named for screen readers (and UI tests)
 
         protected override void Render(Graphics g)
         {
@@ -2701,7 +2720,10 @@ namespace WallhavenShuffle
         // The click runs once the menu has closed, so a dialog it opens gets the keyboard and the menu is gone first.
         public ToolStripMenuItem Add(string text, string glyph, EventHandler click)
         {
-            var i = new ToolStripMenuItem(text, null, (s, e) => { if (IsHandleCreated) BeginInvoke(click, s, e); else click(s, e); }) { Padding = Px(8, 9, 28, 9), Tag = glyph };
+            // The action runs once the menu has closed, queued on the app's UI thread, not on the menu: a menu that's
+            // disposed as it closes (the window's + menu was) would otherwise drop it, and the click did nothing.
+            var ui = SynchronizationContext.Current;
+            var i = new ToolStripMenuItem(text, null, (s, e) => { if (ui != null) ui.Post(_ => click(s, e), null); else click(s, e); }) { Padding = Px(8, 9, 28, 9), Tag = glyph };
             Items.Add(i);
             return i;
         }
