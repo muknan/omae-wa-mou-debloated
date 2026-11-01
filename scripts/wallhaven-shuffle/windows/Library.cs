@@ -364,7 +364,19 @@ namespace WallhavenShuffle
 
         public int HiddenCount { get { return doc.Find("hidden").Items.Count + hiddenLocal.Count; } }
 
-        // "Never show this one": into Hidden (on every device), then the next one.
+        // Hidden: in Hidden (synced, by Wallhaven id) or, for a picture of your own, in blocked.txt. A History entry is an
+        // id or a file path (a copy named by its Wallhaven id counts as that wallpaper).
+        bool IsHiddenEntry(string id)
+        {
+            if (string.IsNullOrEmpty(id)) return false;
+            if (hiddenLocal.Contains(id)) return true;
+            string wid = id.IndexOf('\\') >= 0 ? Path.GetFileNameWithoutExtension(id) : id;
+            return SyncDoc.IsWallId(wid) && doc.Hidden.Contains(wid.ToLowerInvariant());
+        }
+        bool IsHidden(Wall w) { return w != null && (IsHiddenEntry(w.Id) || (w.WallhavenId != null && doc.Hidden.Contains(w.WallhavenId))); }
+
+        // "Never show this one": into Hidden (on every device), out of the history (Previous never brings it back), and
+        // on to the one after it: the next in the history when going back, else a new one (as Next would).
         public void Block()
         {
             if (current == null) return;
@@ -373,9 +385,61 @@ namespace WallhavenShuffle
             if (item != null) Change(SyncDoc.Op("add", "pl", "hidden", "item", SyncDoc.ItemDict(item)));
             else { hiddenLocal.Add(current.Id); WriteList("blocked.txt", hiddenLocal); }
             Log("hid " + Describe(current));
-            rot.Back = -1;   // straight to a new one, even while going back
             prepared = null;
-            Next("hidden");
+            MoveOnFromHidden(rot.Forget(IsHiddenEntry), "hidden");
+        }
+
+        // The one on screen was hidden (here or on another device): the next in the history from where it was, or a new one.
+        void MoveOnFromHidden(int follow, string why)
+        {
+            if (busy && follow > 0) rot.Back = follow - 1;   // a change is under way: the queued Next carries on from there
+            if (!busy)
+                for (int i = follow; i >= 0 && i < rot.History.Count; i++)
+                {
+                    var w = FindWall(rot.History[i]);
+                    if (w != null && !IsHidden(w)) { Log("next (" + why + ")"); ShowWall(w, i); return; }
+                }
+            Next(why);
+        }
+
+        // Shows these hidden ones again (Wallhaven ids, or your own pictures' paths): the hidden grid's "Show again".
+        public void Unhide(IEnumerable<string> ids)
+        {
+            int n = 0;
+            foreach (var id in ids.ToList())
+            {
+                if (hiddenLocal.Remove(id)) { n++; continue; }
+                string wid = id.ToLowerInvariant();
+                if (doc.Hidden.Contains(wid) && Change(SyncDoc.Op("remove", "pl", "hidden", "id", wid)) == null) n++;
+            }
+            WriteList("blocked.txt", hiddenLocal);
+            if (n == 0) return;
+            Log("showing " + n + " hidden wallpaper" + (n == 1 ? "" : "s") + " again");
+            prepared = null;
+            Changed();
+        }
+
+        // What's hidden, for the grid: Wallhaven ones (newest first, with the cached original if there is one) and your
+        // own pictures.
+        public List<HiddenOne> HiddenOnes()
+        {
+            var list = new List<HiddenOne>();
+            foreach (var it in doc.Find("hidden").Items.OrderByDescending(x => x.At))
+            {
+                string file = null;
+                try { file = Directory.Exists(cacheDir) ? Directory.GetFiles(cacheDir, it.Id + ".*").FirstOrDefault(f => Wall.IsCacheFile(Path.GetFileName(f))) : null; } catch (Exception) { }
+                list.Add(new HiddenOne { Id = it.Id, File = file, Thumb = "https://th.wallhaven.cc/small/" + it.Id.Substring(0, 2) + "/" + it.Id + ".jpg", Name = it.Res });
+            }
+            foreach (var p in hiddenLocal) list.Add(new HiddenOne { Id = p, File = File.Exists(p) ? p : null, Name = Path.GetFileNameWithoutExtension(p), Local = true });
+            return list;
+        }
+        public class HiddenOne { public string Id, File, Thumb, Name; public bool Local; }
+
+        // The grid of hidden ones; those picked show again.
+        public void HiddenDialogFor(Form owner)
+        {
+            var picked = HiddenDialog.Pick(owner, HiddenOnes());
+            if (picked != null && picked.Count > 0) Unhide(picked);
         }
 
         // Undoes every "Never show this one".
@@ -804,7 +868,9 @@ namespace WallhavenShuffle
                 folderCache.Clear();
                 Reconcile();
                 // the one on screen was hidden elsewhere: move on
-                if (current != null && current.WallhavenId != null && doc.Hidden.Contains(current.WallhavenId) && !busy) { prepared = null; Next("hidden on another device"); }
+                // hidden on another device: out of the history too; the one on screen moves on as if hidden here
+                int follow = rot.Forget(IsHiddenEntry);
+                if (current != null && IsHidden(current) && !busy) { prepared = null; MoveOnFromHidden(follow, "hidden on another device"); }
             }
             SaveLibrary();
             object nowObj;
@@ -891,7 +957,7 @@ namespace WallhavenShuffle
         Dictionary<string, object> StatusForRemote(out string thumbFor)
         {
             thumbFor = null;
-            var st = new Dictionary<string, object> { { "app", "pc 2.7" } };
+            var st = new Dictionary<string, object> { { "app", "pc 2.8" } };
             if (current != null)
             {
                 var item = ItemOf(current);
@@ -934,7 +1000,7 @@ namespace WallhavenShuffle
         // The one Next shows: forward again after Previous, else the one downloaded ahead.
         Wall Upcoming(HashSet<string> pool)
         {
-            for (int i = rot.ForwardTarget(); i >= 0 && i < rot.History.Count; i++) { var w = FindWall(rot.History[i]); if (w != null) return w; }
+            for (int i = rot.ForwardTarget(); i >= 0 && i < rot.History.Count; i++) { var w = FindWall(rot.History[i]); if (w != null && !IsHidden(w)) return w; }
             if (prepared != null && (current == null || prepared.Id != current.Id) && pool.Contains(prepared.Id)) return prepared;
             return null;
         }

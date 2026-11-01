@@ -34,7 +34,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * is open), with one small request; the playlists come down only when they changed.
  */
 final class Sync {
-    static final String VERSION = "1.17";
+    static final String VERSION = "1.18";
 
     // ---- settings (always local; mirrored to the service when paired)
 

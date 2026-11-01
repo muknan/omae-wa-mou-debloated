@@ -45,6 +45,17 @@ namespace WallhavenShuffle
             Theme.Load();
 
             // ---------------------------------------------------------------- pure pieces
+            // Never show while going back: out of the history (Previous never brings it back), and on from where it was
+            {
+                var rr = new Rotation(new string[0], new[] { "a", "b", "c", "d", "e" }, 1);
+                rr.Back = 1;   // on b
+                int follow = (int)typeof(Rotation).GetMethod("Forget").Invoke(rr, new object[] { (Func<string, bool>)(x => x == "b") });
+                Ok(follow == 1 && string.Join(",", rr.History) == "a,c,d,e" && rr.Back == -1, "hiding the one on screen while going back: gone from the history, Next carries on with the one after it (" + follow + ")");
+                var r2 = new Rotation(new string[0], new[] { "a", "b", "c", "d", "e" }, 1);
+                r2.Back = 3;   // on d, hiding b (elsewhere)
+                int f2 = (int)typeof(Rotation).GetMethod("Forget").Invoke(r2, new object[] { (Func<string, bool>)(x => x == "b") });
+                Ok(f2 == -1 && string.Join(",", r2.History) == "a,c,d,e" && r2.Back == 2, "hiding one further back: the place stays on the one on screen");
+            }
             var r = new Rotation(new[] { "a", "b" }, new[] { "a", "b" }, 1);
             r.LoadRound(new[] { "x", "x", "y" });
             Ok(r.Round.Count == 2 && r.InRound("x") && !r.InRound("a") && r.History.Count == 2 && r.Back == -1, "Rotation.LoadRound swaps the round (no duplicates), keeps history");
@@ -171,6 +182,41 @@ namespace WallhavenShuffle
                 Ok(app.HiddenCount == 0 && d.Hidden.Count == 0, "show them all again");
                 SetF(app, "busy", false);
 
+                // Never show while going back (a change under way, so nothing is shown here): gone from the history,
+                // the place kept so the queued Next carries on with the one after it, not a new one at the end
+                {
+                    var rot = GetF(app, "rot");
+                    var hist = (List<string>)rot.GetType().GetField("History").GetValue(rot);
+                    hist.Clear(); hist.AddRange(new[] { "def456", "abc123", "def456" });
+                    rot.GetType().GetField("Back").SetValue(rot, 1);
+                    SetF(app, "current", ((List<Wall>)GetF(app, "walls")).First(x => x.Id == "abc123"));
+                    SetF(app, "busy", true);
+                    SetF(app, "queued", 0);
+                    app.Block();
+                    Ok(!hist.Contains("abc123") && (int)rot.GetType().GetField("Back").GetValue(rot) == 0 && (int)GetF(app, "queued") == 1,
+                        "Never show while going back: out of the history, and Next goes on to the one after it (history " + string.Join(",", hist) + ")");
+                    Ok(!(bool)GetP(app, "CanGoBack") || hist[0] != "abc123", "Previous can't land on it");
+                    app.UnhideAll();
+                    SetF(app, "busy", false); SetF(app, "queued", 0);
+                }
+                // the hidden grid: lists them; "Show again" shows only the ones picked; the dialog counts what's picked
+                {
+                    Call(app, "Change", D("op", "add", "pl", "hidden", "item", D("id", "def456")));
+                    Call(app, "Change", D("op", "add", "pl", "hidden", "item", D("id", "zz2222")));
+                    var ones = app.HiddenOnes();
+                    Ok(ones.Count >= 2 && ones.Any(x => x.Id == "def456") && ones.Any(x => x.Id == "zz2222") && ones.First(x => x.Id == "def456").File != null,
+                        "the hidden grid lists them (the cached original for one that's downloaded)");
+                    var dlg = (Form)Activator.CreateInstance(typeof(HiddenDialog), All, null, new object[] { ones }, null);
+                    var tl = (System.Collections.IList)GetF(dlg, "tiles");
+                    var okb = (TextButton)GetF(dlg, "ok");
+                    Ok(tl.Count == ones.Count && !okb.Enabled && okb.Text == "Show again", "the grid: a tile each, nothing picked yet, Show again greyed");
+                    ((HiddenTile)tl[0]).Selected = true; Call(dlg, "Update");
+                    Ok(okb.Enabled && okb.Text == "Show 1 again", "picking one: the button says how many (" + okb.Text + ")");
+                    dlg.Close(); dlg.Dispose();
+                    app.Unhide(new[] { "def456" });
+                    Ok(!d.Hidden.Contains("def456") && d.Hidden.Contains("zz2222"), "Show again: only the ones picked");
+                    app.UnhideAll();
+                }
                 // ---------------------------------------------------------------- folders in step with the playlists
                 var snap = d.Copy();
                 var names = new Dictionary<string, string>((Dictionary<string, string>)GetF(app, "folderNames"));

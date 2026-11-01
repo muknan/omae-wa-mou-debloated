@@ -32,7 +32,8 @@ Open the deployment's address on a phone (or any browser) for the remote:
   for the rest: show it on another device, add it to a playlist, never show it again, open it on Wallhaven. Swipe
   it for Next and Previous; on a computer, ← and → do the same and the space bar pauses.
 - **Playlists**: the same on every device. Each device picks which ones it shuffles. Add a wallpaper by its
-  Wallhaven link; Hidden lists what's never shown, to let ones back.
+  Wallhaven link. Hidden is a grid of what's never shown: tap the ones to let back, then Show again
+  (with Undo).
 - **Browse**: a device's toplist as a grid, by most favourites, newest or shuffled, to add to playlists.
 - **Devices**: pair a TV, PC or browser with the 6-digit code it shows; rename or sign out any of them.
 

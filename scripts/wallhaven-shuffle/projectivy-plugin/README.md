@@ -41,10 +41,12 @@ To go back, choose **Booru Wallpaper Provider** (or anything else) there. Uninst
 
 ## Settings
 
-The settings screen shows the wallpaper on screen with **Next**, **Keep**, **Pause**, **Save to Favourites**, **Add
-to playlist** and **Hide**, and on the right a short list of rows, each opening a picker made for the remote:
+The settings screen shows the wallpaper on screen with **Keep**, **Previous**, **Pause**, **Next**, **Save to
+Favourites**, **Add to playlist** and **Never show**, and on the right a short list of rows, each opening a picker made for the remote:
 
 - **Shuffle from**: the toplist, Favourites and your playlists, in any mix (one round through all of them).
+- **Hidden wallpapers**: how many are never shown; it opens them as a grid. OK on a tile picks it (a tick), then
+  **Show N again** lets those back on every device (**Select all** picks them all).
 - **Change**: how often. Projectivy's own **Update delay** is how often it asks; the plugin changes at its first ask
   after this time has passed, so the TV can't change faster than Projectivy asks. Next skips the wait.
 - **Toplist**: quality, shape, period, popularity, categories, an optional topic, and the largest size (up to 4K is

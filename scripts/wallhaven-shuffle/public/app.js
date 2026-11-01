@@ -11,7 +11,7 @@
   };
   let token = store.get('whs.token');
   const S = { doc: null, status: {}, presets: null, me: null, online: true, inFlight: 0 };
-  const UI = { dev: store.get('whs.dev'), pending: {}, settleAt: {}, localWant: {}, heroes: {}, shown: {}, browse: { dev: store.get('whs.browseDev'), sort: 'fav', withHidden: false } };
+  const UI = { dev: store.get('whs.dev'), hiddenSel: new Set(), pending: {}, settleAt: {}, localWant: {}, heroes: {}, shown: {}, browse: { dev: store.get('whs.browseDev'), sort: 'fav', withHidden: false } };
   const lists = new Map(); // list query -> { items, error, loading, at }
   const sheets = new Set(); // open sheets' refill functions, so they follow changes made elsewhere
 
@@ -79,6 +79,7 @@
   }
 
   const P = {
+    check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
     now: '<rect x="3" y="4.5" width="18" height="12" rx="2"/><path d="M8.5 20h7"/>',
     playlists: '<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>',
     browse: '<circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/>',
@@ -128,7 +129,7 @@
     const i = h('img', { src, alt, decoding: known ? 'sync' : 'async', loading: eager || known ? 'eager' : 'lazy', draggable: 'false' });
     if (!i.complete && !known) i.classList.add('loading');
     i.addEventListener('load', () => { loaded.add(src); i.classList.remove('loading'); }, { once: true });
-    i.addEventListener('error', () => i.classList.remove('loading'), { once: true });
+    i.addEventListener('error', () => { i.classList.remove('loading'); i.classList.add('broken'); }, { once: true });   // gone from Wallhaven: the tile's own colour, not a broken-image icon
     return i;
   };
 
@@ -755,7 +756,8 @@
       item({ label: 'Toplist', value: filtersSummary(s.filters), onclick: () => filtersSheet(id) }),
       selectItem({ label: 'Change every', value: s.every, id: `every-${id}`, options: S.presets.every.map((m) => [m, everyLabel(m)]), onchange: (v) => setSettings(id, { every: Number(v) }) }));
 
-    const recent = Array.isArray(st.recent) ? st.recent.filter((r) => r && (r.id || r.local)).slice(0, 20) : [];
+    const hiddenIds = new Set(findPl('hidden').items.map((x) => x.id));
+    const recent = Array.isArray(st.recent) ? st.recent.filter((r) => r && (r.id || r.local) && !(r.id && hiddenIds.has(r.id))).slice(0, 20) : [];
     const side = h('div', { class: 'side' },
       online || !stat.seen ? null : h('div', { class: 'offline pad' }, icon('alert'), h('span', {}, away ? 'Wallpapers change only on its home screen. What you change here applies when it’s back there.' : 'Changes apply when it’s back on.')),
       settings,
@@ -876,25 +878,33 @@
     if (!p) return h('div', { class: 'empty' }, h('h2', {}, 'That playlist is gone'), h('a', { class: 'btn', href: '#/playlists' }, 'All playlists'));
     const isHidden = p.kind === 'hidden';
     const devs = devicesWithSettings();
-    const options = () => {
-      if (isHidden) {
-        const before = p.items.slice();
-        return ops([{ op: 'clear', pl: 'hidden' }], { toast: 'They can all show up again', undo: () => ops(before.map((it) => ({ op: 'add', pl: 'hidden', item: it }))) });
-      }
-      playlistSheet(p);
+    const options = () => playlistSheet(p);
+    // Hidden: a grid to pick from (tap to pick, Select all), then "Show N again" (with Undo)
+    const sel = UI.hiddenSel;
+    if (isHidden) for (const id of [...sel]) if (!p.items.some((x) => x.id === id)) sel.delete(id);
+    const everyPicked = isHidden && p.items.length > 0 && sel.size === p.items.length;
+    const pickAll = () => { if (everyPicked) sel.clear(); else for (const it of p.items) sel.add(it.id); changed(); };
+    const showAgain = () => {
+      const items = p.items.filter((x) => sel.has(x.id));
+      sel.clear();
+      ops(items.map((it) => ({ op: 'remove', pl: 'hidden', id: it.id })), {
+        toast: items.length === 1 ? 'It can show up again' : `${items.length} can show up again`,
+        undo: () => ops(items.map((it) => ({ op: 'add', pl: 'hidden', item: it }))),
+      });
     };
     return h('div', {},
       h('div', { class: 'title pad' },
         h('a', { class: 'icon-btn', href: '#/playlists', 'aria-label': 'Playlists', style: { marginLeft: '-10px' } }, icon('back')),
         h('h1', {}, p.name),
         p.kind === 'fav' || (isHidden && !p.items.length) ? null
-          : isHidden ? h('button', { class: 'text-btn', onclick: options }, 'Show all again')
+          : isHidden ? h('button', { class: 'text-btn', onclick: pickAll }, everyPicked ? 'Select none' : 'Select all')
             : h('button', { class: 'icon-btn', 'aria-label': 'Playlist options', onclick: options }, icon('more'))),
-      h('p', { class: 'lede pad' }, isHidden ? 'These never show on any device. Tap one to let it show again.' : plural(p.items.length, 'wallpaper')),
+      h('p', { class: 'lede pad' }, isHidden ? (p.items.length ? 'Never shown on any device. Pick the ones to show again.' : '') : plural(p.items.length, 'wallpaper')),
       !isHidden && devs.length ? [h('div', { class: 'group-label pad', style: { marginTop: '0' } }, 'Shuffled on'),
         group(devs.map(([id, d]) => switchItem({ ic: kindIcon(d.kind), label: d.name, on: d.settings.sources.includes(p.id), id: `on-${p.id}-${id}`, onchange: () => toggleSource(id, p.id) })))] : null,
       isHidden ? null : group(item({ ic: 'link', label: 'Add from a Wallhaven link', cls: 'accent', chev: false, onclick: () => addLinkSheet(p) })),
-      p.items.length ? h('div', { style: { marginTop: '28px' } }, photoGrid(p.items, { pl: p.id }))
+      p.items.length ? h('div', { style: { marginTop: '28px' } }, photoGrid(p.items, { pl: p.id, pick: isHidden ? sel : null }),
+        isHidden && sel.size ? h('div', { class: 'selectbar pad' }, h('button', { class: 'btn primary', onclick: showAgain }, sel.size === 1 ? 'Show 1 again' : `Show ${sel.size} again`)) : null)
         : h('div', { class: 'empty' }, h('h2', {}, isHidden ? 'Nothing hidden' : 'No wallpapers yet'),
           h('p', {}, isHidden ? 'Never show this one, on any device, puts a wallpaper here.' : 'Save one from Now, pick some in Browse, or add a Wallhaven link.'),
           isHidden ? null : h('a', { class: 'btn', href: '#/browse' }, 'Browse the toplist')));
@@ -946,6 +956,12 @@
     const count = Math.min(items.length, Math.max(60, UI.shown[key] || 0));
     const grid = h('div', { class: 'photos' }, items.slice(0, count).map((it) => {
       const isHidden = hidden.has(it.id) && ctx.pl !== 'hidden';
+      if (ctx.pick) {   // picking (the Hidden grid): a tap picks or unpicks it
+        const on = ctx.pick.has(it.id);
+        return h('button', { class: `photo pickable ${on ? 'picked' : ''}`, 'data-key': it.id, 'aria-pressed': String(on), 'aria-label': `Wallpaper ${fmtRes(it.res)}`,
+          onclick: () => { if (on) ctx.pick.delete(it.id); else ctx.pick.add(it.id); changed(); } },
+          img(thumb(it, 'small')), on ? h('span', { class: 'tick' }, icon('check')) : null);
+      }
       return h('button', { class: `photo ${isHidden ? 'dim' : ''}`, 'data-key': it.id, 'aria-label': `Wallpaper ${fmtRes(it.res)}`, onclick: () => preview(it, ctx) },
         img(thumb(it, 'small')),
         favs.has(it.id) && ctx.pl !== 'fav' ? h('span', { class: 'badge heart' }, icon('heartOn')) : isHidden ? h('span', { class: 'badge' }, icon('hide')) : null);
@@ -1089,7 +1105,7 @@
       return;
     }
     const roundedStatus = Object.fromEntries(Object.entries(S.status).map(([k, v]) => [k, { ...v, seen: Math.round(v.seen / 60e3) }]));
-    const sig = JSON.stringify([r, S.online, S.doc, roundedStatus, UI.pending, Object.keys(UI.settleAt), UI.dev, UI.browse, [...lists.entries()].map(([k, v]) => [k, !!v.items, v.loading, v.error])]);
+    const sig = JSON.stringify([r, S.online, S.doc, roundedStatus, UI.pending, Object.keys(UI.settleAt), [...UI.hiddenSel], UI.dev, UI.browse, [...lists.entries()].map(([k, v]) => [k, !!v.items, v.loading, v.error])]);
     if (sig === lastSig && !force) return;
     lastSig = sig;
     const view = r.name === 'playlists' ? (r.arg ? viewPlaylist(r.arg) : viewPlaylists()) : r.name === 'browse' ? viewBrowse() : r.name === 'devices' ? viewDevices() : viewNow();

@@ -59,8 +59,9 @@ toplist, the same one the TV uses. It is one exe with no installer and no .NET S
 - The folders and the playlists stay in step both ways: a picture copied into a playlist's folder in Explorer joins
   the playlist (within a minute), one you delete leaves it, and a new folder becomes a new playlist. Taken out of a
   playlist means to the Recycle Bin. Only files the app synced before are ever removed.
-- **Never show this one** (⋯) puts the wallpaper in **Hidden**, which every source leaves out. ⋯ > **Show hidden
-  wallpapers again** clears it; the remote shows Hidden and can let them back one by one.
+- **Never show this one** (⋯) puts the wallpaper in **Hidden**, which every source leaves out. Hiding the one on screen moves on
+  at once (back in history if you were going back). ⋯ > **Hidden wallpapers…** shows them as a grid: click the ones
+  to show again (or Select all), then **Show N again**. The remote and the TV have the same grid.
 - **Add a folder of your pictures…** shuffles any folder (top level; JPG, PNG, WebP, BMP, GIF) where it is: nothing
   is copied. Pictures of your own stay on this PC; playlists sync Wallhaven wallpapers only.
 - ⋯ > **Playlists** lists each playlist and folder with **Open its folder**, **Rename…** and **Delete…** (deleted
@@ -79,8 +80,8 @@ toplist, the same one the TV uses. It is one exe with no installer and no .NET S
 - It checks in every 10 seconds, every 1.5 while a remote is open, with one small request; playlists download only
   when they changed.
 
-**⋯ menu**: Add to playlist, Show on, Show in folder, Open on Wallhaven, Never show this one, Playlists, Show hidden
-wallpapers again, Remote, **Settings** (picture fit, the pause and lock screen switches, Start with Windows, and
+**⋯ menu**: Add to playlist, Show on, Show in folder, Open on Wallhaven, Never show this one, Playlists, Hidden
+wallpapers…, Remote, **Settings** (picture fit, the pause and lock screen switches, Start with Windows, and
 **Advanced settings**, which opens `settings.ini` in Notepad; saved changes apply within a few seconds), and Restore
 my original wallpaper (a copy of it is kept next to the app at the first run).
 

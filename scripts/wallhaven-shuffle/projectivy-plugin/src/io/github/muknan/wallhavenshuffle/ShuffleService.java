@@ -217,10 +217,14 @@ public final class ShuffleService extends Service {
         SharedPreferences p = ListStore.prefs(c);
         try {
             JSONArray recent = new JSONArray(p.getString("recent_json", "[]"));
-            if (recent.length() == 0) return;
-            JSONObject prev = recent.getJSONObject(0);
+            // the latest one that isn't hidden (hidden ones drop out of the list on the way)
+            Set<String> hidden = Sync.hiddenIds(c);
+            int at = 0;
+            while (at < recent.length() && hidden.contains(recent.getJSONObject(at).optString("id"))) at++;
+            if (at >= recent.length()) return;
+            JSONObject prev = recent.getJSONObject(at);
             JSONArray rest = new JSONArray();
-            for (int i = 1; i < recent.length(); i++) rest.put(recent.get(i));
+            for (int i = at + 1; i < recent.length(); i++) rest.put(recent.get(i));
             String cur = p.getString("current", "");
             List<String> round = Shuffle.split(p.getString("round", "")), history = Shuffle.split(p.getString("history", ""));
             round.remove(cur);
@@ -271,7 +275,11 @@ public final class ShuffleService extends Service {
                 st.put("next", Shuffle.nextChange(lastAsk, base, changed, s.every * 60_000L, System.currentTimeMillis()));
             // the settings as this TV has them (the remote shows "Updating…" until they match what it asked for)
             st.put("paused", s.paused).put("kept", !s.keep.isEmpty()).put("every", s.every);
-            st.put("recent", new JSONArray(p.getString("recent_json", "[]")));
+            // recently shown, without hidden ones (Previous skips them too)
+            JSONArray recentAll = new JSONArray(p.getString("recent_json", "[]")), recentShown = new JSONArray();
+            Set<String> hiddenNow = Sync.hiddenIds(c);
+            for (int i = 0; i < recentAll.length(); i++) if (!hiddenNow.contains(recentAll.getJSONObject(i).optString("id"))) recentShown.put(recentAll.get(i));
+            st.put("recent", recentShown);
             List<Shuffle.Item> pool = pool(c, s);
             Shuffle.Item up = upcoming(c, pool);
             if (up != null) st.put("up", Sync.itemJson(up));

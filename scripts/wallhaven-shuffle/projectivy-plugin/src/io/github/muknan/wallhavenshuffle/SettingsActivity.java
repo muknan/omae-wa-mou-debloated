@@ -19,7 +19,10 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
+import android.widget.BaseAdapter;
+import android.widget.Button;
 import android.widget.EditText;
+import android.widget.GridView;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -33,7 +36,11 @@ import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.Locale;
 
 /**
@@ -204,6 +211,7 @@ public final class SettingsActivity extends Activity implements Sync.Listener {
         LinearLayout g1 = group(box, null);
         row(g1, "Shuffle from", () -> sourcesLabel(), v -> pickSources());
         row(g1, "Change every", () -> TvSettings.everyLabel(Sync.settings(this).every), v -> pickEvery());
+        row(g1, "Hidden wallpapers", () -> { int n = Sync.hiddenIds(this).size(); return n == 0 ? "" : String.format(Locale.US, "%,d", n); }, v -> pickHidden());
 
         LinearLayout g2 = group(box, "Toplist");
         row(g2, "Quality", () -> TvSettings.QUALITY.get(Sync.settings(this).quality), v -> pickMap("Quality", TvSettings.QUALITY, Sync.settings(this).quality, (s, k) -> s.quality = k));
@@ -228,6 +236,106 @@ public final class SettingsActivity extends Activity implements Sync.Listener {
         row(g4, "Get a fresh list now", () -> listLabel(), v -> { toast("Getting the list…"); ListStore.refreshNow(this, r -> ui.post(() -> { toast(r); refresh(); })); });
         space(box, 40);   // the last row clear of the screen edge when the list is scrolled to the end
         return box;
+    }
+
+    // "Hidden wallpapers": every one hidden, as a grid to move through with the remote; OK picks one (a ring and a tick),
+    // "Show again" shows the picked ones on every device again. The same grid as on the PC and in the remote.
+    private void pickHidden() {
+        List<Shuffle.Item> hidden = Sync.items(this, "hidden");
+        java.util.Collections.reverse(hidden);   // newest first
+        if (hidden.isEmpty()) { dialog("Hidden wallpapers").setMessage("Nothing is hidden. Never show this one puts a wallpaper here.").setPositiveButton("OK", null).show(); return; }
+        Set<String> picked = new HashSet<>();
+        Map<String, Bitmap> pics = new HashMap<>();
+        GridView grid = new GridView(this);
+        grid.setNumColumns(4);
+        grid.setHorizontalSpacing(dp(10)); grid.setVerticalSpacing(dp(10));
+        grid.setPadding(dp(24), dp(12), dp(24), dp(12)); grid.setClipToPadding(false);
+        grid.setStretchMode(GridView.STRETCH_COLUMN_WIDTH);
+        GradientDrawable ring = new GradientDrawable();   // where the remote is: a white ring, as on the pills
+        ring.setCornerRadius(dp(8)); ring.setColor(Color.TRANSPARENT); ring.setStroke(dp(3), FG);
+        grid.setSelector(ring); grid.setDrawSelectorOnTop(true);
+        BaseAdapter adapter = new BaseAdapter() {
+            @Override public int getCount() { return hidden.size(); }
+            @Override public Object getItem(int i) { return hidden.get(i); }
+            @Override public long getItemId(int i) { return i; }
+            @Override public View getView(int i, View old, ViewGroup parent) {
+                Shuffle.Item w = hidden.get(i);
+                FrameLayout tile = old instanceof FrameLayout ? (FrameLayout) old : newTile();
+                ImageView img = (ImageView) tile.getChildAt(0);
+                TextView tick = (TextView) tile.getChildAt(1);
+                Bitmap b = pics.get(w.id);
+                img.setImageBitmap(b);
+                boolean on = picked.contains(w.id);
+                tick.setVisibility(on ? View.VISIBLE : View.GONE);
+                GradientDrawable fg = new GradientDrawable();
+                fg.setCornerRadius(dp(8)); fg.setColor(Color.TRANSPARENT);
+                if (on) fg.setStroke(dp(3), ACCENT);
+                tile.setForeground(fg);
+                img.setAlpha(on ? 0.85f : 1f);
+                return tile;
+            }
+        };
+        grid.setAdapter(adapter);
+        AlertDialog d = dialog("Hidden wallpapers").setMessage("Never shown on any device. Pick the ones to show again.").setView(grid)
+            .setPositiveButton("Show again", null).setNeutralButton("Select all", null).setNegativeButton("Cancel", null).create();
+        Runnable update = () -> {
+            Button show = d.getButton(AlertDialog.BUTTON_POSITIVE), all = d.getButton(AlertDialog.BUTTON_NEUTRAL);
+            if (show != null) { show.setEnabled(!picked.isEmpty()); show.setText(picked.isEmpty() ? "Show again" : "Show " + picked.size() + " again"); }
+            if (all != null) all.setText(picked.size() == hidden.size() ? "Select none" : "Select all");
+            adapter.notifyDataSetChanged();
+        };
+        grid.setOnItemClickListener((p, v, i, id) -> { String k = hidden.get(i).id; if (!picked.remove(k)) picked.add(k); update.run(); });
+        d.setOnShowListener(x -> {
+            d.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
+                if (picked.size() == hidden.size()) picked.clear(); else for (Shuffle.Item w : hidden) picked.add(w.id);
+                update.run();
+            });
+            d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+                if (picked.isEmpty()) return;
+                List<JSONObject> ops = new ArrayList<>();
+                try { for (String k : picked) ops.add(new JSONObject().put("op", "remove").put("pl", "hidden").put("id", k)); } catch (Exception ignored) { }
+                int n = ops.size();
+                d.dismiss();
+                background(() -> Sync.op(this, ops.toArray(new JSONObject[0])), n == 1 ? "It can show up again" : n + " can show up again");
+            });
+            update.run();
+            grid.requestFocus();
+        });
+        d.show();
+        if (d.getWindow() != null) d.getWindow().setLayout(dp(760), ViewGroup.LayoutParams.WRAP_CONTENT);
+        // thumbnails, one at a time in the background (Wallhaven's small ones)
+        new Thread(() -> {
+            for (Shuffle.Item w : hidden) {
+                if (!d.isShowing()) return;
+                try {
+                    HttpURLConnection http = (HttpURLConnection) new URL("https://th.wallhaven.cc/small/" + w.id.substring(0, 2) + "/" + w.id + ".jpg").openConnection();
+                    http.setConnectTimeout(10_000); http.setReadTimeout(15_000);
+                    Bitmap b;
+                    try (InputStream in = http.getInputStream()) { b = BitmapFactory.decodeStream(in); } finally { http.disconnect(); }
+                    if (b != null) ui.post(() -> { pics.put(w.id, b); adapter.notifyDataSetChanged(); });
+                } catch (Exception ignored) { }
+            }
+        }, "hidden-thumbs").start();
+    }
+
+    // A grid tile: the picture (16:9, cropped to fill), and a tick in the corner when picked.
+    private FrameLayout newTile() {
+        FrameLayout tile = new FrameLayout(this) {
+            @Override protected void onMeasure(int w, int h) { int width = MeasureSpec.getSize(w); super.onMeasure(w, MeasureSpec.makeMeasureSpec(width * 9 / 16, MeasureSpec.EXACTLY)); }
+        };
+        tile.setBackground(round(RAISED, 8));
+        tile.setClipToOutline(true);
+        tile.setOutlineProvider(new ViewOutlineProvider() { @Override public void getOutline(View v, Outline o) { o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), dp(8)); } });
+        ImageView img = new ImageView(this);
+        img.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        tile.addView(img, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        TextView tick = text("✓", 14, BG, true);
+        tick.setGravity(Gravity.CENTER);
+        tick.setBackground(round(ACCENT, 12));
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(24), dp(24), Gravity.TOP | Gravity.END);
+        lp.setMargins(0, dp(6), dp(6), 0);
+        tile.addView(tick, lp);
+        return tile;
     }
 
     private String sourcesLabel() {
@@ -401,10 +509,10 @@ public final class SettingsActivity extends Activity implements Sync.Listener {
         Shuffle.Item cur = ShuffleService.current(this);
         keepBtn.setText(s.keep.isEmpty() ? "Keep" : "Stop keeping");
         pauseBtn.setText(s.paused ? "Resume" : "Pause");
-        keepBtn.setTextColor(s.keep.isEmpty() ? FG : ACCENT);
+        keepBtn.setTextColor(keepBtn.isFocused() ? BG : s.keep.isEmpty() ? FG : ACCENT);   // dark on the white pill while the remote is on it
         boolean fav = cur != null && Sync.contains(this, "fav", cur.id);
         favBtn.setText(fav ? "In Favourites" : "Save to Favourites");
-        favBtn.setTextColor(fav ? HEART : FG);
+        favBtn.setTextColor(favBtn.isFocused() ? BG : fav ? HEART : FG);
         if (cur == null) {
             picture.setImageDrawable(null);
             pictureId = "";

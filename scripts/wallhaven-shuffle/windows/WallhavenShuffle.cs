@@ -23,7 +23,7 @@ using Microsoft.Win32;
 
 [assembly: System.Reflection.AssemblyTitle("Wallhaven Shuffle")]
 [assembly: System.Reflection.AssemblyProduct("Wallhaven Shuffle")]
-[assembly: System.Reflection.AssemblyVersion("2.7.0.0")]
+[assembly: System.Reflection.AssemblyVersion("2.8.0.0")]
 
 namespace WallhavenShuffle
 {
@@ -714,6 +714,31 @@ namespace WallhavenShuffle
             return newRound;
         }
 
+        // Takes every History entry gone() says out (hidden ones: Previous never brings them back). Going back, the place
+        // stays on the entry on screen; if that entry itself went, Back is -1 and the result is the index of the entry
+        // after it (where Next carries on), or -1 when there is none.
+        public int Forget(Func<string, bool> gone)
+        {
+            int before = 0, follow = -1;
+            bool screenGone = false;
+            var kept = new List<string>();
+            for (int i = 0; i < History.Count; i++)
+            {
+                if (gone(History[i])) { if (Back >= 0 && i < Back) before++; if (i == Back) screenGone = true; continue; }
+                kept.Add(History[i]);
+            }
+            if (kept.Count == History.Count) return -1;
+            if (Back >= 0)
+            {
+                int at = Back - before;   // the entry on screen, or (if it went) the one after it
+                if (screenGone) { follow = at < kept.Count ? at : -1; Back = -1; }
+                else Back = at >= kept.Count - 1 ? -1 : at;
+            }
+            History.Clear();
+            History.AddRange(kept);
+            return follow;
+        }
+
         // Where Previous goes (a History index), or -1 at the oldest.
         public int BackTarget() { int at = Back < 0 ? History.Count - 1 : Back; return at > 0 ? at - 1 : -1; }
         // Where Next goes while going back (a History index), or -1 when not going back.
@@ -1333,7 +1358,7 @@ namespace WallhavenShuffle
             for (int i = rot.ForwardTarget(); i >= 0 && i < rot.History.Count; i++)
             {
                 var w = FindWall(rot.History[i]);
-                if (w != null) { ShowWall(w, i); return; }
+                if (w != null && !IsHidden(w)) { ShowWall(w, i); return; }
             }
             rot.Back = -1;
             if (prepared != null && ((current != null && prepared.Id == current.Id) || !InPool(prepared))) prepared = null;
@@ -1346,10 +1371,10 @@ namespace WallhavenShuffle
         public void Previous()
         {
             if (Queue(-1)) return;
-            for (int i = rot.BackTarget(); i >= 0; i--)   // skipping any that aren't there any more
+            for (int i = rot.BackTarget(); i >= 0; i--)   // skipping any that aren't there any more, or are hidden
             {
                 var w = FindWall(rot.History[i]);
-                if (w != null) { ReleaseKeep("previous"); ShowWall(w, i); return; }
+                if (w != null && !IsHidden(w)) { ReleaseKeep("previous"); ShowWall(w, i); return; }
             }
         }
 
@@ -1919,7 +1944,7 @@ namespace WallhavenShuffle
             hideItem = moreMenu.Add("Never show this one", Glyphs.Hide, delegate { app.Block(); });
             moreMenu.AddSeparator();
             moreMenu.AddSubmenu("Playlists", Glyphs.Library, FillPlaylistsMenu);
-            unhideItem = moreMenu.Add("Show hidden wallpapers again", Glyphs.View, delegate { app.UnhideAll(); });
+            unhideItem = moreMenu.Add("Hidden wallpapers…", Glyphs.View, delegate { app.HiddenDialogFor(this); });
             moreMenu.AddSubmenu("Remote", Glyphs.Phone, sub => app.FillRemoteMenu(sub, this));
             moreMenu.AddSubmenu("Settings", Glyphs.Settings, FillSettingsMenu);
             moreMenu.Add("Restore my original wallpaper", Glyphs.Restore, delegate { app.RestoreOriginal(); });
@@ -1933,7 +1958,7 @@ namespace WallhavenShuffle
                 showItem.Enabled = app.CurrentFile != null && File.Exists(app.CurrentFile);
                 int hidden = app.HiddenCount;
                 unhideItem.Enabled = hidden > 0;
-                unhideItem.Text = hidden > 0 ? "Show hidden wallpapers again (" + hidden + ")" : "Show hidden wallpapers again";
+                FluentMenu.ShowValue(unhideItem, hidden > 0 ? hidden.ToString("N0") : null);   // how many, dim on the right like the other menus' values
                 moreMenu.RefreshGlyphs();
             };
 
@@ -2481,6 +2506,195 @@ namespace WallhavenShuffle
     // A small Windows 11 dialog: a title, a line of explanation, an optional text box (checked as you type, with the
     // reason shown under it), and the primary and Cancel buttons. Enter = the primary button, Esc = Cancel. Solid
     // (not acrylic), with Windows' own rounded corners, border and shadow; in front of the flyout.
+    // "Hidden wallpapers": every one hidden (Never show this one), as a grid; pick some and show them again. Styled as
+    // FluentDialog. Pictures load in the background: the cached original when there is one, else Wallhaven's thumbnail.
+    class HiddenDialog : Form
+    {
+        readonly List<HiddenTile> tiles = new List<HiddenTile>();
+        readonly TextButton ok, all;
+        readonly Label body;
+        Size content;
+        volatile bool closed;
+
+        HiddenDialog(List<TrayApp.HiddenOne> hidden)
+        {
+            AutoScaleMode = AutoScaleMode.None;
+            Font = Theme.Body(10f);
+            Text = "Hidden wallpapers";
+            FormBorderStyle = FormBorderStyle.FixedSingle;
+            ControlBox = false; MaximizeBox = false; MinimizeBox = false;
+            ShowInTaskbar = false; TopMost = true; KeyPreview = true;
+            StartPosition = FormStartPosition.Manual;
+            BackColor = Theme.Bg; ForeColor = Theme.Text;
+            Func<int, int> k = v => (int)Math.Round(v * Theme.Scale);
+            int w = k(560), pad = k(24), gap = k(8), y = pad, cols = 3;
+
+            var head = new Label { Text = "Hidden wallpapers", Font = Theme.Strong(14f), ForeColor = Theme.Text, BackColor = Theme.Bg, AutoSize = false, Bounds = new Rectangle(pad, y, w - 2 * pad - k(110), k(32)) };
+            all = new TextButton("Select all", false) { Bounds = new Rectangle(w - pad - k(104), y, k(104), k(30)), Visible = hidden.Count > 1 };
+            all.Click += delegate { bool every = tiles.All(t => t.Selected); foreach (var t in tiles) t.Selected = !every; Update(); };
+            y = head.Bottom + k(6);
+            body = new Label { ForeColor = Theme.TextSecondary, BackColor = Theme.Bg, AutoSize = false, Bounds = new Rectangle(pad, y, w - 2 * pad, k(22)),
+                Text = hidden.Count == 0 ? "Nothing is hidden. Never show this one puts a wallpaper here." : "Never shown on any device. Pick the ones to show again." };
+            y = body.Bottom + k(14);
+            Controls.Add(head); Controls.Add(all); Controls.Add(body);
+
+            int tw = (w - 2 * pad - (cols - 1) * gap) / cols, th = tw * 9 / 16;
+            int rows = (hidden.Count + cols - 1) / cols, gridH = Math.Max(0, rows * (th + gap) - gap);
+            var grid = new Panel { Bounds = new Rectangle(pad, y, w - 2 * pad + (gridH > k(380) ? SystemInformation.VerticalScrollBarWidth : 0), Math.Min(gridH, k(380))), AutoScroll = true, BackColor = Theme.Bg };
+            if (gridH > k(380)) Width += 0;
+            for (int i = 0; i < hidden.Count; i++)
+            {
+                var t = new HiddenTile(hidden[i]) { Bounds = new Rectangle((i % cols) * (tw + gap), (i / cols) * (th + gap), tw, th), TabIndex = i };
+                t.Click += delegate { t.Selected = !t.Selected; Update(); };
+                tiles.Add(t);
+                grid.Controls.Add(t);
+            }
+            if (hidden.Count > 0) { Controls.Add(grid); y = grid.Bottom + k(20); }
+
+            var footer = new Panel { Bounds = new Rectangle(0, y, w + (gridH > k(380) ? SystemInformation.VerticalScrollBarWidth : 0), k(80)), BackColor = Theme.Dark ? Color.FromArgb(28, 28, 28) : Color.FromArgb(234, 234, 234) };
+            int bw = (footer.Width - 2 * pad - k(8)) / 2;
+            ok = new TextButton("Show again", true) { Bounds = new Rectangle(pad, k(24), bw, k(32)), Visible = hidden.Count > 0 };
+            var cancel = new TextButton(hidden.Count > 0 ? "Cancel" : "OK", hidden.Count == 0) { Bounds = hidden.Count > 0 ? new Rectangle(pad + bw + k(8), k(24), bw, k(32)) : new Rectangle(pad, k(24), footer.Width - 2 * pad, k(32)) };
+            ok.Click += delegate { if (tiles.Any(t => t.Selected)) DialogResult = DialogResult.OK; };
+            cancel.Click += delegate { DialogResult = DialogResult.Cancel; };
+            footer.Controls.Add(ok); footer.Controls.Add(cancel);
+            Controls.Add(footer);
+            content = new Size(footer.Width, footer.Bottom);
+            Size = content;
+            Update();
+            LoadPictures(tw, th);
+        }
+
+        // The count on the button, the button greyed with none picked, "Select all" / "Select none".
+        new void Update()
+        {
+            int n = tiles.Count(t => t.Selected);
+            ok.Text = n == 0 ? "Show again" : "Show " + n + " again";
+            ok.Enabled = n > 0;
+            all.Text = tiles.Count > 0 && n == tiles.Count ? "Select none" : "Select all";
+        }
+
+        // One at a time, in the background (4K originals are big): scaled to the tile, then handed to it.
+        void LoadPictures(int tw, int th)
+        {
+            var todo = tiles.ToList();
+            var t = new Thread(delegate ()
+            {
+                foreach (var tile in todo)
+                {
+                    if (closed) return;
+                    Bitmap bmp = null;
+                    try
+                    {
+                        byte[] bytes = null;
+                        if (tile.One.File != null) bytes = File.ReadAllBytes(tile.One.File);
+                        else if (tile.One.Thumb != null)
+                            using (var web = new WebClient()) { web.Headers[HttpRequestHeader.UserAgent] = SyncClient.UserAgent; bytes = web.DownloadData(tile.One.Thumb); }
+                        if (bytes != null)
+                            using (var ms = new MemoryStream(bytes))
+                            using (var img = Image.FromStream(ms))
+                            {
+                                double scale = Math.Max((double)tw / img.Width, (double)th / img.Height);   // cover, centred
+                                int sw = (int)Math.Ceiling(img.Width * scale), sh = (int)Math.Ceiling(img.Height * scale);
+                                bmp = new Bitmap(tw, th);
+                                using (var g = Graphics.FromImage(bmp)) { g.InterpolationMode = InterpolationMode.HighQualityBicubic; g.DrawImage(img, (tw - sw) / 2, (th - sh) / 2, sw, sh); }
+                            }
+                    }
+                    catch (Exception) { /* left as a plain tile with its name */ }
+                    if (closed) { if (bmp != null) bmp.Dispose(); return; }
+                    var b = bmp;
+                    try { BeginInvoke(new Action(delegate { if (closed) { if (b != null) b.Dispose(); } else tile.Picture = b; })); } catch (Exception) { if (b != null) b.Dispose(); return; }
+                }
+            });
+            t.IsBackground = true;
+            t.Start();
+        }
+
+        protected override void OnFormClosed(FormClosedEventArgs e) { closed = true; base.OnFormClosed(e); }
+
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == 0x0083 && m.WParam != IntPtr.Zero) { m.Result = IntPtr.Zero; return; } // no caption or borders (Windows keeps the shadow)
+            if (m.Msg == 0x0084) { m.Result = new IntPtr(1); return; }
+            base.WndProc(ref m);
+        }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            Native.StyleFlyout(Handle, Theme.Dark, Theme.FlyoutBorder);
+            Native.SetWindowPos(Handle, IntPtr.Zero, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020);
+            Size = content;
+        }
+
+        protected override void OnShown(EventArgs e) { base.OnShown(e); Activate(); Native.SetForegroundWindow(Handle); if (tiles.Count > 0) tiles[0].Focus(); }
+
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if (keyData == Keys.Escape) { DialogResult = DialogResult.Cancel; return true; }
+            if (keyData == Keys.Enter && tiles.Any(t => t.Selected)) { DialogResult = DialogResult.OK; return true; }
+            if (keyData == (Keys.Control | Keys.A)) { foreach (var t in tiles) t.Selected = true; Update(); return true; }
+            return base.ProcessCmdKey(ref msg, keyData);
+        }
+
+        // The ones picked (their ids), or null if cancelled.
+        public static List<string> Pick(Form owner, List<TrayApp.HiddenOne> hidden)
+        {
+            using (var d = new HiddenDialog(hidden))
+            {
+                var area = owner != null && owner.Visible ? owner.Bounds : Screen.PrimaryScreen.WorkingArea;
+                d.Location = new Point(area.Left + (area.Width - d.content.Width) / 2, Math.Max(area.Top, area.Top + (area.Height - d.content.Height) / 2));
+                TrayApp.ModalOpen++;
+                try
+                {
+                    var r = owner != null && owner.Visible ? d.ShowDialog(owner) : d.ShowDialog();
+                    return r == DialogResult.OK ? d.tiles.Where(t => t.Selected).Select(t => t.One.Id).ToList() : null;
+                }
+                finally { TrayApp.ModalOpen--; }
+            }
+        }
+    }
+
+    // A hidden wallpaper in the grid: its picture (or its name until it loads), and when picked an accent ring and a tick.
+    class HiddenTile : FluentControl
+    {
+        public readonly TrayApp.HiddenOne One;
+        Bitmap picture;
+        bool selected;
+        public HiddenTile(TrayApp.HiddenOne one) { One = one; AccessibleName = one.Local ? one.Name : "Wallpaper " + one.Id; AccessibleRole = AccessibleRole.CheckButton; }
+        public Bitmap Picture { get { return picture; } set { if (picture != null) picture.Dispose(); picture = value; Invalidate(); } }
+        public bool Selected { get { return selected; } set { if (selected == value) return; selected = value; AccessibleDescription = value ? "selected" : null; Invalidate(); } }
+        protected override bool IsInputKey(Keys key) { return key == Keys.Space || base.IsInputKey(key); }
+        protected override void OnKeyDown(KeyEventArgs e) { if (e.KeyCode == Keys.Space) { OnClick(EventArgs.Empty); e.Handled = true; } base.OnKeyDown(e); }
+        protected override void Dispose(bool disposing) { if (disposing && picture != null) { picture.Dispose(); picture = null; } base.Dispose(disposing); }
+
+        protected override void Render(Graphics g)
+        {
+            var r = new RectangleF(0.5f, 0.5f, Width - 1, Height - 1);
+            using (var path = Theme.Rounded(r, 6 * K))
+            {
+                g.SetClip(path);
+                if (picture != null) g.DrawImage(picture, 0, 0, Width, Height);
+                else
+                {
+                    using (var b = new SolidBrush(Theme.Field)) g.FillRectangle(b, ClientRectangle);
+                    Theme.DrawText(g, One.Local ? One.Name : One.Id, Font, ClientRectangle, Theme.TextSecondary, StringAlignment.Center);
+                }
+                if (hover && !selected) using (var b = new SolidBrush(Color.FromArgb(28, 255, 255, 255))) g.FillRectangle(b, ClientRectangle);
+                g.ResetClip();
+                if (selected)
+                {
+                    using (var p = new Pen(Theme.Accent, 3 * K)) { var rr = new RectangleF(1.5f * K, 1.5f * K, Width - 3 * K, Height - 3 * K); using (var inner = Theme.Rounded(rr, 5 * K)) g.DrawPath(p, inner); }
+                    float d = 22 * K;
+                    var c = new RectangleF(Width - d - 7 * K, 7 * K, d, d);
+                    using (var b = new SolidBrush(Theme.Accent)) g.FillEllipse(b, c);
+                    Theme.DrawGlyph(g, Glyphs.Check, Theme.Px(g, 9f), Rectangle.Round(c), Theme.OnAccent);
+                }
+                else if (Focused) using (var p = new Pen(Theme.TextSecondary, 1.5f * K)) g.DrawPath(p, path);
+            }
+        }
+    }
+
     class FluentDialog : Form
     {
         readonly TextBox box;
@@ -2762,9 +2976,9 @@ namespace WallhavenShuffle
         // A row's current value, on its right in the secondary colour ("Quality      4K and up  ›").
         // The value is kept in AccessibleDescription (screen readers read it too) and drawn by the renderer; the menu
         // makes itself wide enough for label, gap and value as it opens (FitValues).
-        static void ShowValue(ToolStripMenuItem i, string value)
+        public static void ShowValue(ToolStripMenuItem i, string value)
         {
-            if (string.IsNullOrEmpty(value)) return;
+            if (string.IsNullOrEmpty(value)) { i.AccessibleDescription = null; i.ShortcutKeyDisplayString = null; i.ShowShortcutKeys = false; return; }   // none (any earlier value goes)
             i.AccessibleDescription = value;
             // the shortcut column makes Windows reserve the room (the renderer draws the value itself)
             i.ShortcutKeyDisplayString = value + " ";
