@@ -1,4 +1,4 @@
-// Tests for Wallhaven Shuffle (build.ps1 -Test; compiled with WallhavenShuffle.cs, Sync.cs and Library.cs; run from a
+﻿// Tests for Wallhaven Shuffle (build.ps1 -Test; compiled with WallhavenShuffle.cs, Sync.cs and Library.cs; run from a
 // temporary folder). The TrayApp is constructed but its message loop never runs, so no timer fires; it's paused, and
 // Favourites point at a test folder, so the real wallpaper and Pictures folder are never touched.
 using System;
@@ -73,6 +73,8 @@ namespace WallhavenShuffle
             var bad = new Filters { Quality = "9k", Ratio = "3x1", Range = "2y", Cats = "000", Topic = "<b>", Fav = -1, MaxWidth = 1234 }.Clean();
             Ok(bad.Quality == "4k+" && bad.Ratio == "16x9,16x10" && bad.Range == "1y" && bad.Cats == "110" && bad.Topic == "" && bad.Fav == 50 && bad.MaxWidth == 0, "odd filter values go back to valid ones");
             Ok(new Filters().Summary == "4K and up · Past year" && Filters.EveryLabel(120) == "2 hours" && Filters.FavLabel(1000) == "1,000+ favourites", "labels");
+            Ok(Filters.ParseFav("75") == 75 && Filters.ParseFav(" 1,500 ") == 1500 && Filters.ParseFav("0") == 0 && Filters.ParseFav("100000") == 100000
+               && Filters.ParseFav("100001") == -1 && Filters.ParseFav("-5") == -1 && Filters.ParseFav("7.5") == -1 && Filters.ParseFav("") == -1 && Filters.ParseFav("abc") == -1, "a typed favourites minimum");
 
             // the document's rules (the same as the service's)
             var doc = new SyncDoc();
@@ -303,6 +305,30 @@ namespace WallhavenShuffle
                 var back = Settings.Load();
                 Ok(back.KeepId == @"C:\x\y.jpg" && back.Filters.Quality == "8k" && back.Filters.Topic == "space" && back.Server == "https://example.invalid" && back.Sources.SequenceEqual(new[] { "fav" }), "settings.ini keeps the new settings");
                 s.KeepId = ""; s.Save();
+
+                // Toplist > Popularity: the presets, a typed-in one in its place, and Type one…
+                {
+                    Func<List<ToolStripItem>> popularity = () =>
+                    {
+                        var menu = new FluentMenu();
+                        app.FillToplistMenu(menu, null);
+                        var pop = menu.Items.OfType<ToolStripMenuItem>().First(x => x.Text == "Popularity");
+                        menu.Show(new Point(-3000, -3000));
+                        for (int k = 0; k < 10; k++) { Application.DoEvents(); System.Threading.Thread.Sleep(5); }
+                        pop.ShowDropDown();
+                        for (int k = 0; k < 10; k++) { Application.DoEvents(); System.Threading.Thread.Sleep(5); }
+                        var items = pop.DropDownItems.Cast<ToolStripItem>().ToList();
+                        menu.Close();
+                        return items;
+                    };
+                    int was = s.Filters.Fav;
+                    var popA = popularity();
+                    Ok(popA.Last().Text == "Type one…" && popA[popA.Count - 2] is ToolStripSeparator && popA.OfType<ToolStripMenuItem>().Count(x => x.Checked) == 1, "Popularity ends with Type one…");
+                    app.SetFilters(x => x.Fav = 1500);
+                    var popB = popularity().OfType<ToolStripMenuItem>().Select(x => x.Text + (x.Checked ? "*" : "")).ToList();
+                    Ok(popB.IndexOf("1,500+ favourites*") == popB.IndexOf("1,000+ favourites") + 1, "a typed-in one shows in its place, checked: " + string.Join(" | ", popB));
+                    app.SetFilters(x => x.Fav = was);
+                }
             }
             finally
             {

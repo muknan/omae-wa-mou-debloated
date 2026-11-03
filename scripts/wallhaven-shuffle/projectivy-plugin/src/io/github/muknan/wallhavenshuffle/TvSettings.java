@@ -106,6 +106,15 @@ final class TvSettings {
         if (m < 1440) return m == 60 ? "1 hour" : (m / 60) + " hours";
         return "1 day";
     }
+    // A favourites minimum typed in: digits (commas and spaces allowed, as in 1,500), 0 to 100,000; -1 if it isn't one.
+    static final int FAV_MAX = 100000;
+    static final String FAV_NOTE = "Only wallpapers with at least this many favourites on Wallhaven. 0 shows any.";
+    static int parseFav(String v) {
+        String t = v == null ? "" : v.replaceAll("[\\s,]", "");
+        if (!t.matches("\\d{1,6}")) return -1;
+        int n = Integer.parseInt(t);
+        return n <= FAV_MAX ? n : -1;
+    }
     static String favLabel(int n) { return n == 0 ? "Any" : String.format(Locale.US, "%,d+ favourites", n); }
     static String maxwLabel(int w) { return w == 0 ? "Any" : w == 3840 ? "Up to 4K" : "Up to 5K"; }
     String catsLabel() {

@@ -49,8 +49,9 @@ Favourites**, **Add to playlist** and **Never show**, and on the right a short l
   **Show N again** lets those back on every device (**Select all** picks them all).
 - **Change**: how often. Projectivy's own **Update delay** is how often it asks; the plugin changes at its first ask
   after this time has passed, so the TV can't change faster than Projectivy asks. Next skips the wait.
-- **Toplist**: quality, shape, period, popularity, categories, an optional topic, and the largest size (up to 4K is
-  lighter for a TV's decoder). The same choices as the Windows app and the remote.
+- **Toplist**: quality, shape, period, popularity (a preset, or **Type one…** for any number), categories, an optional
+  topic, and the largest size (up to 4K is lighter for a TV's decoder). The same choices as the Windows app and the
+  remote.
 - **Sync**: **Pair with your phone or PC** shows a 6-digit code; type it in the remote (Devices > Pair a device) or on
   the PC (Remote > Pair a device). Paired, the playlists, Favourites and Hidden are shared, the remote can change
   everything here and send Next, Previous or a wallpaper, and Hide on any device leaves it out here too.

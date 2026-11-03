@@ -23,7 +23,7 @@ using Microsoft.Win32;
 
 [assembly: System.Reflection.AssemblyTitle("Wallhaven Shuffle")]
 [assembly: System.Reflection.AssemblyProduct("Wallhaven Shuffle")]
-[assembly: System.Reflection.AssemblyVersion("2.8.0.0")]
+[assembly: System.Reflection.AssemblyVersion("2.9.0.0")]
 
 namespace WallhavenShuffle
 {
@@ -1050,7 +1050,15 @@ namespace WallhavenShuffle
             choices("Period", Filters.Ranges, f.Range, (x, v) => x.Range = v);
             sub.AddSubmenu("Popularity", null, m =>
             {
-                foreach (int n in Filters.Favs) { int k = n; m.Add(Filters.FavLabel(k), null, delegate { SetFilters(x => x.Fav = k); }).Checked = k == f.Fav; }
+                // the presets, the one in use if it was typed in, and Type one…
+                foreach (int n in Filters.Favs.Concat(new[] { f.Fav }).Distinct().OrderBy(x => x)) { int k = n; m.Add(Filters.FavLabel(k), null, delegate { SetFilters(x => x.Fav = k); }).Checked = k == f.Fav; }
+                m.AddSeparator();
+                m.Add("Type one…", Glyphs.Edit, delegate
+                {
+                    string t = FluentDialog.Ask(owner, "Popularity", Filters.FavNote, "Save", f.Fav > 0 ? f.Fav.ToString() : "",
+                        v => Filters.ParseFav(v) >= 0 ? null : "A whole number from 0 to " + Filters.FavMax.ToString("N0"));
+                    if (t != null && Filters.ParseFav(t) != settings.Filters.Fav) { int k = Filters.ParseFav(t); SetFilters(x => x.Fav = k); }
+                });
             }, Filters.FavLabel(f.Fav));
             sub.AddSubmenu("Categories", null, m =>
             {
@@ -1074,7 +1082,7 @@ namespace WallhavenShuffle
                 m.AddSeparator();
                 m.Add("Type one…", Glyphs.Edit, delegate
                 {
-                    string q = FluentDialog.Ask(owner, "Topic", "A Wallhaven search, like nature or night city: the toplist of just those.", "Use it", f.Topic,
+                    string q = FluentDialog.Ask(owner, "Topic", "A Wallhaven search, like nature or night city: the toplist of just those.", "Save", f.Topic,
                         v => v.Trim().Length == 0 || Filters.NormTopic(v).Length > 0 ? null : "Letters, digits, spaces and hyphens only");
                     if (q != null) SetFilters(x => x.Topic = q);
                 });

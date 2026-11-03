@@ -30,7 +30,7 @@ export function listParams(query = {}) {
   const atleast = /^\d{3,5}x\d{3,5}$/.test(query.atleast || '') ? query.atleast : (query.res ? '' : (process.env.ATLEAST || ''));
   const ratios = /^\d{1,2}x\d{1,2}(,\d{1,2}x\d{1,2})*$/.test(query.ratios || '') ? query.ratios : (process.env.RATIOS || '');
   const maxw = /^\d{1,5}$/.test(query.maxw || '') ? Number(query.maxw) : Number(process.env.MAX_WIDTH || 0); // 0 = no limit
-  const fav = /^\d{1,5}$/.test(query.fav || '') ? Number(query.fav) : Number(process.env.MIN_FAVORITES || 0);
+  const fav = /^\d{1,6}$/.test(query.fav || '') ? Math.min(Number(query.fav), 100000) : Number(process.env.MIN_FAVORITES || 0);
   // Wallhaven's own filter switches, as 0/1 flags: categories = general, anime, people; purity = SFW, sketchy, NSFW
   // (sketchy/NSFW need an API key). Defaults match Wallhaven's site: all categories, SFW only.
   const cats = /^[01]{3}$/.test(query.cats || '') ? query.cats : (process.env.CATEGORIES || '111');

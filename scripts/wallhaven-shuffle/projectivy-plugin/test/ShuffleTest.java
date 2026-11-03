@@ -95,6 +95,8 @@ public class ShuffleTest {
             && bad.fav == 50 && bad.maxw == 3840 && bad.every == 1 && bad.q.isEmpty() && bad.sources.equals(List.of("toplist", "fav", "p_ab12cd")), bad.sources);
         check("labels", TvSettings.everyLabel(1).equals("1 minute") && TvSettings.everyLabel(120).equals("2 hours") && TvSettings.everyLabel(1440).equals("1 day")
             && TvSettings.favLabel(1000).equals("1,000+ favourites") && new TvSettings().catsLabel().equals("General, Anime"), TvSettings.everyLabel(45));
+        check("a typed favourites minimum", TvSettings.parseFav("75") == 75 && TvSettings.parseFav(" 1,500 ") == 1500 && TvSettings.parseFav("0") == 0 && TvSettings.parseFav("100000") == 100000
+            && TvSettings.parseFav("100001") == -1 && TvSettings.parseFav("-5") == -1 && TvSettings.parseFav("7.5") == -1 && TvSettings.parseFav("") == -1, TvSettings.parseFav(" 1,500 "));
 
         System.out.println(fail == 0 ? "ALL PASSED" : fail + " FAILED");
         System.exit(fail == 0 ? 0 : 1);

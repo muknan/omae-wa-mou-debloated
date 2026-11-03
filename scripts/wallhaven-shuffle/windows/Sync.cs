@@ -37,6 +37,15 @@ namespace WallhavenShuffle
 
         public static string Label(string[][] table, string key) { var row = table.FirstOrDefault(r => r[0] == key); return row != null ? row[1] : key; }
         public static string FavLabel(int n) { return n == 0 ? "Any" : n.ToString("N0") + "+ favourites"; }
+        // A favourites minimum typed in: digits (commas and spaces allowed, as in 1,500), 0 to 100,000; -1 if it isn't one.
+        public const int FavMax = 100000;
+        public const string FavNote = "Only wallpapers with at least this many favourites on Wallhaven. 0 shows any.";
+        public static int ParseFav(string v)
+        {
+            string t = new string((v ?? "").Where(c => c != ',' && !char.IsWhiteSpace(c)).ToArray());
+            int n;
+            return t.Length > 0 && t.Length <= 6 && t.All(char.IsDigit) && int.TryParse(t, out n) && n <= FavMax ? n : -1;
+        }
         public static string WidthLabel(int w) { return w == 0 ? "Any" : w == 3840 ? "Up to 4K" : "Up to 5K"; }
         public static string EveryLabel(int m)
         {
@@ -358,7 +367,7 @@ namespace WallhavenShuffle
     // One request to /api/sync/<action>. Throws SyncError with the service's own words (Status 0 = no connection).
     static class SyncClient
     {
-        public const string UserAgent = "WallhavenShuffle-Windows/2.8";
+        public const string UserAgent = "WallhavenShuffle-Windows/2.9";
 
         public static Dictionary<string, object> Call(string server, string action, Dictionary<string, object> body, string token)
         {

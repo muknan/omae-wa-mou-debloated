@@ -362,7 +362,7 @@ public final class SettingsActivity extends Activity implements Sync.Listener {
 
     interface Apply<T> { void apply(TvSettings s, T value); }
 
-    private void change(Apply<String> f, String v) { TvSettings s = Sync.settings(this); f.apply(s, v); Sync.saveSettings(this, s, true); refresh(); }
+    private <T> void change(Apply<T> f, T v) { TvSettings s = Sync.settings(this); f.apply(s, v); Sync.saveSettings(this, s, true); refresh(); }
 
     private void pickMap(String title, java.util.Map<String, String> choices, String current, Apply<String> f) {
         final List<String> keys = new ArrayList<>(choices.keySet());
@@ -386,7 +386,27 @@ public final class SettingsActivity extends Activity implements Sync.Listener {
         pickInts("Change every", TvSettings.EVERY, Sync.settings(this).every, TvSettings::everyLabel, (s, v) -> s.every = v);
         if (base >= 90_000) toast("Projectivy asks about every " + Math.round(base / 60000.0) + " min, so the TV can’t change faster than that");
     }
-    private void pickFav() { pickInts("Popularity", TvSettings.FAVS, Sync.settings(this).fav, TvSettings::favLabel, (s, v) -> s.fav = v); }
+    // Popularity: the presets, the one in use if it was typed in, and Type one… (the remote's number keys or the keyboard).
+    private void pickFav() {
+        int cur = Sync.settings(this).fav;
+        java.util.TreeSet<Integer> set = new java.util.TreeSet<>();
+        for (int n : TvSettings.FAVS) set.add(n);
+        set.add(cur);
+        Integer[] values = set.toArray(new Integer[0]);
+        String[] labels = new String[values.length + 1];
+        int at = -1;
+        for (int i = 0; i < values.length; i++) { labels[i] = TvSettings.favLabel(values[i]); if (values[i] == cur) at = i; }
+        labels[values.length] = "Type one…";
+        dialog("Popularity").setSingleChoiceItems(labels, at, (d, i) -> {
+            d.dismiss();
+            if (i < values.length) { change((s, v) -> s.fav = v, values[i]); return; }
+            editText("Popularity", cur > 0 ? String.valueOf(cur) : "", "e.g. 75", TvSettings.FAV_NOTE, InputType.TYPE_CLASS_NUMBER, v -> {
+                int n = TvSettings.parseFav(v);
+                if (n < 0) toast(String.format(Locale.US, "A whole number from 0 to %,d", TvSettings.FAV_MAX));
+                else if (n != Sync.settings(this).fav) change((s, x) -> s.fav = x, n);
+            });
+        }).show();
+    }
     private void pickMaxw() { pickInts("Largest size", TvSettings.MAXW, Sync.settings(this).maxw, TvSettings::maxwLabel, (s, v) -> s.maxw = v); }
 
     private void pickSources() {
@@ -586,13 +606,21 @@ public final class SettingsActivity extends Activity implements Sync.Listener {
         new Thread(() -> { String err = work.run(); ui.post(() -> { toast(err == null ? ok : err); refresh(); }); }, "change").start();
     }
 
-    private void editText(String title, String value, String hint, int type, java.util.function.Consumer<String> done) {
+    private void editText(String title, String value, String hint, int type, java.util.function.Consumer<String> done) { editText(title, value, hint, null, type, done); }
+    private void editText(String title, String value, String hint, String message, int type, java.util.function.Consumer<String> done) {
         EditText e = new EditText(this);
         e.setText(value); e.setHint(hint); e.setInputType(type); e.setSingleLine(true); e.setSelectAllOnFocus(true);
         FrameLayout pad = new FrameLayout(this);
         pad.setPadding(dp(24), dp(8), dp(24), 0);
         pad.addView(e);
-        dialog(title).setView(pad).setPositiveButton("Save", (d, w) -> done.accept(e.getText().toString())).setNegativeButton("Cancel", null).show();
+        AlertDialog d = dialog(title).setMessage(message).setView(pad).setPositiveButton("Save", (x, w) -> done.accept(e.getText().toString())).setNegativeButton("Cancel", null).show();
+        // the keyboard's ✓ saves too, rather than only closing the keyboard
+        e.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_DONE);
+        e.setOnEditorActionListener((v, action, ev) -> {
+            if (action != android.view.inputmethod.EditorInfo.IME_ACTION_DONE) return false;
+            d.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
+            return true;
+        });
     }
 
     private AlertDialog.Builder dialog(String title) { return new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert).setTitle(title); }

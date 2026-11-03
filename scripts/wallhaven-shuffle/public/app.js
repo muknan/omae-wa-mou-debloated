@@ -242,6 +242,10 @@
     return '1 day';
   }
   const favLabel = (n) => (n ? `${nf.format(n)}+ favourites` : 'Any');
+  // A favourites minimum typed in: digits (commas and spaces allowed, as in 1,500), 0 to 100,000; NaN if it isn't one.
+  const FAV_MAX = 100000;
+  const parseFav = (v) => { const t = String(v).replace(/[\s,]/g, ''); return /^\d{1,6}$/.test(t) && Number(t) <= FAV_MAX ? Number(t) : NaN; };
+  const FAV_NOTE = 'Only wallpapers with at least this many favourites on Wallhaven. 0 shows any.';
   const kindIcon = (k) => (k === 'tv' ? 'tv' : k === 'pc' ? 'pc' : 'web');
   const kindName = (k) => (k === 'tv' ? 'TV' : k === 'pc' ? 'PC' : 'Browser');
   function presence(id) {
@@ -524,11 +528,11 @@
     return { close, dlg };
   }
 
-  function prompt(title, { value = '', placeholder = '', okLabel = 'Save', check, note } = {}) {
+  function prompt(title, { value = '', placeholder = '', okLabel = 'Save', check, note, inputmode } = {}) {
     return new Promise((resolve) => {
       let done = false;
       const s = sheet(title, (body, close) => {
-        const input = h('input', { class: 'field', id: 'prompt-input', value, placeholder, maxlength: 80, autocomplete: 'off', enterkeyhint: 'done' });
+        const input = h('input', { class: 'field', id: 'prompt-input', value, placeholder, maxlength: 80, autocomplete: 'off', enterkeyhint: 'done', inputmode: inputmode || null });
         const err = h('div', { class: 'err', role: 'alert' });
         const ok = h('button', { class: 'btn primary', type: 'submit' }, okLabel);
         const validate = () => { const e = check ? check(input.value) : null; err.textContent = input.value.trim() ? e || '' : ''; ok.disabled = !!e; return !e; };
@@ -807,7 +811,15 @@
           selectItem({ label: 'Quality', value: f.quality, id: `q-${id}`, options: Object.entries(pr.quality).map(([k, v]) => [k, v.label]), onchange: (v) => setF({ quality: v }) }),
           selectItem({ label: 'Shape', value: f.ratio, id: `r-${id}`, options: Object.entries(pr.ratio), onchange: (v) => setF({ ratio: v }) }),
           selectItem({ label: 'Period', value: f.range, id: `p-${id}`, options: Object.entries(pr.range), onchange: (v) => setF({ range: v }) }),
-          selectItem({ label: 'Popularity', value: f.fav, id: `f-${id}`, options: pr.fav.map((n) => [n, favLabel(n)]), onchange: (v) => setF({ fav: Number(v) }) }),
+          // the presets, the one in use if it was typed in, and Type one…
+          selectItem({ label: 'Popularity', value: f.fav, id: `f-${id}`, options: [...[...new Set([...pr.fav, f.fav])].sort((a, b) => a - b).map((n) => [n, favLabel(n)]), ['type', 'Type one…']],
+            onchange: async (v) => {
+              if (v !== 'type') return setF({ fav: Number(v) });
+              sheets.forEach((r) => r());   // the select shows the one in use again while typing
+              const t = await prompt('Popularity', { value: f.fav ? String(f.fav) : '', placeholder: 'e.g. 75', note: FAV_NOTE, inputmode: 'numeric',
+                check: (x) => (Number.isNaN(parseFav(x)) ? `A whole number from 0 to ${nf.format(FAV_MAX)}` : null) });
+              if (t != null && parseFav(t) !== S.doc.devices[id]?.settings.filters.fav) setF({ fav: parseFav(t) });
+            } }),
           selectItem({ label: 'Largest size', value: f.maxw, id: `w-${id}`, options: Object.entries(pr.maxw), onchange: (v) => setF({ maxw: Number(v) }) })),
         groupLabel('Categories'),
         group(cats.map((label, i) => switchItem({ label, on: f.cats[i] === '1', id: `c-${id}-${i}`, onchange: (on) => {

@@ -957,7 +957,7 @@ namespace WallhavenShuffle
         Dictionary<string, object> StatusForRemote(out string thumbFor)
         {
             thumbFor = null;
-            var st = new Dictionary<string, object> { { "app", "pc 2.8" } };
+            var st = new Dictionary<string, object> { { "app", "pc 2.9" } };
             if (current != null)
             {
                 var item = ItemOf(current);
