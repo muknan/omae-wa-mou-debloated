@@ -360,9 +360,9 @@ function Publish-Agent {
     Write-Text $f (New-ConfText $c)
     $hadOwn = Sh1 '[ -f /data/local/tmp/tv-apply.sh ] && [ ! -f /data/local/tmp/tv-apply.conf ] && echo yes'
     if ($hadOwn -eq 'yes') { [void](Sh 'cp /data/local/tmp/tv-apply.sh /data/local/tmp/tv-apply.sh.bak'); Info 'Kept a copy of the existing tv-apply.sh as tv-apply.sh.bak' }
-    foreach ($s in 'tv-apply.sh', 'tv-refresh.sh', 'tv-daily.sh', 'tv-volhold.sh', 'tv-keys.sh') { Send-File ([IO.Path]::Combine($script:Root, 'scripts', 'device', $s)) "/data/local/tmp/$s" }
+    foreach ($s in 'tv-apply.sh', 'tv-refresh.sh', 'tv-daily.sh', 'tv-volhold.sh', 'tv-keys.sh', 'tv-next.sh') { Send-File ([IO.Path]::Combine($script:Root, 'scripts', 'device', $s)) "/data/local/tmp/$s" }
     Send-File $f /data/local/tmp/tv-apply.conf
-    [void](Sh 'chmod 755 /data/local/tmp/tv-apply.sh /data/local/tmp/tv-refresh.sh /data/local/tmp/tv-daily.sh /data/local/tmp/tv-volhold.sh /data/local/tmp/tv-keys.sh; chmod 644 /data/local/tmp/tv-apply.conf')
+    [void](Sh 'chmod 755 /data/local/tmp/tv-apply.sh /data/local/tmp/tv-refresh.sh /data/local/tmp/tv-daily.sh /data/local/tmp/tv-volhold.sh /data/local/tmp/tv-keys.sh /data/local/tmp/tv-next.sh; chmod 644 /data/local/tmp/tv-apply.conf')
     # Running helpers keep their old code until they're restarted: stop them, tv-apply.sh starts them again.
     [void](Sh 'kill $(cat /data/local/tmp/tv-daily.pid 2>/dev/null) 2>/dev/null; for p in $(cat /data/local/tmp/tv-volhold.pid 2>/dev/null); do kill $p; pkill -P $p; done 2>/dev/null; rm -f /data/local/tmp/tv-volhold.pid /data/local/tmp/tv-volhold.held')
     $out = Sh 'sh /data/local/tmp/tv-apply.sh; tail -n 40 /data/local/tmp/tv-apply.log'
@@ -876,7 +876,7 @@ function Invoke-Undo {
         [void](Sh "for k in `$(cmd notification snoozed 2>/dev/null | grep -oE '^[^ ]+' | grep -E 'keymapper|adbautoenable'); do cmd notification unsnooze `$k; done")
         [void](Sh 'kill $(cat /data/local/tmp/tv-daily.pid 2>/dev/null) 2>/dev/null; rm -rf /data/local/tmp/tv-daily.sh /data/local/tmp/tv-daily.pid /data/local/tmp/tv-daily.last /data/local/tmp/tv-daily.idle /data/local/tmp/tv-apply.blocked')
         [void](Sh 'for p in $(cat /data/local/tmp/tv-volhold.pid 2>/dev/null); do kill $p; pkill -P $p; done 2>/dev/null; rm -f /data/local/tmp/tv-volhold.sh /data/local/tmp/tv-volhold.pid /data/local/tmp/tv-volhold.held /data/local/tmp/tv-volhold.unsupported')
-        [void](Sh 'for p in $(cat /data/local/tmp/tv-keys.pid 2>/dev/null); do kill $p; pkill -P $p; done 2>/dev/null; rm -f /data/local/tmp/tv-keys.sh /data/local/tmp/tv-keys.pid /data/local/tmp/tv-apply.keepoff')
+        [void](Sh 'for p in $(cat /data/local/tmp/tv-keys.pid 2>/dev/null); do kill $p; pkill -P $p; done 2>/dev/null; rm -f /data/local/tmp/tv-keys.sh /data/local/tmp/tv-keys.pid /data/local/tmp/tv-apply.keepoff /data/local/tmp/tv-next.sh')
         [void](Sh 'for k in ip_reachability_ignore_incompleted_ipv6_default_router_version ip_reachability_ignore_incompleted_ipv6_dns_server_version; do device_config delete connectivity $k; done')
         # Netflix back on the power-saving whitelist (UNWHITELIST_NETFLIX took it off; Android remembers that across
         # restarts), plus what the boot helper setup leaves behind.

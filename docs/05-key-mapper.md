@@ -28,6 +28,7 @@ The TV+ button is the exception: the firmware takes it before Key Mapper sees it
 | Live TV (unused without an antenna) | Launch app → your favourite streaming app |
 | Colour buttons | Rewind / Fast forward / Play-Pause / Next track |
 | Double press of any spare button | **The refresh button** (below) |
+| Long press of a colour button | **Next episode in every app** (below) |
 
 ## The refresh button ("fresh boot without rebooting")
 Runs [`tv-refresh.sh`](../scripts/device/tv-refresh.sh): re-applies everything and clears cached apps in about 4 s, never touching the app on screen.
@@ -62,6 +63,19 @@ and restarts).
 On some firmwares an app's toasts are blocked together with its notifications ("Suppressing toast … by user
 request"). The volume bar works everywhere. (The shell can't show the volume UI itself on some firmwares, so it has
 to be Key Mapper's action.)
+
+## Next episode in every app
+Key Mapper's own *Next track* reaches most players (SmartTube, mpv), but not Nuvio: its player tells Android it can't
+skip to next, and uses the Next and Channel Up keys to skip chapters. Its only way to the next episode is the player's
+"Next episode" button. [`tv-next.sh`](../scripts/device/tv-next.sh) handles both: in Nuvio it presses Up, Up, Down,
+Right, OK, which lands on that button whatever state the player is in (only while an episode plays, so it never opens
+a menu on a movie); anywhere else it sends the media Next key.
+
+New key map → record the trigger (e.g. **long press** Green) → Add action → **Shell command**:
+- Description: `Next episode`, Script: `sh /data/local/tmp/tv-next.sh`, Execution mode: **ADB** (Expert Mode).
+
+Tested on the Xiaomi TV: Nuvio (S15 E13 → E14, about 2.5 s), SmartTube (next video). Spotify's TV app ignores
+Android's Next altogether (both the key and the media-session command); only its on-screen ⏭ skips.
 
 ## Costs
 Key Mapper ≈ 50 MB plus Expert Mode ≈ 47 MB of always-resident memory. Worth it if you use it; skip Expert Mode if you don't need the refresh button.
