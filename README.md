@@ -203,7 +203,8 @@ uninstall the helper apps it installed. Then the TV restarts.
 
 ### How it works
 
-- Junk apps are **disabled, not deleted**, so they come back with one command.
+- Junk apps are **disabled, not deleted**, so they come back with one command. Updates switch disabled apps back
+  on, so the helpers switch them off again within 5 minutes ([details](docs/09-extras.md#apps-that-stay-off-after-updates)).
 - Android forgets "keep this app asleep" every time the TV restarts. **Termux + Termux:Boot** run a small script
   at every startup that connects to the TV's own ADB, re-applies everything, puts background apps to sleep
   and then closes itself.

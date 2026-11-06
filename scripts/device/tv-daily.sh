@@ -22,6 +22,9 @@
 #     it looks every 2 seconds whether the home screen is back in front (a file read). When it is, it asks
 #     SurfaceFlinger once, and if the panel is at 50 Hz it starts the wallpaper plugin's PanelResetActivity (a
 #     silent 24 fps clip in two pixels, under a second), which puts it back to 60 Hz. At most two tries each time.
+#   - KEEP_OFF: every 5 minutes, any app on the list tv-apply.sh wrote (tv-apply.keepoff) that an update switched
+#     back on is switched off again (one `pm list`, ~0.07 s).
+#   - The volume and Live TV button helpers are restarted if they ended.
 # Settings are re-read from tv-apply.conf at every check; with everything switched off it exits by itself.
 DIR=/data/local/tmp
 LOG=$DIR/tv-apply.log
@@ -126,6 +129,7 @@ while true; do
     QUIET_APPS="io.github.sds100.keymapper com.tpn.adbautoenable"
     IDLE_TRIM_MINUTES=10
     WIFI_IPV6_ROUTER_FIX=1
+    LIVE_TV_BUTTON_INPUT=
     # shellcheck source=/dev/null
     [ -f $DIR/tv-apply.conf ] && . $DIR/tv-apply.conf
     [ -f $DIR/tv-refresh.sh ] || DAILY_REFRESH=0
@@ -153,8 +157,20 @@ while true; do
                 fi ;;
         esac
     fi
+    # Keep the Live TV button helper running too.
+    if [ -n "$LIVE_TV_BUTTON_INPUT" ] && [ -f $DIR/tv-keys.sh ]; then
+        kp=; kc=; read -r kp 2>/dev/null < $DIR/tv-keys.pid
+        [ -n "$kp" ] && read -r kc 2>/dev/null < /proc/"$kp"/cmdline
+        case "$kc" in
+            *tv-keys*) ;;
+            *)  setsid nohup sh $DIR/tv-keys.sh </dev/null >/dev/null 2>&1 &
+                log "restarted Live TV button helper" ;;
+        esac
+    fi
+    keep=; [ -f $DIR/tv-apply.keepoff ] && read -r keep < $DIR/tv-apply.keepoff
     if [ "$DAILY_REFRESH" != "1" ] && [ -z "$QUIET_APPS" ] && [ "${IDLE_TRIM_MINUTES:-0}" -le 0 ] &&
-        [ "$WIFI_IPV6_ROUTER_FIX" != "1" ] && [ "${VOLUME_HOLD_REPEAT:-1}" != "1" ] && [ "$PANEL_60HZ_FIX" != "1" ]; then
+        [ "$WIFI_IPV6_ROUTER_FIX" != "1" ] && [ "${VOLUME_HOLD_REPEAT:-1}" != "1" ] && [ "$PANEL_60HZ_FIX" != "1" ] &&
+        [ -z "$keep" ] && [ -z "$LIVE_TV_BUTTON_INPUT" ]; then
         log "background helper stopped (switched off or removed)"
         rm -f $DIR/tv-daily.pid
         exit 0
@@ -165,6 +181,14 @@ while true; do
             for p in $QUIET_APPS; do
                 case "$k" in *"|$p|"*) cmd notification snooze --for 2592000000 "$k" >/dev/null 2>&1 ;; esac
             done
+        done
+    fi
+
+    # Apps that stay off: every 5 minutes (from the first check), switch back off any an update switched on.
+    if [ -n "$keep" ] && [ $((ticks % 5)) -eq 1 ]; then
+        on=" $(pm list packages -e 2>/dev/null | sed 's/package://' | tr '\n' ' ') "
+        for p in $keep; do
+            case "$on" in *" $p "*) pm disable-user --user 0 "$p" >/dev/null 2>&1 && log "switched $p off again (an update had switched it back on)" ;; esac
         done
     fi
 

@@ -295,6 +295,8 @@ function Step-Debloat {
     }
     $script:State | Add-Member -Force features $features
     Set-StepDone 'debloat'
+    # The boot helper keeps these off after updates (KEEP_OFF): give it the new list if it's already set up.
+    if ((Test-StepDone 'background') -and $script:State.conf) { [void](Publish-Agent); Ok 'The TV keeps these switched off, even after updates.' }
 }
 
 # ====================================================================== step 2: background apps
@@ -328,24 +330,41 @@ function Get-BackgroundGroups {
 
 function New-ConfText($c) {
     $l = @('# Written by the omae-wa-mou-debloated setup wizard. Re-run the wizard to change it.')
-    foreach ($k in 'ANIM_SCALE', 'INCLUDE_USER_APPS', 'PREINSTALLED_APPS', 'STOP_ONLY', 'EXTRA_PROTECT', 'XIAOMI_ANIM_KEY', 'UNWHITELIST_NETFLIX', 'START_KEYMAPPER_EXPERT_MODE', 'QUIET_APPS', 'DAILY_REFRESH', 'DAILY_REFRESH_HOUR', 'WIFI_IPV6_ROUTER_FIX', 'VOLUME_HOLD_REPEAT', 'IDLE_TRIM_MINUTES', 'PANEL_60HZ_FIX') {
+    foreach ($k in 'ANIM_SCALE', 'INCLUDE_USER_APPS', 'PREINSTALLED_APPS', 'STOP_ONLY', 'EXTRA_PROTECT', 'XIAOMI_ANIM_KEY', 'UNWHITELIST_NETFLIX', 'START_KEYMAPPER_EXPERT_MODE', 'QUIET_APPS', 'DAILY_REFRESH', 'DAILY_REFRESH_HOUR', 'WIFI_IPV6_ROUTER_FIX', 'VOLUME_HOLD_REPEAT', 'IDLE_TRIM_MINUTES', 'PANEL_60HZ_FIX', 'KEEP_OFF', 'LIVE_TV_BUTTON_INPUT') {
         if ($null -eq $c.$k) { continue }
         $l += ('{0}="{1}"' -f $k, $c.$k)
     }
     return ($l -join "`n") + "`n"
 }
 
+# Apps the boot helper keeps off even after an update switches them back on (KEEP_OFF): what the wizard switched off
+# (and didn't switch back on), plus catalog junk that was already off. Never a protected app or one the catalog keeps.
+function Get-KeepOff {
+    $state = [ordered]@{}
+    foreach ($c in @(Get-Changes)) {
+        if ($c.type -eq 'pm-disable') { $state[$c.package] = $true }
+        elseif ($c.type -eq 'pm-enable') { $state[$c.package] = $false }
+    }
+    $off = @($state.Keys | Where-Object { $state[$_] })
+    $already = @(Get-CatalogMatches (Read-Catalog) | Where-Object { $_.AlreadyOff -and $_.Risk -ne 'keep' } | ForEach-Object { $_.Package })
+    $prot = @(Get-ProtectedSystemApps) + @(Read-BackgroundCatalog | Where-Object { $_.kind -eq 'protect' } | ForEach-Object { $_.package })
+    return @(@($off) + @($already) | Where-Object { $_ -and $prot -notcontains $_ } | Sort-Object -Unique)
+}
+
 function Publish-Agent {
     $c = $script:State.conf
+    $c | Add-Member -Force KEEP_OFF ((Get-KeepOff) -join ' ')
+    if ($null -eq $c.LIVE_TV_BUTTON_INPUT) { $c | Add-Member -Force LIVE_TV_BUTTON_INPUT "$(Get-Answer 'liveTvButtonInput' $null)" }
+    $script:State.conf = $c; Save-State
     $f = Join-Path $script:Dir 'tv-apply.conf'
     Write-Text $f (New-ConfText $c)
     $hadOwn = Sh1 '[ -f /data/local/tmp/tv-apply.sh ] && [ ! -f /data/local/tmp/tv-apply.conf ] && echo yes'
     if ($hadOwn -eq 'yes') { [void](Sh 'cp /data/local/tmp/tv-apply.sh /data/local/tmp/tv-apply.sh.bak'); Info 'Kept a copy of the existing tv-apply.sh as tv-apply.sh.bak' }
-    foreach ($s in 'tv-apply.sh', 'tv-refresh.sh', 'tv-daily.sh', 'tv-volhold.sh') { Send-File ([IO.Path]::Combine($script:Root, 'scripts', 'device', $s)) "/data/local/tmp/$s" }
+    foreach ($s in 'tv-apply.sh', 'tv-refresh.sh', 'tv-daily.sh', 'tv-volhold.sh', 'tv-keys.sh') { Send-File ([IO.Path]::Combine($script:Root, 'scripts', 'device', $s)) "/data/local/tmp/$s" }
     Send-File $f /data/local/tmp/tv-apply.conf
-    [void](Sh 'chmod 755 /data/local/tmp/tv-apply.sh /data/local/tmp/tv-refresh.sh /data/local/tmp/tv-daily.sh /data/local/tmp/tv-volhold.sh; chmod 644 /data/local/tmp/tv-apply.conf')
+    [void](Sh 'chmod 755 /data/local/tmp/tv-apply.sh /data/local/tmp/tv-refresh.sh /data/local/tmp/tv-daily.sh /data/local/tmp/tv-volhold.sh /data/local/tmp/tv-keys.sh; chmod 644 /data/local/tmp/tv-apply.conf')
     # Running helpers keep their old code until they're restarted: stop them, tv-apply.sh starts them again.
-    [void](Sh 'kill $(cat /data/local/tmp/tv-daily.pid 2>/dev/null) 2>/dev/null; for p in $(pgrep -f tv-volhol[d].sh); do kill $p 2>/dev/null; pkill -P $p 2>/dev/null; done; rm -f /data/local/tmp/tv-volhold.pid /data/local/tmp/tv-volhold.held')
+    [void](Sh 'kill $(cat /data/local/tmp/tv-daily.pid 2>/dev/null) 2>/dev/null; for p in $(cat /data/local/tmp/tv-volhold.pid 2>/dev/null); do kill $p; pkill -P $p; done 2>/dev/null; rm -f /data/local/tmp/tv-volhold.pid /data/local/tmp/tv-volhold.held')
     $out = Sh 'sh /data/local/tmp/tv-apply.sh; tail -n 40 /data/local/tmp/tv-apply.log'
     return $out
 }
@@ -402,6 +421,7 @@ function Step-Background {
         VOLUME_HOLD_REPEAT          = '1'
         IDLE_TRIM_MINUTES           = '10'
         PANEL_60HZ_FIX              = '1'
+        LIVE_TV_BUTTON_INPUT        = "$(Get-Answer 'liveTvButtonInput' $null)"
     }
     $script:State.conf = $c; Save-State
     Add-Change @{ type = 'deploy'; anim = "$anim"; stopOnly = $c.STOP_ONLY; protect = $c.EXTRA_PROTECT; preinstalled = $c.PREINSTALLED_APPS }
@@ -815,6 +835,8 @@ function Invoke-Undo {
     $snapF = Join-Path $script:Dir 'snapshot-original.json'
     $snap = if (Test-Path $snapF) { Get-Content $snapF -Raw | ConvertFrom-Json } else { $null }
     [array]::Reverse($ch)
+    # Stop the background helpers first: they'd switch KEEP_OFF apps off again while Undo switches them on.
+    [void](Sh 'kill $(cat /data/local/tmp/tv-daily.pid 2>/dev/null) 2>/dev/null; rm -f /data/local/tmp/tv-apply.keepoff; for p in $(cat /data/local/tmp/tv-keys.pid 2>/dev/null); do kill $p; pkill -P $p; done 2>/dev/null')
     $enabled = @{}
     foreach ($c in $ch) {
         if ($c.type -eq 'pm-disable' -and -not $enabled[$c.package]) {
@@ -853,7 +875,8 @@ function Invoke-Undo {
         Ok 'animation speed restored'
         [void](Sh "for k in `$(cmd notification snoozed 2>/dev/null | grep -oE '^[^ ]+' | grep -E 'keymapper|adbautoenable'); do cmd notification unsnooze `$k; done")
         [void](Sh 'kill $(cat /data/local/tmp/tv-daily.pid 2>/dev/null) 2>/dev/null; rm -rf /data/local/tmp/tv-daily.sh /data/local/tmp/tv-daily.pid /data/local/tmp/tv-daily.last /data/local/tmp/tv-daily.idle /data/local/tmp/tv-apply.blocked')
-        [void](Sh 'for p in $(pgrep -f tv-volhol[d].sh); do kill $p 2>/dev/null; pkill -P $p 2>/dev/null; done; rm -f /data/local/tmp/tv-volhold.sh /data/local/tmp/tv-volhold.pid /data/local/tmp/tv-volhold.held /data/local/tmp/tv-volhold.unsupported')
+        [void](Sh 'for p in $(cat /data/local/tmp/tv-volhold.pid 2>/dev/null); do kill $p; pkill -P $p; done 2>/dev/null; rm -f /data/local/tmp/tv-volhold.sh /data/local/tmp/tv-volhold.pid /data/local/tmp/tv-volhold.held /data/local/tmp/tv-volhold.unsupported')
+        [void](Sh 'for p in $(cat /data/local/tmp/tv-keys.pid 2>/dev/null); do kill $p; pkill -P $p; done 2>/dev/null; rm -f /data/local/tmp/tv-keys.sh /data/local/tmp/tv-keys.pid /data/local/tmp/tv-apply.keepoff')
         [void](Sh 'for k in ip_reachability_ignore_incompleted_ipv6_default_router_version ip_reachability_ignore_incompleted_ipv6_dns_server_version; do device_config delete connectivity $k; done')
         # Netflix back on the power-saving whitelist (UNWHITELIST_NETFLIX took it off; Android remembers that across
         # restarts), plus what the boot helper setup leaves behind.
@@ -893,6 +916,8 @@ function Show-Status {
         'p=$(cat $d/tv-daily.pid 2>/dev/null); echo helper=$(grep -c tv-daily /proc/$p/cmdline 2>/dev/null || echo 0); ' +
         'echo daily=$(cat $d/tv-daily.last 2>/dev/null); ' +
         'q=$(cat $d/tv-volhold.pid 2>/dev/null); echo volhold=$(grep -c tv-volhold /proc/$q/cmdline 2>/dev/null || echo 0)$([ -f $d/tv-volhold.unsupported ] && echo u); ' +
+        'k=$(cat $d/tv-keys.pid 2>/dev/null); echo keys=$(grep -c tv-keys /proc/$k/cmdline 2>/dev/null || echo 0); ' +
+        'echo keepoff=$(cat $d/tv-apply.keepoff 2>/dev/null | wc -w); ' +
         'echo notifs=$(cmd notification list 2>/dev/null | grep -cE ''\|(io.github.sds100.keymapper|com.tpn.adbautoenable)\|''); ' +
         'echo dns=$(settings get global private_dns_mode) $(settings get global private_dns_specifier); ' +
         'echo drops=$(dumpsys wifi 2>/dev/null | grep -c CMD_IP_REACHABILITY_LOST); ' +
@@ -907,6 +932,9 @@ function Show-Status {
     Info ("{0,-32} {1}" -f 'Background helper (tv-daily)', $(if ($h.helper -eq '1') { "ok, last daily refresh: $(if ($h.daily) { $h.daily } else { 'not yet' })" } else { 'not running' }))
     Info ("{0,-32} {1}" -f 'Helper notifications visible', $(if ($h.notifs -eq '0') { 'none' } else { "$($h.notifs) (hidden within a minute)" }))
     Info ("{0,-32} {1}" -f 'Volume hold-to-repeat', $(switch -Regex ($h.volhold) { 'u' { 'not supported on this firmware' } '^1' { 'on' } default { 'not running' } }))
+    Info ("{0,-32} {1}" -f 'Kept off after updates', $(if ([int]$h.keepoff -gt 0) { "$($h.keepoff) apps" } else { 'none' }))
+    $live = "$($script:State.conf.LIVE_TV_BUTTON_INPUT)"
+    if ($live) { Info ("{0,-32} {1}" -f 'Live TV button', $(if ($h.keys -eq '1') { "opens $live" } else { 'helper not running' })) }
     Info ("{0,-32} {1}" -f 'Private DNS', $h.dns)
     $drops = [int]$h.drops
     Info ("{0,-32} {1}" -f 'Wi-Fi IPv6 router fix', $(if ($h.v6fix -eq '1') { 'on' } else { 'off' }))

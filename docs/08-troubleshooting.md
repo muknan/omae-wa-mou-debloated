@@ -29,7 +29,7 @@ often Wi-Fi reconnected since boot (many reconnects point at the router, see the
 
 | Symptom | Fix |
 |---|---|
-| An app or feature stopped working | Undo just that package: `adb shell pm enable --user 0 <package>` (the list is in `my-tv\<your TV>\report.md`), or *Undo everything*. Then tell the wizard to skip it: add it to `skipPackages` in an answers file, or simply untick it next time. |
+| An app or feature stopped working | Undo just that package: take it out of `KEEP_OFF` in `tv-apply.conf` (or it's switched off again within 5 minutes), then `adb shell pm enable --user 0 <package>` (the list is in `my-tv\<your TV>\report.md`), or *Undo everything*. Then tell the wizard to skip it: add it to `skipPackages` in an answers file, or simply untick it next time. |
 | A music app or VPN stops when you leave it | Re-run step 2 and move it to "stopped at startup, may run after you open it". |
 | An app you use is put to sleep too often | Re-run step 2 and move it to "left alone". |
 | A notification badge on the home screen | Usually Key Mapper's permanent notifications. The background helper hides them within a minute; if one stays, the helper isn't running: press the refresh button once, or re-run step 2. |
@@ -38,9 +38,12 @@ often Wi-Fi reconnected since boot (many reconnects point at the router, see the
 | Holding VOLUME changes it by one step only | An app's accessibility key filter (Projectivy's) stops Android's key repeat. The volume helper restores it (`VOLUME_HOLD_REPEAT`); see [Holding the volume buttons](09-extras.md#holding-the-volume-buttons). |
 | Wi-Fi goes off and on every few minutes | Usually the router's IPv6. The boot helper works around it (`WIFI_IPV6_ROUTER_FIX`); see [Wi-Fi that keeps dropping](09-extras.md#wi-fi-that-keeps-dropping). |
 | TV switches itself off after ~10 minutes on the home screen | With the screensaver off, the TV goes to standby when the screensaver would have started. `adb shell settings put system screen_off_timeout 1800000` makes that 30 minutes (milliseconds; see [03](03-settings-tweaks.md#small-background-savers)). |
+| An app you switched off is back after an update | Updates switch disabled apps back on. The helpers switch anything on `KEEP_OFF` off again within 5 minutes; see [Apps that stay off after updates](09-extras.md#apps-that-stay-off-after-updates). |
+| The TV+ / Live TV button opens Mi TV+ | PatchWall was switched back on by an update (it's on `KEEP_OFF`, so that's fixed within 5 minutes). To make the button open an HDMI input, see [The Live TV / TV+ button](09-extras.md#the-live-tv--tv-button). |
 | Remote button does nothing | Expert Mode isn't running. Restart the TV (the boot helper starts it) or see [05](05-key-mapper.md). |
 | Home button opens the stock launcher | Projectivy needs its accessibility helper on and the stock launcher **enabled**. Re-run step 5. |
 | "Accessibility service" toast from Projectivy | Another accessibility app (Key Mapper) restarted briefly. Both reconnect on their own. |
+| Key Mapper buttons stopped working after Key Mapper was force-stopped | Android switches off the accessibility service of an app that's force-stopped. Settings > System > Accessibility > Key Mapper > On. Don't force-stop Key Mapper or Projectivy. |
 | Home is completely broken | `adb shell pm enable --user 0 com.google.android.apps.tv.launcherx` and `adb shell pm enable --user 0 com.google.android.tungsten.setupwraith`, then restart. |
 
 ## Undo everything

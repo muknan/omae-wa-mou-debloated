@@ -18,7 +18,9 @@ Key Mapper's **Record trigger** captures any button. To see the raw codes yourse
 ```powershell
 adb shell getevent -lt      # press buttons, Ctrl+C to stop
 ```
-On the test TV: Live TV = `KEY_MEMO`, PatchWall/Mi = `KEY_WWW`. Buttons for apps you've disabled (e.g. PatchWall) are free to reuse.
+On the test TV: Live TV (TV+) = `KEY_MEMO`, PatchWall/Mi = `KEY_WWW`. Buttons for apps you've disabled (e.g. PatchWall) are free to reuse.
+The TV+ button is the exception: the firmware takes it before Key Mapper sees it. To make it open an HDMI input, use
+`LIVE_TV_BUTTON_INPUT` ([09](09-extras.md#the-live-tv--tv-button)).
 
 ## Example ideas
 | Trigger | Action |

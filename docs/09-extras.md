@@ -92,8 +92,40 @@ back without touching Projectivy:
 - **Who runs it.** `tv-apply.sh` starts it at boot, and `tv-daily.sh` restarts it within a minute if it ever
   stops. It also listens again by itself when the remote reconnects.
 - **Switching it off.** Set `VOLUME_HOLD_REPEAT="0"` in `tv-apply.conf`. To stop it right now:
-  `adb shell 'for p in $(pgrep -f tv-volhol[d].sh); do kill $p 2>/dev/null; pkill -P $p 2>/dev/null; done'` (the `[d]` keeps the command from matching itself; stopping its children matters, because the helper acts on the signal only once its `getevent` ends). Undo everything
+  `adb shell 'for p in $(cat /data/local/tmp/tv-volhold.pid 2>/dev/null); do kill $p; pkill -P $p; done 2>/dev/null'` (stopping its children matters, because the helper acts on the signal only once its `getevent` ends). Undo everything
   removes it too.
+
+## Apps that stay off after updates
+
+Switching an app off (`pm disable-user`) doesn't stop updates. When the firmware's updater or the Play Store
+updates a switched-off app, Android switches it back on. On the Xiaomi test TV, Xiaomi's updater updated PatchWall
+(which switched it on), and PatchWall then updated Mi TV+ (which switched that on too), so the remote's TV+ button
+opened Mi TV+ again.
+
+- **The list.** `KEEP_OFF` in `tv-apply.conf`: the wizard fills it with what it switched off plus the catalog's
+  junk that was already off. The Home app, the keyboard and accessibility apps are never switched off, whatever it
+  says.
+- **Who checks.** The boot helper at every start and refresh, and `tv-daily.sh` every 5 minutes (one `pm list`,
+  about 0.07 s). Anything found on again is switched off again and logged: `switched <app> off again`.
+- **Wanting one back.** Take it out of `KEEP_OFF` first (or re-run the wizard and let it switch it on), then
+  `adb shell pm enable --user 0 <package>`. Otherwise it's switched off again within 5 minutes. Undo everything
+  stops the checks before switching apps back on.
+
+## The Live TV / TV+ button
+
+On the Xiaomi test TV the remote's TV+ button (`KEY_MEMO`, keycode 352) is caught by the firmware before any app,
+so Key Mapper can't record or remap it ("No trigger detected"). The firmware then opens Mi TV+ if PatchWall is on,
+or Live TV on the last input used if it's off. `LIVE_TV_BUTTON_INPUT` makes the button open one input instead:
+
+- **Setting it.** `LIVE_TV_BUTTON_INPUT="HDMI 1"` in `tv-apply.conf` (the input's name as the TV lists it), or an
+  input id. In an answers file: `"liveTvButtonInput": "HDMI 1"`. Empty = the firmware's own behaviour.
+- **How.** `scripts/device/tv-keys.sh` only listens (`getevent`, nothing intercepted). When the button is released
+  it waits for the firmware's Live TV screen, then hands it the input the standard Android way (a passthrough-input
+  link). Live TV switches in place if it opened another input, and does nothing if it's already on it, so there's
+  no flicker. (Starting a second, fresh Live TV screen made Live TV close both: a black flash.) List the inputs with
+  `adb shell "dumpsys tv_input | grep mLabel"`.
+- **Who runs it.** The boot helper starts it (and restarts it, so a changed setting takes effect), and
+  `tv-daily.sh` restarts it within a minute if it stops. Another button name: `LIVE_TV_KEY` (as `getevent -l` shows it).
 
 ## Ad and tracker blocking for the whole TV (Private DNS)
 

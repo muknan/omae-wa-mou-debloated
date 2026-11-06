@@ -70,6 +70,18 @@ PANEL_60HZ_FIX=1
 # 1 = start Key Mapper's Expert Mode if it isn't running (needed for Key Mapper "Execute with ADB" actions on
 # TVs where its own auto-start can't pair). 0 = don't.
 START_KEYMAPPER_EXPERT_MODE=1
+
+# Apps that stay switched off, even after an update. A firmware or app update can switch a disabled app back on
+# (on the Xiaomi test TV, Xiaomi's updater updated PatchWall, which switched it on, and PatchWall then updated Mi TV+,
+# which switched that on too). Any of these found on again is switched off again: here, and every 5 minutes by
+# tv-daily.sh. The launcher, keyboard and accessibility apps are never switched off, whatever this says. The setup
+# wizard fills it with what it switched off plus the junk that was already off. Empty = off.
+KEEP_OFF=""
+
+# The remote's Live TV button (Xiaomi: "TV+") opens this input, e.g. "HDMI 1" (its name in the TV's input list) or an
+# input id. The firmware catches that button before any app can (Key Mapper never sees it), so tv-keys.sh listens
+# for it (read-only, like tv-volhold.sh) and opens the input right after the firmware's own action. Empty = off.
+LIVE_TV_BUTTON_INPUT=""
 # ====================================================================
 CONF=/data/local/tmp/tv-apply.conf
 # shellcheck source=/dev/null
@@ -105,6 +117,21 @@ for p in $USER_APPS $PREINSTALLED_APPS; do
 done
 # tv-daily.sh puts these to sleep when they sit unused in the background (IDLE_TRIM_MINUTES).
 echo $BG_BLOCK > /data/local/tmp/tv-apply.blocked
+
+# Apps that stay off (KEEP_OFF), minus anything protected; tv-daily.sh re-checks this list every 5 minutes.
+KEEP=""
+for p in $KEEP_OFF; do
+    listed "$p" "$PROTECT" || KEEP="$KEEP $p"
+done
+# shellcheck disable=SC2086,SC2116  # deliberate: one line, single spaces
+echo $KEEP > /data/local/tmp/tv-apply.keepoff
+if [ -n "$KEEP" ]; then
+    ON=" $(pm list packages -e 2>/dev/null | sed 's/package://' | tr '\n' ' ') "
+    for p in $KEEP; do
+        listed "$p" "$ON" || continue
+        pm disable-user --user 0 "$p" >/dev/null 2>&1 && log "switched $p off again (an update had switched it back on)"
+    done
+fi
 
 # shellcheck disable=SC2086  # deliberate word splitting: counts the words in $1
 count() { set -- $1; echo $#; }
@@ -179,10 +206,12 @@ if [ "$START_KEYMAPPER_EXPERT_MODE" = "1" ] && pm path $KM >/dev/null 2>&1 && ! 
     fi
 fi
 
-# Daily refresh, idle trim, re-hiding helper notifications, re-checking the Wi-Fi fix, keeping the volume helper
-# running, the panel fix: start the tiny background helper (tv-daily.sh) if it isn't running yet.
+# Daily refresh, idle trim, re-hiding helper notifications, re-checking the Wi-Fi fix, keeping the volume and button
+# helpers running, the panel fix, keeping apps off: start the tiny background helper (tv-daily.sh) if it isn't
+# running yet.
 if { [ "$DAILY_REFRESH" = "1" ] || [ -n "$QUIET_APPS" ] || [ "${IDLE_TRIM_MINUTES:-0}" -gt 0 ] ||
-     [ "$WIFI_IPV6_ROUTER_FIX" = "1" ] || [ "$VOLUME_HOLD_REPEAT" = "1" ] || [ "$PANEL_60HZ_FIX" = "1" ]; } && [ -f /data/local/tmp/tv-daily.sh ]; then
+     [ "$WIFI_IPV6_ROUTER_FIX" = "1" ] || [ "$VOLUME_HOLD_REPEAT" = "1" ] || [ "$PANEL_60HZ_FIX" = "1" ] ||
+     [ -n "$KEEP" ] || [ -n "$LIVE_TV_BUTTON_INPUT" ]; } && [ -f /data/local/tmp/tv-daily.sh ]; then
     dp=$(cat /data/local/tmp/tv-daily.pid 2>/dev/null)
     if [ -z "$dp" ] || ! grep -q tv-daily /proc/"$dp"/cmdline 2>/dev/null; then
         setsid nohup sh /data/local/tmp/tv-daily.sh </dev/null >/dev/null 2>&1 &
@@ -201,9 +230,29 @@ if [ "$VOLUME_HOLD_REPEAT" = "1" ] && [ -f /data/local/tmp/tv-volhold.sh ]; then
     fi
 elif [ "$VOLUME_HOLD_REPEAT" != "1" ]; then
     # Stop the shell and its children: it acts on the signal only once its getevent ends, which ending the children does.
-    vh=$(pgrep -f 'tv-volhol[d].sh')
-    if [ -n "$vh" ]; then for p in $vh; do kill $p 2>/dev/null; pkill -P $p 2>/dev/null; done; log "stopped volume hold-to-repeat helper"; fi
+    # By its pid file, not pgrep -f (that also matches a shell that merely mentions the script; see tv-keys below).
+    vh=$(cat /data/local/tmp/tv-volhold.pid 2>/dev/null)
+    if [ -n "$vh" ] && grep -q tv-volhold /proc/"$vh"/cmdline 2>/dev/null; then
+        kill "$vh" 2>/dev/null; pkill -P "$vh" 2>/dev/null; log "stopped volume hold-to-repeat helper"
+    fi
     rm -f /data/local/tmp/tv-volhold.pid /data/local/tmp/tv-volhold.held
+fi
+
+# The Live TV button helper (tv-keys.sh): restarted here so a changed LIVE_TV_BUTTON_INPUT takes effect; switched
+# off, stopped. Found by its pid file: matching command lines (pgrep -f) also finds any shell whose command merely
+# mentions the script, such as the adb shell deploying it, and would stop that one (and this script with it).
+kh=$(cat /data/local/tmp/tv-keys.pid 2>/dev/null)
+if [ -n "$kh" ] && grep -q tv-keys /proc/"$kh"/cmdline 2>/dev/null; then
+    kill "$kh" 2>/dev/null; pkill -P "$kh" 2>/dev/null   # it acts on the signal once its getevent ends: end that too
+else
+    kh=
+fi
+rm -f /data/local/tmp/tv-keys.pid
+if [ -n "$LIVE_TV_BUTTON_INPUT" ] && [ -f /data/local/tmp/tv-keys.sh ]; then
+    setsid nohup sh /data/local/tmp/tv-keys.sh </dev/null >/dev/null 2>&1 &
+    [ -z "$kh" ] && log "started Live TV button helper ($LIVE_TV_BUTTON_INPUT)"
+elif [ -n "$kh" ]; then
+    log "stopped Live TV button helper"
 fi
 
 # Hide helper apps' permanent notifications (after Expert Mode starts, since Key Mapper posts when it connects).
