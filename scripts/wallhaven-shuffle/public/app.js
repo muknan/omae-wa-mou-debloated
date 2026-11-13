@@ -241,11 +241,21 @@
     if (m < 1440) return m === 60 ? '1 hour' : `${m / 60} hours`;
     return '1 day';
   }
-  const favLabel = (n) => (n ? `${nf.format(n)}+ favourites` : 'Any');
-  // A favourites minimum typed in: digits (commas and spaces allowed, as in 1,500), 0 to 100,000; NaN if it isn't one.
+  // Popularity: favourites on Wallhaven, at least fav and (favmax > 0) at most favmax. The same words on the TV and PC.
+  const favLabel = (min, max = 0) => (max ? (min ? `${nf.format(min)} to ${nf.format(max)} favourites` : `Up to ${nf.format(max)} favourites`) : min ? `${nf.format(min)}+ favourites` : 'Any');
   const FAV_MAX = 100000;
-  const parseFav = (v) => { const t = String(v).replace(/[\s,]/g, ''); return /^\d{1,6}$/.test(t) && Number(t) <= FAV_MAX ? Number(t) : NaN; };
-  const FAV_NOTE = 'Only wallpapers with at least this many favourites on Wallhaven. 0 shows any.';
+  const FAV_NOTE = 'How many people favourited a wallpaper on Wallhaven. Leave At most empty for no upper limit.';
+  // A number typed in: digits (commas and spaces allowed, as in 1,500); NaN if it isn't one.
+  const parseNum = (v) => { const t = String(v).replace(/[\s,]/g, ''); return /^\d{1,6}$/.test(t) ? Number(t) : NaN; };
+  // The two fields of Type a range…: { fav, favmax } or { err }. An empty At least is 0; an empty At most is no limit.
+  function parseRange(minText, maxText) {
+    const min = String(minText).trim() ? parseNum(minText) : 0, max = String(maxText).trim() ? parseNum(maxText) : 0;
+    if (Number.isNaN(min) || min > FAV_MAX) return { err: `At least: a whole number from 0 to ${nf.format(FAV_MAX)}` };
+    if (Number.isNaN(max) || max > FAV_MAX) return { err: `At most: a whole number up to ${nf.format(FAV_MAX)}, or empty` };
+    if (String(maxText).trim() && max < Math.max(min, 1)) return { err: `At most: ${nf.format(Math.max(min, 1))} or more, or empty` };
+    return { fav: min, favmax: max };
+  }
+  const ORDER = { shuffle: 'Shuffled', fav: 'Most favourites' };
   const kindIcon = (k) => (k === 'tv' ? 'tv' : k === 'pc' ? 'pc' : 'web');
   const kindName = (k) => (k === 'tv' ? 'TV' : k === 'pc' ? 'PC' : 'Browser');
   function presence(id) {
@@ -547,6 +557,33 @@
     });
   }
 
+  // Popularity's Type a range…: At least and At most side by side, number keys. { fav, favmax }, or null if cancelled.
+  function rangePrompt(fav, favmax) {
+    return new Promise((resolve) => {
+      let done = false;
+      const s = sheet('Popularity', (body, close) => {
+        const field = (id, label, value, placeholder) => {
+          const input = h('input', { class: 'field', id, value, placeholder, maxlength: 7, autocomplete: 'off', inputmode: 'numeric', enterkeyhint: id === 'fav-min' ? 'next' : 'done' });
+          return [input, h('label', { class: 'range-field', for: id }, h('span', {}, label), input)];
+        };
+        const [min, minBox] = field('fav-min', 'At least', fav ? String(fav) : '', '0');
+        const [max, maxBox] = field('fav-max', 'At most', favmax ? String(favmax) : '', 'No limit');
+        const err = h('div', { class: 'err', role: 'alert' });
+        const ok = h('button', { class: 'btn primary', type: 'submit' }, 'Save');
+        const validate = (final) => { const r = parseRange(min.value, max.value); err.textContent = r.err && (final || min.value.trim() || max.value.trim()) ? r.err : ''; ok.disabled = !!r.err; return r; };
+        min.addEventListener('input', () => validate());
+        max.addEventListener('input', () => validate());
+        min.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); max.focus(); } });
+        put(body, h('form', { class: 'pad', onsubmit: (e) => { e.preventDefault(); const r = validate(true); if (!r.err) { done = true; resolve(r); close(); } } },
+          h('p', { class: 'note' }, FAV_NOTE), h('div', { class: 'range' }, minBox, maxBox), err,
+          h('div', { class: 'foot' }, h('button', { class: 'btn', type: 'button', onclick: () => close() }, 'Cancel'), ok)));
+        validate();
+        setTimeout(() => { min.focus(); min.select(); }, 80);
+      }, { fixed: true });
+      s.dlg.addEventListener('close', () => { if (!done) resolve(null); });
+    });
+  }
+
   function confirmSheet(title, message, okLabel) {
     return new Promise((resolve) => {
       let done = false;
@@ -758,6 +795,7 @@
     const settings = group(
       item({ label: 'Shuffle from', value: sourcesSummary(id), onclick: () => sourcesSheet(id), cls: none ? 'warn' : '' }),
       item({ label: 'Toplist', value: filtersSummary(s.filters), onclick: () => filtersSheet(id) }),
+      selectItem({ label: 'Order', value: Object.hasOwn(ORDER, s.order) ? s.order : 'shuffle', id: `order-${id}`, options: Object.entries(ORDER), onchange: (v) => setSettings(id, { order: v }) }),
       selectItem({ label: 'Change every', value: s.every, id: `every-${id}`, options: S.presets.every.map((m) => [m, everyLabel(m)]), onchange: (v) => setSettings(id, { every: Number(v) }) }));
 
     const hiddenIds = new Set(findPl('hidden').items.map((x) => x.id));
@@ -796,6 +834,15 @@
     });
   }
 
+  // Popularity's choices: each preset is a minimum with no upper limit; the one in use is added if it was typed in.
+  const favKey = (f) => (f.favmax ? `${f.fav}-${f.favmax}` : String(f.fav));
+  function favOptions(presets, f) {
+    const all = presets.map((n) => ({ fav: n, favmax: 0 }));
+    if (!all.some((x) => favKey(x) === favKey(f))) all.push({ fav: f.fav, favmax: f.favmax || 0 });
+    all.sort((a, b) => a.fav - b.fav || (a.favmax || Infinity) - (b.favmax || Infinity));
+    return [...all.map((x) => [favKey(x), favLabel(x.fav, x.favmax)]), ['type', 'Type a range…']];
+  }
+
   function filtersSheet(id) {
     sheet('Toplist', (body, close) => {
       const d = S.doc.devices[id];
@@ -811,14 +858,14 @@
           selectItem({ label: 'Quality', value: f.quality, id: `q-${id}`, options: Object.entries(pr.quality).map(([k, v]) => [k, v.label]), onchange: (v) => setF({ quality: v }) }),
           selectItem({ label: 'Shape', value: f.ratio, id: `r-${id}`, options: Object.entries(pr.ratio), onchange: (v) => setF({ ratio: v }) }),
           selectItem({ label: 'Period', value: f.range, id: `p-${id}`, options: Object.entries(pr.range), onchange: (v) => setF({ range: v }) }),
-          // the presets, the one in use if it was typed in, and Type one…
-          selectItem({ label: 'Popularity', value: f.fav, id: `f-${id}`, options: [...[...new Set([...pr.fav, f.fav])].sort((a, b) => a - b).map((n) => [n, favLabel(n)]), ['type', 'Type one…']],
+          // the presets (a minimum), the one in use if it was typed in (a range too), and Type a range…
+          selectItem({ label: 'Popularity', value: favKey(f), id: `f-${id}`, options: favOptions(pr.fav, f),
             onchange: async (v) => {
-              if (v !== 'type') return setF({ fav: Number(v) });
+              if (v !== 'type') { const [a, b = '0'] = v.split('-'); return setF({ fav: Number(a), favmax: Number(b) }); }
               sheets.forEach((r) => r());   // the select shows the one in use again while typing
-              const t = await prompt('Popularity', { value: f.fav ? String(f.fav) : '', placeholder: 'e.g. 75', note: FAV_NOTE, inputmode: 'numeric',
-                check: (x) => (Number.isNaN(parseFav(x)) ? `A whole number from 0 to ${nf.format(FAV_MAX)}` : null) });
-              if (t != null && parseFav(t) !== S.doc.devices[id]?.settings.filters.fav) setF({ fav: parseFav(t) });
+              const r = await rangePrompt(f.fav, f.favmax || 0);
+              const now = S.doc.devices[id]?.settings.filters;
+              if (r && (r.fav !== now?.fav || r.favmax !== (now?.favmax || 0))) setF(r);
             } }),
           selectItem({ label: 'Largest size', value: f.maxw, id: `w-${id}`, options: Object.entries(pr.maxw), onchange: (v) => setF({ maxw: Number(v) }) })),
         groupLabel('Categories'),
@@ -1018,7 +1065,7 @@
     if (query) loadList(query);
     const L = (query && lists.get(query)) || { loading: true };
     const hidden = new Set(findPl('hidden').items.map((x) => x.id));
-    let items = (L.items || []).filter((w) => !f.maxw || (w.dimension_x || 0) <= f.maxw).map(fromList);
+    let items = (L.items || []).filter((w) => (!f.maxw || (w.dimension_x || 0) <= f.maxw) && (!f.favmax || (w.favorites || 0) <= f.favmax)).map(fromList);
     const total = items.length;
     if (!B.withHidden) items = items.filter((w) => !hidden.has(w.id));
     if (B.sort === 'fav') items.sort((a, b) => b.fav - a.fav);

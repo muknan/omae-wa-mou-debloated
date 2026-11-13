@@ -29,6 +29,11 @@ foreach ($d in 'aidl', 'src', 'res', 'test') { Copy-Item (Join-Path $here $d) (J
 Copy-Item (Join-Path $here 'AndroidManifest.xml') $in
 
 if ($Test) {
+    # The version the TV reports to the remote (Sync.VERSION) must be the manifest's (it once stayed 1.18 on 1.19).
+    $manifestVersion = ([regex]'android:versionName="([^"]+)"').Match((Get-Content (Join-Path $here 'AndroidManifest.xml') -Raw)).Groups[1].Value
+    $syncVersion = ([regex]'VERSION = "([^"]+)"').Match((Get-Content (Join-Path $here 'src\io\github\muknan\wallhavenshuffle\Sync.java') -Raw)).Groups[1].Value
+    if ($manifestVersion -ne $syncVersion) { throw "Sync.VERSION is $syncVersion but the manifest says $manifestVersion" }
+    Write-Host "ok   version $manifestVersion in the manifest and Sync.VERSION"
     Run $javac -encoding UTF-8 -d "$work\test" "$in\src\io\github\muknan\wallhavenshuffle\Shuffle.java" "$in\src\io\github\muknan\wallhavenshuffle\TvSettings.java" "$in\test\ShuffleTest.java"
     Run $java -cp "$work\test" io.github.muknan.wallhavenshuffle.ShuffleTest
 }

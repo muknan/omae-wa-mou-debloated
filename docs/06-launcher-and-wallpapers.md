@@ -90,6 +90,7 @@ environment variables:
 | `CATEGORIES` | `111` | general / anime / people as 0-1 flags: `110` = no People |
 | `PURITY` | `100` | SFW only |
 | `MIN_FAVORITES` | `0` | skip wallpapers with fewer favourites (the toplist is every upload, ranked) |
+| `MAX_FAVORITES` | `0` | skip wallpapers with more favourites (`0` = no limit; below `MIN_FAVORITES` it means none). Each app can set its own range (Popularity > Type a range…) |
 | `SET_SIZE` | `200` | wallpapers per hourly set (at most 200). Projectivy keeps a set for an hour and shows a **random** one from it every *Update delay* minutes, not in order, so a bigger set means fewer repeats: at a 1-minute delay, ~20 repeats an hour with 70, ~2-8 with 200 |
 | `SYNC_KEY` | (none) | the remote and sync (below): a long password of your own that signs in the first device |
 | `KV_REST_API_URL`, `KV_REST_API_TOKEN` | (none) | added by Vercel's Upstash integration; the remote and sync keep their data there |

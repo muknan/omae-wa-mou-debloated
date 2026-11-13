@@ -111,7 +111,10 @@ export const FAVS = [0, 10, 25, 50, 100, 250, 500, 1000];
 export const MAXW = { 0: 'Any', 3840: 'Up to 4K', 5120: 'Up to 5K' };
 export const EVERY = [1, 2, 5, 10, 15, 30, 60, 120, 180, 360, 720, 1440];
 export const TOPICS = ['nature', 'landscape', 'mountains', 'forest', 'ocean', 'space', 'city', 'night', 'sunset', 'winter', 'architecture', 'minimalism', 'abstract', 'digital art', 'cars'];
-export const PRESETS = { quality: QUALITY, ratio: RATIO, range: RANGE, fav: FAVS, maxw: MAXW, every: EVERY, topics: TOPICS };
+// The order a device shows its pool in: shuffled, or the most favourited first (the same words as Browse).
+export const ORDER = { shuffle: 'Shuffled', fav: 'Most favourites' };
+export const FAV_MAX = 100000;
+export const PRESETS = { quality: QUALITY, ratio: RATIO, range: RANGE, fav: FAVS, maxw: MAXW, every: EVERY, topics: TOPICS, order: ORDER };
 
 export const MAX_ITEMS = 5000, MAX_PLAYLISTS = 100, MAX_DEVICES = 30;
 const KINDS = new Set(['tv', 'pc', 'web']);
@@ -122,7 +125,8 @@ export function defaultSettings(kind) {
     sources: ['toplist'],
     // The same list the apps used before sync (1 year of 4K+, widescreen, no People, 50+ favourites); a TV skips
     // anything wider than 4K, which its decoder handles slowly.
-    filters: { quality: '4k+', ratio: '16x9,16x10', range: '1y', fav: 50, cats: '110', maxw: kind === 'tv' ? 3840 : 0, q: '' },
+    filters: { quality: '4k+', ratio: '16x9,16x10', range: '1y', fav: 50, favmax: 0, cats: '110', maxw: kind === 'tv' ? 3840 : 0, q: '' },
+    order: 'shuffle',
     every: kind === 'tv' ? 1 : 15,
     paused: false,
     keep: '',
@@ -139,19 +143,24 @@ export function normSettings(patch, base) {
     if (Object.hasOwn(QUALITY, f.quality)) o.quality = f.quality;
     if (typeof f.ratio === 'string' && Object.hasOwn(RATIO, f.ratio)) o.ratio = f.ratio;
     if (Object.hasOwn(RANGE, f.range)) o.range = f.range;
-    if (Number.isInteger(f.fav) && f.fav >= 0 && f.fav <= 100000) o.fav = f.fav;
+    if (Number.isInteger(f.fav) && f.fav >= 0 && f.fav <= FAV_MAX) o.fav = f.fav;
+    if (Number.isInteger(f.favmax) && f.favmax >= 0 && f.favmax <= FAV_MAX) o.favmax = f.favmax;
+    // a minimum raised past the maximum (an app from before ranges sends only fav): no upper limit then
+    if (!Number.isInteger(o.favmax) || o.favmax < o.fav) o.favmax = 0;
     if (/^[01]{3}$/.test(f.cats) && f.cats !== '000') o.cats = f.cats;
     if (Number.isInteger(f.maxw) && Object.hasOwn(MAXW, f.maxw)) o.maxw = f.maxw;
     if (f.q !== undefined) o.q = normTopic(f.q);
   }
+  if (Object.hasOwn(ORDER, s.order)) out.order = s.order;
+  if (!Object.hasOwn(ORDER, out.order)) out.order = 'shuffle';
   if (Number.isInteger(s.every) && s.every >= 1 && s.every <= 1440) out.every = s.every;
   if (typeof s.paused === 'boolean') out.paused = s.paused;
   if (typeof s.keep === 'string' && s.keep.length <= 400) out.keep = s.keep;
   return out;
 }
 
-// The /api/list query for a device's filters: always without the width limit, which each app applies itself, so
-// devices with the same filters share one cached list.
+// The /api/list query for a device's filters: always without the width limit and the favourites maximum, which each
+// app applies itself, so devices with the same filters share one cached list.
 export function listQueryFor(f) {
   const q = QUALITY[f.quality] || QUALITY['4k+'];
   return listQuery({ range: f.range, res: q.res || '', atleast: q.atleast || '', ratios: f.ratio, cats: f.cats, purity: '100', q: f.q, fav: f.fav, maxw: 0 });

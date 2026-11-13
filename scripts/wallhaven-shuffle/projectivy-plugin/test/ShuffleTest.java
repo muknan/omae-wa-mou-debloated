@@ -98,6 +98,41 @@ public class ShuffleTest {
         check("a typed favourites minimum", TvSettings.parseFav("75") == 75 && TvSettings.parseFav(" 1,500 ") == 1500 && TvSettings.parseFav("0") == 0 && TvSettings.parseFav("100000") == 100000
             && TvSettings.parseFav("100001") == -1 && TvSettings.parseFav("-5") == -1 && TvSettings.parseFav("7.5") == -1 && TvSettings.parseFav("") == -1, TvSettings.parseFav(" 1,500 "));
 
+        // Popularity ranges: the same words and rules as the remote and the PC
+        check("range labels", TvSettings.favLabel(0, 0).equals("Any") && TvSettings.favLabel(250, 0).equals("250+ favourites")
+            && TvSettings.favLabel(0, 500).equals("Up to 500 favourites") && TvSettings.favLabel(250, 1000).equals("250 to 1,000 favourites"), TvSettings.favLabel(250, 1000));
+        String[] err = new String[1];
+        check("200 to 1,000", Arrays.equals(TvSettings.parseRange("200", "1,000", err), new int[]{200, 1000}) && err[0] == null, err[0]);
+        check("an empty At least is 0, an empty At most no limit", Arrays.equals(TvSettings.parseRange("", "300", err), new int[]{0, 300})
+            && Arrays.equals(TvSettings.parseRange("75", " ", err), new int[]{75, 0}) && Arrays.equals(TvSettings.parseRange("500", "500", err), new int[]{500, 500}), "");
+        check("At most below At least says why", TvSettings.parseRange("500", "200", err) == null && "At most: 500 or more, or empty".equals(err[0]), err[0]);
+        check("At most 0 says why", TvSettings.parseRange("", "0", err) == null && "At most: 1 or more, or empty".equals(err[0]), err[0]);
+        check("bad numbers say which field", TvSettings.parseRange("abc", "", err) == null && err[0].startsWith("At least:")
+            && TvSettings.parseRange("1", "200000", err) == null && err[0].startsWith("At most:"), err[0]);
+        TvSettings r = TvSettings.defaults();
+        r.fav = 200; r.favmax = 1000; r.order = "fav"; r.clean();
+        check("the maximum stays out of the list query (the TV applies it)", r.favmax == 1000 && r.listQuery().equals("range=1y&atleast=3840x2160&ratios=16x9,16x10&cats=110&purity=100&fav=200&maxw=0"), r.listQuery());
+        TvSettings odd = TvSettings.defaults();
+        odd.fav = 2000; odd.favmax = 1000; odd.order = "newest"; odd.clean();
+        check("a maximum below the minimum: no upper limit; an unknown order: shuffled", odd.favmax == 0 && odd.order.equals("shuffle"), odd.favmax + " " + odd.order);
+        TvSettings cp = r.copy();
+        check("copy keeps the maximum and the order", cp.favmax == 1000 && cp.order.equals("fav"), cp.favmax);
+        Shuffle.Item big = new Shuffle.Item("big", "i", "p", "3840x2160", 3840, 1500), small = new Shuffle.Item("small", "i", "p", "3840x2160", 3840, 300),
+            wide = new Shuffle.Item("wide", "i", "p", "5120x2880", 5120, 300);
+        check("inside the limits: favourites and width", !r.inLimits(big) && r.inLimits(small) && !r.inLimits(wide), "");
+
+        // Order: Most favourites. The most favourited one not shown this round, round after round; ties in the pool's order.
+        List<Shuffle.Item> ranked = new ArrayList<>();
+        int[] favs = {10, 900, 50, 900, 0};
+        for (int i = 0; i < favs.length; i++) ranked.add(new Shuffle.Item("abcde".substring(i, i + 1), "i", "p", "3840x2160", 3840, favs[i]));
+        Shuffle byFav = new Shuffle(List.of(), List.of(), new Random(3));
+        StringBuilder seq = new StringBuilder();
+        for (int i = 0; i < 7; i++) seq.append(byFav.next(ranked, true).id);
+        check("most favourited first, then a new round from the top", seq.toString().equals("bdcaebd"), seq);
+        Set<String> firsts = new HashSet<>();
+        for (int i = 0; i < 20; i++) firsts.add(new Shuffle(List.of(), List.of(), new Random(i + 1)).next(ranked, false).id);
+        check("shuffled picks vary", firsts.size() > 2, firsts);
+
         System.out.println(fail == 0 ? "ALL PASSED" : fail + " FAILED");
         System.exit(fail == 0 ? 0 : 1);
     }

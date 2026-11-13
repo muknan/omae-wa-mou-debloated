@@ -8,7 +8,8 @@ import java.util.Random;
 import java.util.Set;
 
 /**
- * What comes next. Every wallpaper in the pool is shown once per round, in random order, and where possible never
+ * What comes next. Every wallpaper in the pool is shown once per round, in random order (or, with Order: Most
+ * favourites, the most favourited first; ties in the pool's order), and where possible never
  * one of the last few shown, so the end of one round and the start of the next don't repeat either. The same rules
  * as the Windows app. Plain Java (no Android), so it's tested on the PC; the state is two strings the service keeps
  * in its preferences.
@@ -39,7 +40,10 @@ final class Shuffle {
     }
 
     /** The next one, recorded as shown; null for an empty pool. */
-    Item next(List<Item> pool) {
+    Item next(List<Item> pool) { return next(pool, false); }
+
+    /** byFavourites: the most favourited one not shown this round, instead of a random one. */
+    Item next(List<Item> pool, boolean byFavourites) {
         if (pool.isEmpty()) return null;
         boolean allShown = true;
         for (Item w : pool) if (!inRound.contains(w.id)) { allShown = false; break; }
@@ -54,7 +58,9 @@ final class Shuffle {
             if (!recent.contains(w.id)) notRecent.add(w);
         }
         List<Item> from = notRecent.isEmpty() ? fresh : notRecent;
-        Item pick = from.get(rng.nextInt(from.size()));
+        Item pick = from.get(0);
+        if (byFavourites) { for (Item w : from) if (w.favorites > pick.favorites) pick = w; }
+        else pick = from.get(rng.nextInt(from.size()));
 
         round.add(pick.id); inRound.add(pick.id);
         history.add(pick.id);

@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { handle, memoryStore, applyOp, emptyDoc, normSettings, defaultSettings, listQueryFor, checkName, K } from '../lib/sync.js';
-import { listParams, listQuery } from '../lib/core.js';
+import { listParams, listQuery, passes } from '../lib/core.js';
 
 process.env.SYNC_KEY = 'test-key-0123456789';
 
@@ -214,4 +214,39 @@ test('a device\'s clock offset is kept with its status (its own clock is not)', 
   const st = (await call(store, 'state', { token: web.token })).status[pc.id].st;
   assert.equal(st.t, undefined);
   assert.ok(st.skew >= 4900 && st.skew < 6000, `skew ${st.skew}`);
+});
+
+test('favourites range and order: kept, checked, shared list, and a minimum raised past the maximum clears it', () => {
+  const base = defaultSettings('tv');
+  assert.equal(base.filters.favmax, 0);
+  assert.equal(base.order, 'shuffle');
+  let s = normSettings({ order: 'fav', filters: { fav: 200, favmax: 1000 } }, base);
+  assert.equal(s.order, 'fav');
+  assert.equal(s.filters.fav, 200);
+  assert.equal(s.filters.favmax, 1000);
+  // each app applies the maximum itself, so the list (and its cached copy) is the one without it
+  assert.equal(listQueryFor(s.filters), 'range=1y&atleast=3840x2160&ratios=16x9,16x10&cats=110&purity=100&fav=200&maxw=0');
+  assert.equal(normSettings({ order: 'newest', filters: { favmax: -1 } }, s).order, 'fav');
+  assert.equal(normSettings({ filters: { favmax: 100001 } }, s).filters.favmax, 1000);
+  assert.equal(normSettings({ filters: { favmax: 1.5 } }, s).filters.favmax, 1000);
+  // an app from before ranges sends only a new minimum: above the maximum, there's no upper limit any more
+  assert.equal(normSettings({ filters: { fav: 2000 } }, s).filters.favmax, 0);
+  assert.equal(normSettings({ filters: { fav: 1000 } }, s).filters.favmax, 1000);   // equal is fine: exactly 1,000
+  // settings saved before ranges (no favmax, no order) come out with them
+  const old = structuredClone(base); delete old.filters.favmax; delete old.order;
+  const up = normSettings({ filters: { fav: 25 } }, old);
+  assert.equal(up.filters.favmax, 0);
+  assert.equal(up.order, 'shuffle');
+});
+
+test('/api/list and search read the range: favmax only in the address when set; below the minimum it means none', () => {
+  const q = (s) => listParams(Object.fromEntries(new URLSearchParams(s)));
+  const p = q('range=1y&atleast=3840x2160&fav=200&favmax=1000&maxw=0');
+  assert.equal(p.favmax, 1000);
+  assert.equal(listQuery(p), 'range=1y&atleast=3840x2160&cats=111&purity=100&fav=200&favmax=1000&maxw=0');
+  assert.equal(listQuery(q('range=1y&atleast=3840x2160&fav=200&maxw=0')), 'range=1y&atleast=3840x2160&cats=111&purity=100&fav=200&maxw=0');
+  assert.equal(q('fav=500&favmax=100').favmax, 0);
+  const keep = passes(p);
+  assert.deepEqual([150, 200, 640, 1000, 1001].map((n) => keep({ favorites: n, dimension_x: 3840 })), [false, true, true, true, false]);
+  assert.equal(passes(q('fav=0'))({ favorites: 90000 }), true);
 });

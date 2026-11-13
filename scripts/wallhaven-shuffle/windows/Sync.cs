@@ -18,7 +18,7 @@ namespace WallhavenShuffle
     class Filters
     {
         public string Quality = "4k+", Ratio = "16x9,16x10", Range = "1y", Cats = "110", Topic = "";
-        public int Fav = 50, MaxWidth = 0;
+        public int Fav = 50, FavMax = 0, MaxWidth = 0;   // Popularity: at least Fav favourites and, if FavMax > 0, at most FavMax
 
         public static readonly string[][] Qualities = {
             new[] { "1080+", "Full HD and up", "1920x1080" }, new[] { "1440+", "1440p and up", "2560x1440" },
@@ -33,18 +33,37 @@ namespace WallhavenShuffle
         public static readonly int[] Favs = { 0, 10, 25, 50, 100, 250, 500, 1000 };
         public static readonly int[] Widths = { 0, 3840, 5120 };
         public static readonly int[] Every = { 1, 2, 5, 10, 15, 30, 60, 120, 180, 360, 720, 1440 };
+        // The order the pool is shown in (the same words as the remote's Browse): shuffled, or the most favourited first.
+        public static readonly string[][] Orders = { new[] { "shuffle", "Shuffled" }, new[] { "fav", "Most favourites" } };
         public static readonly string[] Topics = { "nature", "landscape", "mountains", "forest", "ocean", "space", "city", "night", "sunset", "winter", "architecture", "minimalism", "abstract", "digital art", "cars" };
 
         public static string Label(string[][] table, string key) { var row = table.FirstOrDefault(r => r[0] == key); return row != null ? row[1] : key; }
-        public static string FavLabel(int n) { return n == 0 ? "Any" : n.ToString("N0") + "+ favourites"; }
-        // A favourites minimum typed in: digits (commas and spaces allowed, as in 1,500), 0 to 100,000; -1 if it isn't one.
-        public const int FavMax = 100000;
-        public const string FavNote = "Only wallpapers with at least this many favourites on Wallhaven. 0 shows any.";
+        // Popularity's words, the same as the remote's and the TV's: Any, 250+ favourites, Up to 500 favourites, 250 to 1,000 favourites.
+        public static string FavLabel(int min, int max = 0)
+        {
+            if (max > 0) return (min > 0 ? min.ToString("N0") + " to " : "Up to ") + max.ToString("N0") + " favourites";
+            return min == 0 ? "Any" : min.ToString("N0") + "+ favourites";
+        }
+        public string PopularityLabel { get { return FavLabel(Fav, FavMax); } }
+        public const int FavLimit = 100000;
+        public const string FavNote = "How many people favourited a wallpaper on Wallhaven. Leave At most empty for no upper limit.";
+        // A number typed in: digits (commas and spaces allowed, as in 1,500), 0 to 100,000; -1 if it isn't one.
         public static int ParseFav(string v)
         {
             string t = new string((v ?? "").Where(c => c != ',' && !char.IsWhiteSpace(c)).ToArray());
             int n;
-            return t.Length > 0 && t.Length <= 6 && t.All(char.IsDigit) && int.TryParse(t, out n) && n <= FavMax ? n : -1;
+            return t.Length > 0 && t.Length <= 6 && t.All(char.IsDigit) && int.TryParse(t, out n) && n <= FavLimit ? n : -1;
+        }
+        // Type a range…'s two fields: null and the range, or why not. An empty At least is 0; an empty At most is no limit.
+        public static string ParseRange(string minText, string maxText, out int min, out int max)
+        {
+            bool hasMin = (minText ?? "").Trim().Length > 0, hasMax = (maxText ?? "").Trim().Length > 0;
+            min = hasMin ? ParseFav(minText) : 0;
+            max = hasMax ? ParseFav(maxText) : 0;
+            if (min < 0) return "At least: a whole number from 0 to " + FavLimit.ToString("N0");
+            if (max < 0) return "At most: a whole number up to " + FavLimit.ToString("N0") + ", or empty";
+            if (hasMax && max < Math.Max(min, 1)) return "At most: " + Math.Max(min, 1).ToString("N0") + " or more, or empty";
+            return null;
         }
         public static string WidthLabel(int w) { return w == 0 ? "Any" : w == 3840 ? "Up to 4K" : "Up to 5K"; }
         public static string EveryLabel(int m)
@@ -69,7 +88,8 @@ namespace WallhavenShuffle
             if (!Ranges.Any(r => r[0] == Range)) Range = "1y";
             if (Cats == null || !Regex.IsMatch(Cats, "^[01]{3}$") || Cats == "000") Cats = "110";
             Topic = NormTopic(Topic);
-            if (Fav < 0 || Fav > 100000) Fav = 50;
+            if (Fav < 0 || Fav > FavLimit) Fav = 50;
+            if (FavMax < 0 || FavMax > FavLimit || FavMax < Fav) FavMax = 0;   // a minimum raised past it: no upper limit
             if (!Widths.Contains(MaxWidth)) MaxWidth = 0;
             return this;
         }
@@ -77,7 +97,7 @@ namespace WallhavenShuffle
         public Filters Copy() { return (Filters)MemberwiseClone(); }
 
         // The /api/list query: character for character the service's listQueryFor, so every device with the same
-        // filters shares one cached list. No width limit in it (each app applies its own).
+        // filters shares one cached list. No width limit or favourites maximum in it (each app applies its own).
         public string ListQuery()
         {
             string size = Qualities.First(r => r[0] == Quality)[2];
@@ -103,6 +123,7 @@ namespace WallhavenShuffle
             if (q["cats"] != null) f.Cats = q["cats"];
             int n;
             if (q["fav"] != null && int.TryParse(q["fav"], out n)) f.Fav = n;
+            if (q["favmax"] != null && int.TryParse(q["favmax"], out n)) f.FavMax = n;
             if (q["maxw"] != null && int.TryParse(q["maxw"], out n)) f.MaxWidth = n;
             if (q["q"] != null) f.Topic = q["q"];
             return f.Clean();
@@ -313,14 +334,15 @@ namespace WallhavenShuffle
         public int Every = 15;
         public bool Paused;
         public string Keep = "";
+        public string Order = "shuffle";
 
         public Dictionary<string, object> ToDict()
         {
             var f = Filters;
             return new Dictionary<string, object> {
                 { "sources", Sources.ToArray() },
-                { "filters", new Dictionary<string, object> { { "quality", f.Quality }, { "ratio", f.Ratio }, { "range", f.Range }, { "cats", f.Cats }, { "q", f.Topic }, { "fav", f.Fav }, { "maxw", f.MaxWidth } } },
-                { "every", Every }, { "paused", Paused }, { "keep", Keep } };
+                { "filters", new Dictionary<string, object> { { "quality", f.Quality }, { "ratio", f.Ratio }, { "range", f.Range }, { "cats", f.Cats }, { "q", f.Topic }, { "fav", f.Fav }, { "favmax", f.FavMax }, { "maxw", f.MaxWidth } } },
+                { "order", Order }, { "every", Every }, { "paused", Paused }, { "keep", Keep } };
         }
 
         public static DeviceSettings FromDict(Dictionary<string, object> d)
@@ -334,8 +356,9 @@ namespace WallhavenShuffle
                 var f = (Dictionary<string, object>)v;
                 Func<string, string, string> str = (k, def) => { object x; return f.TryGetValue(k, out x) && x != null ? Convert.ToString(x) : def; };
                 Func<string, int, int> num = (k, def) => { object x; try { return f.TryGetValue(k, out x) && x != null ? Convert.ToInt32(x) : def; } catch (Exception) { return def; } };
-                s.Filters = new Filters { Quality = str("quality", "4k+"), Ratio = str("ratio", "16x9,16x10"), Range = str("range", "1y"), Cats = str("cats", "110"), Topic = str("q", ""), Fav = num("fav", 50), MaxWidth = num("maxw", 0) }.Clean();
+                s.Filters = new Filters { Quality = str("quality", "4k+"), Ratio = str("ratio", "16x9,16x10"), Range = str("range", "1y"), Cats = str("cats", "110"), Topic = str("q", ""), Fav = num("fav", 50), FavMax = num("favmax", 0), MaxWidth = num("maxw", 0) }.Clean();
             }
+            if (d.TryGetValue("order", out v) && Filters.Orders.Any(r => r[0] == Convert.ToString(v))) s.Order = Convert.ToString(v);
             try { if (d.TryGetValue("every", out v)) s.Every = Math.Max(1, Math.Min(1440, Convert.ToInt32(v))); } catch (Exception) { }
             if (d.TryGetValue("paused", out v) && v is bool) s.Paused = (bool)v;
             if (d.TryGetValue("keep", out v) && v != null) s.Keep = Convert.ToString(v);

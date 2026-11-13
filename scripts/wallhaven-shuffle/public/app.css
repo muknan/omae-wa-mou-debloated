@@ -245,6 +245,10 @@ button.item:active, a.item:active, label.item:active { background: var(--raised-
 .err { color: var(--danger); font-size: 14px; min-height: 20px; }
 .field { width: 100%; min-height: 50px; padding: 0 16px; border-radius: 12px; background: var(--raised); border: 1px solid var(--line); font-size: 16px; color: var(--fg); }
 .field:focus { outline: none; border-color: var(--accent); }
+/* two number fields side by side, each with its label above (Popularity's At least / At most) */
+.range { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.range-field { display: grid; gap: 6px; min-width: 0; }
+.range-field span { font-size: 14px; color: var(--fg-2); }
 .code-field { text-align: center; font: 700 28px var(--font-display); letter-spacing: .3em; font-variant-numeric: tabular-nums; min-height: 64px; }
 
 /* ---------- sheets: from the bottom on a phone, a centred panel on wide screens */

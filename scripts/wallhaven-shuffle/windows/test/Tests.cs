@@ -75,6 +75,40 @@ namespace WallhavenShuffle
             Ok(new Filters().Summary == "4K and up · Past year" && Filters.EveryLabel(120) == "2 hours" && Filters.FavLabel(1000) == "1,000+ favourites", "labels");
             Ok(Filters.ParseFav("75") == 75 && Filters.ParseFav(" 1,500 ") == 1500 && Filters.ParseFav("0") == 0 && Filters.ParseFav("100000") == 100000
                && Filters.ParseFav("100001") == -1 && Filters.ParseFav("-5") == -1 && Filters.ParseFav("7.5") == -1 && Filters.ParseFav("") == -1 && Filters.ParseFav("abc") == -1, "a typed favourites minimum");
+            // Popularity ranges: the same words as the remote and the TV
+            Ok(Filters.FavLabel(0) == "Any" && Filters.FavLabel(250) == "250+ favourites" && Filters.FavLabel(0, 500) == "Up to 500 favourites" && Filters.FavLabel(250, 1000) == "250 to 1,000 favourites", "range labels");
+            {
+                int lo, hi;
+                Ok(Filters.ParseRange("200", "1,000", out lo, out hi) == null && lo == 200 && hi == 1000, "200 to 1,000");
+                Ok(Filters.ParseRange("", "300", out lo, out hi) == null && lo == 0 && hi == 300, "an empty At least is 0");
+                Ok(Filters.ParseRange("75", " ", out lo, out hi) == null && lo == 75 && hi == 0, "an empty At most is no limit");
+                Ok(Filters.ParseRange("500", "500", out lo, out hi) == null && hi == 500, "exactly 500 is fine");
+                Ok(Filters.ParseRange("500", "200", out lo, out hi) == "At most: 500 or more, or empty", "At most below At least: says why");
+                Ok(Filters.ParseRange("", "0", out lo, out hi) == "At most: 1 or more, or empty", "At most 0: says why");
+                Ok(Filters.ParseRange("abc", "", out lo, out hi).StartsWith("At least:") && Filters.ParseRange("1", "200000", out lo, out hi).StartsWith("At most:"), "bad numbers: says which field");
+            }
+            var rg = new Filters { Fav = 200, FavMax = 1000 }.Clean();
+            Ok(rg.FavMax == 1000 && rg.ListQuery() == "range=1y&atleast=3840x2160&ratios=16x9,16x10&cats=110&purity=100&fav=200&maxw=0", "the maximum stays out of the list query (each app applies it): " + rg.ListQuery());
+            Ok(new Filters { Fav = 2000, FavMax = 1000 }.Clean().FavMax == 0 && new Filters { FavMax = -3 }.Clean().FavMax == 0 && new Filters { FavMax = 100001 }.Clean().FavMax == 0, "a maximum below the minimum or out of range: no upper limit");
+            {
+                var dsr = new DeviceSettings { Order = "fav", Filters = new Filters { Fav = 200, FavMax = 1000 } };
+                var dsr2 = DeviceSettings.FromDict(Json.Parse(Json.Write(dsr.ToDict())) as Dictionary<string, object>);
+                Ok(dsr2.Order == "fav" && dsr2.Filters.FavMax == 1000 && dsr2.Filters.Fav == 200 && dsr2.Signature == dsr.Signature, "order and the maximum go to the service and back");
+                var old = DeviceSettings.FromDict(Json.Parse("{\"filters\":{\"fav\":50},\"order\":\"weird\"}") as Dictionary<string, object>);
+                Ok(old.Order == "shuffle" && old.Filters.FavMax == 0, "settings from before (no maximum, an unknown order): shuffled, no upper limit");
+            }
+            // Order: Most favourites. The most favourited one not shown this round, round after round; shuffled stays random.
+            {
+                var favOf = new Dictionary<string, int> { { "a", 10 }, { "b", 900 }, { "c", 50 }, { "d", 900 }, { "e", -1 } };
+                var pool = new List<string> { "a", "b", "c", "d", "e" };
+                var ro = new Rotation(new string[0], new string[0], 7);
+                var seen = new List<string>();
+                for (int i = 0; i < 7; i++) { string id = ro.PickNew(pool, seen.Count > 0 ? seen.Last() : null, k => favOf[k]); ro.ShownNew(id, pool); seen.Add(id); }
+                Ok(string.Join("", seen) == "bdcaebd", "most favourited first, ties in the pool's order, your own pictures last, then a new round from the top: " + string.Join("", seen));
+                var picks = new HashSet<string>();
+                for (int i = 0; i < 20; i++) picks.Add(new Rotation(new string[0], new string[0], i + 1).PickNew(pool, null));
+                Ok(picks.Count > 2, "shuffled picks vary (" + picks.Count + " different first picks)");
+            }
 
             // the document's rules (the same as the service's)
             var doc = new SyncDoc();
@@ -323,11 +357,24 @@ namespace WallhavenShuffle
                     };
                     int was = s.Filters.Fav;
                     var popA = popularity();
-                    Ok(popA.Last().Text == "Type one…" && popA[popA.Count - 2] is ToolStripSeparator && popA.OfType<ToolStripMenuItem>().Count(x => x.Checked) == 1, "Popularity ends with Type one…");
+                    Ok(popA.Last().Text == "Type a range…" && popA[popA.Count - 2] is ToolStripSeparator && popA.OfType<ToolStripMenuItem>().Count(x => x.Checked) == 1, "Popularity ends with Type a range…");
                     app.SetFilters(x => x.Fav = 1500);
                     var popB = popularity().OfType<ToolStripMenuItem>().Select(x => x.Text + (x.Checked ? "*" : "")).ToList();
                     Ok(popB.IndexOf("1,500+ favourites*") == popB.IndexOf("1,000+ favourites") + 1, "a typed-in one shows in its place, checked: " + string.Join(" | ", popB));
-                    app.SetFilters(x => x.Fav = was);
+                    app.SetFilters(x => { x.Fav = 200; x.FavMax = 1000; });
+                    var popC = popularity().OfType<ToolStripMenuItem>().Select(x => x.Text + (x.Checked ? "*" : "")).ToList();
+                    Ok(popC.IndexOf("200 to 1,000 favourites*") == popC.IndexOf("100+ favourites") + 1 && !popC.Contains("1,500+ favourites"), "a range shows in its place, checked: " + string.Join(" | ", popC));
+                    Ok(Settings.Load().Filters.FavMax == 1000, "settings.ini keeps the maximum");
+                    // a preset: a minimum again, no upper limit
+                    popularity().OfType<ToolStripMenuItem>().First(x => x.Text == "50+ favourites").PerformClick();
+                    for (int k = 0; k < 20 && s.Filters.FavMax != 0; k++) { Application.DoEvents(); System.Threading.Thread.Sleep(10); }
+                    Ok(s.Filters.Fav == 50 && s.Filters.FavMax == 0, "picking a preset clears the maximum");
+                    app.SetFilters(x => { x.Fav = was; x.FavMax = 0; });
+                    // Order: a new round, kept in settings.ini
+                    app.SetOrder("fav");
+                    Ok(s.Order == "fav" && Settings.Load().Order == "fav", "Order: Most favourites is saved");
+                    app.SetOrder("shuffle");
+                    Ok(Settings.Load().Order == "shuffle", "and back to Shuffled");
                 }
             }
             finally

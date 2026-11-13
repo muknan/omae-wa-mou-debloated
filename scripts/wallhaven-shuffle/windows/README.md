@@ -33,9 +33,11 @@ toplist, the same one the TV uses. It is one exe with no installer and no .NET S
 - **Shuffle from** is a list of switches: the **Toplist**, **Favourites**, your **playlists** and **folders of your
   own pictures**, in any mix. One round goes through all of them together, with no repeats, and each mix keeps its
   own round (the toplist alone carries on where it was).
+- **Order**: **Shuffled**, or **Most favourites**: the most favourited one not shown yet this round comes next.
+  Changing it starts a new round, so Most favourites begins at the top.
 - **Toplist** picks which toplist: quality (Full HD and up … 4K and up, exactly 4K, 5K, 8K), shape (widescreen,
-  16:9, 16:10, ultrawide, any), period (past day … past year), popularity (minimum favourites: a preset, or
-  **Type one…** for any number), categories (General, Anime, People), an optional topic (a Wallhaven search, like
+  16:9, 16:10, ultrawide, any), period (past day … past year), popularity (favourites on Wallhaven: a preset minimum,
+  or **Type a range…** with At least and At most, e.g. 200 to 1,000; an empty At most is no upper limit), categories (General, Anime, People), an optional topic (a Wallhaven search, like
   *nature* or *night city*) and the largest size. These are the same choices as on the TV and in the remote; the list
   comes from `/api/list` with them.
 - Hotkeys:

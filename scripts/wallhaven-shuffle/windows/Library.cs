@@ -207,7 +207,7 @@ namespace WallhavenShuffle
         {
             var hidden = doc.Hidden;
             var byKey = new Dictionary<string, Wall>(StringComparer.OrdinalIgnoreCase);
-            int maxw = settings.Filters.MaxWidth;
+            int maxw = settings.Filters.MaxWidth, favMax = settings.Filters.FavMax;
             foreach (var key in settings.Sources)
             {
                 if (key != "toplist")
@@ -224,8 +224,36 @@ namespace WallhavenShuffle
             }
             if (ToplistOn)
                 foreach (var w in walls)
-                    if (!hidden.Contains(w.Id) && !byKey.ContainsKey(w.Id) && (maxw == 0 || WidthOf(w) <= maxw)) byKey[w.Id] = w;
+                    if (!hidden.Contains(w.Id) && !byKey.ContainsKey(w.Id) && InToplistLimits(w)) byKey[w.Id] = w;
             return byKey.Values.ToList();
+        }
+
+        // The limits each app applies to the toplist itself: the largest size and the most favourites.
+        bool InToplistLimits(Wall w)
+        {
+            var f = settings.Filters;
+            return (f.MaxWidth == 0 || WidthOf(w) <= f.MaxWidth) && (f.FavMax == 0 || w.Favorites <= f.FavMax);
+        }
+
+        // Order changed (here, from another device, or in settings.ini): a new round, so Most favourites starts at the
+        // most favourited one rather than at whatever this round hasn't shown yet.
+        public void SetOrder(string order)
+        {
+            if (order == settings.Order || !Filters.Orders.Any(r => r[0] == order)) return;
+            StartOrder(order);
+            settings.Save();
+            MarkSettingsDirty();
+            Changed();
+        }
+
+        void StartOrder(string order)
+        {
+            settings.Order = order;
+            rot.LoadRound(new string[0]);
+            WriteList(RoundFile, rot.Round);
+            prepared = null;
+            Log("order: " + Filters.Label(Filters.Orders, order));
+            if (!busy && Pool().Count > 0) PrepareNext();
         }
 
         static int WidthOf(Wall w) { int x; var r = w.Resolution ?? ""; int i = r.IndexOf('x'); return i > 0 && int.TryParse(r.Substring(0, i), out x) ? x : 0; }
@@ -785,7 +813,8 @@ namespace WallhavenShuffle
                 Filters = settings.Filters.Copy(),
                 Every = Math.Max(1, (int)Math.Round(settings.IntervalSeconds / 60.0)),
                 Paused = settings.Paused,
-                Keep = settings.KeepId
+                Keep = settings.KeepId,
+                Order = settings.Order
             };
         }
 
@@ -896,7 +925,9 @@ namespace WallhavenShuffle
             var remote = DeviceSettings.FromDict(s as Dictionary<string, object>);
             if (remote == null || remote.Signature == LocalDeviceSettings().Signature) return;
             bool listChanged = remote.Filters.ListQuery() != settings.Filters.ListQuery();
+            if (remote.Filters.FavMax != settings.Filters.FavMax) prepared = null;
             settings.Filters = remote.Filters;
+            if (remote.Order != settings.Order) StartOrder(remote.Order);
             if (remote.Every * 60 != settings.IntervalSeconds) { settings.IntervalSeconds = remote.Every * 60; nextChange = DateTime.Now.AddSeconds(Math.Min(settings.IntervalSeconds, Math.Max(0, (nextChange - DateTime.Now).TotalSeconds))); }
             if (remote.Paused != settings.Paused) { settings.Paused = remote.Paused; if (!settings.Paused) nextChange = DateTime.Now.AddSeconds(settings.IntervalSeconds); }
             if (remote.Keep != settings.KeepId)
@@ -957,7 +988,7 @@ namespace WallhavenShuffle
         Dictionary<string, object> StatusForRemote(out string thumbFor)
         {
             thumbFor = null;
-            var st = new Dictionary<string, object> { { "app", "pc 2.9" } };
+            var st = new Dictionary<string, object> { { "app", "pc 2.10" } };
             if (current != null)
             {
                 var item = ItemOf(current);
@@ -990,8 +1021,7 @@ namespace WallhavenShuffle
             }
             st["recent"] = recent.ToArray();
             st["local"] = folders.Select(f => (object)new Dictionary<string, object> { { "key", "folder:" + f }, { "name", FolderLabel(f) }, { "count", FolderPool(f).Count }, { "on", IsOn("folder:" + f) } }).ToArray();
-            int maxw = settings.Filters.MaxWidth;
-            st["counts"] = new Dictionary<string, object> { { "toplist", walls.Count(w => maxw == 0 || WidthOf(w) <= maxw) } };
+            st["counts"] = new Dictionary<string, object> { { "toplist", walls.Count(InToplistLimits) } };
             st["list"] = listFor;
             if (!HasSource || settings.Sources.Count == 0) st["note"] = "Nothing to shuffle: turn something on in Shuffle from";
             return st;

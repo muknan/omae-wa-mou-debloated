@@ -1,8 +1,8 @@
 // Shared code for the endpoints: settings, reading one Wallhaven toplist page, and picking the current set.
 // Env vars (all optional): TOP_RANGE, RESOLUTIONS (exact) or ATLEAST (minimum, e.g. 3840x2160) with RATIOS
-// (e.g. 16x9,16x10), MAX_WIDTH (e.g. 3840: skip 5K/8K, which small TVs can't decode comfortably), MIN_FAVORITES,
+// (e.g. 16x9,16x10), MAX_WIDTH (e.g. 3840: skip 5K/8K, which small TVs can't decode comfortably), MIN_FAVORITES, MAX_FAVORITES,
 // CATEGORIES (e.g. 110 = no People), PURITY, SLOT_MINUTES, SET_SIZE, WALLHAVEN_API_KEY.
-// Each can also come from the request (?range=&res=&atleast=&ratios=&maxw=&fav=&cats=&purity=&q=), which wins.
+// Each can also come from the request (?range=&res=&atleast=&ratios=&maxw=&fav=&favmax=&cats=&purity=&q=), which wins.
 // q is an optional topic (Wallhaven's own search, e.g. "nature" or "night city"): the toplist of just those.
 
 // Wallpapers per set (one set per time window). The plugin asks for a set about once an hour and Projectivy keeps
@@ -31,11 +31,14 @@ export function listParams(query = {}) {
   const ratios = /^\d{1,2}x\d{1,2}(,\d{1,2}x\d{1,2})*$/.test(query.ratios || '') ? query.ratios : (process.env.RATIOS || '');
   const maxw = /^\d{1,5}$/.test(query.maxw || '') ? Number(query.maxw) : Number(process.env.MAX_WIDTH || 0); // 0 = no limit
   const fav = /^\d{1,6}$/.test(query.fav || '') ? Math.min(Number(query.fav), 100000) : Number(process.env.MIN_FAVORITES || 0);
+  // favmax = the most favourites (0 = no limit), for wallpapers fewer people have seen; below fav means no limit.
+  const max = /^\d{1,6}$/.test(query.favmax || '') ? Math.min(Number(query.favmax), 100000) : Number(process.env.MAX_FAVORITES || 0);
+  const favmax = max >= fav ? max : 0;
   // Wallhaven's own filter switches, as 0/1 flags: categories = general, anime, people; purity = SFW, sketchy, NSFW
   // (sketchy/NSFW need an API key). Defaults match Wallhaven's site: all categories, SFW only.
   const cats = /^[01]{3}$/.test(query.cats || '') ? query.cats : (process.env.CATEGORIES || '111');
   const purity = /^[01]{3}$/.test(query.purity || '') ? query.purity : (process.env.PURITY || '100');
-  return { range, res, atleast, ratios, maxw, fav, cats, purity, q: normTopic(query.q) };
+  return { range, res, atleast, ratios, maxw, fav, favmax, cats, purity, q: normTopic(query.q) };
 }
 
 // A topic as every app writes it (lower case; letters, digits, spaces and hyphens; single spaces), so one topic is
@@ -50,11 +53,12 @@ export function normTopic(q) {
 // both share one cached copy.
 export const pageQuery = (p) => `range=${p.range}` + (p.atleast ? `&atleast=${p.atleast}` : `&res=${p.res}`) +
   (p.ratios ? `&ratios=${p.ratios}` : '') + `&cats=${p.cats}&purity=${p.purity}` + (p.q ? `&q=${encodeURIComponent(p.q)}` : '');
-// ... plus the filters applied while putting the list together: the CDN cache key of /api/list.
-export const listQuery = (p) => `${pageQuery(p)}&fav=${p.fav}&maxw=${p.maxw}`;
+// ... plus the filters applied while putting the list together: the CDN cache key of /api/list. favmax only when set,
+// so the address without one stays the one the apps have always asked for (and its cached copy).
+export const listQuery = (p) => `${pageQuery(p)}&fav=${p.fav}` + (p.favmax ? `&favmax=${p.favmax}` : '') + `&maxw=${p.maxw}`;
 
-// Keeps a wallpaper that passes the favourites minimum and the width limit.
-export const passes = (p) => (w) => (w.favorites || 0) >= p.fav && (!p.maxw || (w.dimension_x || 0) <= p.maxw);
+// Keeps a wallpaper inside the favourites range and the width limit.
+export const passes = (p) => (w) => (w.favorites || 0) >= p.fav && (!p.favmax || (w.favorites || 0) <= p.favmax) && (!p.maxw || (w.dimension_x || 0) <= p.maxw);
 
 // Our own endpoints, through the CDN (so cached pages and lists come back in milliseconds).
 export function selfUrl(req, path, query) {

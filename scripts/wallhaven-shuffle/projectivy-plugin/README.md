@@ -45,11 +45,14 @@ The settings screen shows the wallpaper on screen with **Keep**, **Previous**, *
 Favourites**, **Add to playlist** and **Never show**, and on the right a short list of rows, each opening a picker made for the remote:
 
 - **Shuffle from**: the toplist, Favourites and your playlists, in any mix (one round through all of them).
+- **Order**: **Shuffled**, or **Most favourites** (the most favourited one not shown yet this round comes next;
+  changing it starts a new round, so it begins at the top).
 - **Hidden wallpapers**: how many are never shown; it opens them as a grid. OK on a tile picks it (a tick), then
   **Show N again** lets those back on every device (**Select all** picks them all).
 - **Change**: how often. Projectivy's own **Update delay** is how often it asks; the plugin changes at its first ask
   after this time has passed, so the TV can't change faster than Projectivy asks. Next skips the wait.
-- **Toplist**: quality, shape, period, popularity (a preset, or **Type one…** for any number), categories, an optional
+- **Toplist**: quality, shape, period, popularity (a preset minimum, or **Type a range…**: At least and At most, e.g.
+  200 to 1,000 favourites for ones fewer people have seen; an empty At most is no upper limit), categories, an optional
   topic, and the largest size (up to 4K is lighter for a TV's decoder). The same choices as the Windows app and the
   remote.
 - **Sync**: **Pair with your phone or PC** shows a 6-digit code; type it in the remote (Devices > Pair a device) or on

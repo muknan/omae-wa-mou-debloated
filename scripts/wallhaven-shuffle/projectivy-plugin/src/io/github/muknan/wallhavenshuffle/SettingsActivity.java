@@ -210,6 +210,7 @@ public final class SettingsActivity extends Activity implements Sync.Listener {
         box.setOrientation(LinearLayout.VERTICAL);
         LinearLayout g1 = group(box, null);
         row(g1, "Shuffle from", () -> sourcesLabel(), v -> pickSources());
+        row(g1, "Order", () -> TvSettings.ORDER.get(Sync.settings(this).order), v -> pickMap("Order", TvSettings.ORDER, Sync.settings(this).order, (s, k) -> s.order = k));
         row(g1, "Change every", () -> TvSettings.everyLabel(Sync.settings(this).every), v -> pickEvery());
         row(g1, "Hidden wallpapers", () -> { int n = Sync.hiddenIds(this).size(); return n == 0 ? "" : String.format(Locale.US, "%,d", n); }, v -> pickHidden());
 
@@ -217,7 +218,7 @@ public final class SettingsActivity extends Activity implements Sync.Listener {
         row(g2, "Quality", () -> TvSettings.QUALITY.get(Sync.settings(this).quality), v -> pickMap("Quality", TvSettings.QUALITY, Sync.settings(this).quality, (s, k) -> s.quality = k));
         row(g2, "Shape", () -> TvSettings.RATIO.get(Sync.settings(this).ratio), v -> pickMap("Shape", TvSettings.RATIO, Sync.settings(this).ratio, (s, k) -> s.ratio = k));
         row(g2, "Period", () -> TvSettings.RANGE.get(Sync.settings(this).range), v -> pickMap("Period", TvSettings.RANGE, Sync.settings(this).range, (s, k) -> s.range = k));
-        row(g2, "Popularity", () -> TvSettings.favLabel(Sync.settings(this).fav), v -> pickFav());
+        row(g2, "Popularity", () -> Sync.settings(this).popularityLabel(), v -> pickFav());
         row(g2, "Categories", () -> Sync.settings(this).catsLabel(), v -> pickCats());
         row(g2, "Topic", () -> Sync.settings(this).q.isEmpty() ? "Any" : Sync.settings(this).q, v -> pickTopic());
         row(g2, "Largest size", () -> TvSettings.maxwLabel(Sync.settings(this).maxw), v -> pickMaxw());
@@ -386,26 +387,77 @@ public final class SettingsActivity extends Activity implements Sync.Listener {
         pickInts("Change every", TvSettings.EVERY, Sync.settings(this).every, TvSettings::everyLabel, (s, v) -> s.every = v);
         if (base >= 90_000) toast("Projectivy asks about every " + Math.round(base / 60000.0) + " min, so the TV can’t change faster than that");
     }
-    // Popularity: the presets, the one in use if it was typed in, and Type one… (the remote's number keys or the keyboard).
+    // Popularity: the presets (a minimum, no upper limit), the one in use if it was typed in (a range too), and Type a
+    // range… (two fields: the remote's number keys or the keyboard).
     private void pickFav() {
-        int cur = Sync.settings(this).fav;
-        java.util.TreeSet<Integer> set = new java.util.TreeSet<>();
-        for (int n : TvSettings.FAVS) set.add(n);
-        set.add(cur);
-        Integer[] values = set.toArray(new Integer[0]);
-        String[] labels = new String[values.length + 1];
+        TvSettings now = Sync.settings(this);
+        List<int[]> all = new ArrayList<>();
+        boolean inList = false;
+        for (int n : TvSettings.FAVS) { all.add(new int[]{n, 0}); inList |= n == now.fav && now.favmax == 0; }
+        if (!inList) all.add(new int[]{now.fav, now.favmax});
+        java.util.Collections.sort(all, (a, b) -> a[0] != b[0] ? Integer.compare(a[0], b[0]) : Integer.compare(a[1] == 0 ? Integer.MAX_VALUE : a[1], b[1] == 0 ? Integer.MAX_VALUE : b[1]));
+        String[] labels = new String[all.size() + 1];
         int at = -1;
-        for (int i = 0; i < values.length; i++) { labels[i] = TvSettings.favLabel(values[i]); if (values[i] == cur) at = i; }
-        labels[values.length] = "Type one…";
+        for (int i = 0; i < all.size(); i++) { labels[i] = TvSettings.favLabel(all.get(i)[0], all.get(i)[1]); if (all.get(i)[0] == now.fav && all.get(i)[1] == now.favmax) at = i; }
+        labels[all.size()] = "Type a range…";
         dialog("Popularity").setSingleChoiceItems(labels, at, (d, i) -> {
             d.dismiss();
-            if (i < values.length) { change((s, v) -> s.fav = v, values[i]); return; }
-            editText("Popularity", cur > 0 ? String.valueOf(cur) : "", "e.g. 75", TvSettings.FAV_NOTE, InputType.TYPE_CLASS_NUMBER, v -> {
-                int n = TvSettings.parseFav(v);
-                if (n < 0) toast(String.format(Locale.US, "A whole number from 0 to %,d", TvSettings.FAV_MAX));
-                else if (n != Sync.settings(this).fav) change((s, x) -> s.fav = x, n);
-            });
+            if (i < all.size()) { int[] r = all.get(i); change((s, v) -> { s.fav = v[0]; s.favmax = v[1]; }, r); return; }
+            editRange(now.fav, now.favmax);
         }).show();
+    }
+
+    // Type a range…: At least and At most side by side, the number keyboard; Save stays off (with the reason under the
+    // fields) until both make a range. Down / the keyboard's Next goes from At least to At most.
+    private void editRange(int fav, int favmax) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(24), dp(8), dp(24), 0);
+        LinearLayout pair = new LinearLayout(this);
+        pair.setOrientation(LinearLayout.HORIZONTAL);
+        EditText[] fields = new EditText[2];
+        String[] names = {"At least", "At most"}, hints = {"0", "No limit"}, values = {fav > 0 ? String.valueOf(fav) : "", favmax > 0 ? String.valueOf(favmax) : ""};
+        for (int i = 0; i < 2; i++) {
+            LinearLayout col = new LinearLayout(this);
+            col.setOrientation(LinearLayout.VERTICAL);
+            TextView l = text(names[i], 15, FG2, false);
+            l.setPadding(dp(4), 0, 0, dp(2));
+            EditText e = new EditText(this);
+            e.setText(values[i]); e.setHint(hints[i]); e.setInputType(InputType.TYPE_CLASS_NUMBER); e.setSingleLine(true); e.setSelectAllOnFocus(true);
+            e.setImeOptions(i == 0 ? android.view.inputmethod.EditorInfo.IME_ACTION_NEXT : android.view.inputmethod.EditorInfo.IME_ACTION_DONE);
+            col.addView(l); col.addView(e);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1);
+            if (i == 0) lp.setMargins(0, 0, dp(16), 0);
+            pair.addView(col, lp);
+            fields[i] = e;
+        }
+        TextView why = text("", 15, 0xFFFF99A4, false);
+        why.setPadding(dp(4), dp(6), 0, 0);
+        box.addView(pair); box.addView(why);
+        AlertDialog d = dialog("Popularity").setMessage(TvSettings.FAV_NOTE).setView(box)
+            .setPositiveButton("Save", (x, w) -> {
+                int[] r = TvSettings.parseRange(fields[0].getText().toString(), fields[1].getText().toString(), null);
+                TvSettings now = Sync.settings(this);
+                if (r != null && (r[0] != now.fav || r[1] != now.favmax)) change((s, v) -> { s.fav = v[0]; s.favmax = v[1]; }, r);
+            }).setNegativeButton("Cancel", null).show();
+        Runnable check = () -> {
+            String[] err = new String[1];
+            boolean ok = TvSettings.parseRange(fields[0].getText().toString(), fields[1].getText().toString(), err) != null;
+            why.setText(ok ? "" : err[0]);
+            d.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(ok);
+        };
+        for (EditText e : fields) e.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) { }
+            @Override public void onTextChanged(CharSequence s, int a, int b, int c) { }
+            @Override public void afterTextChanged(android.text.Editable s) { check.run(); }
+        });
+        // the keyboard's ✓ in At most saves, as the one-field dialogs do (only when Save is on)
+        fields[1].setOnEditorActionListener((v, action, ev) -> {
+            if (action != android.view.inputmethod.EditorInfo.IME_ACTION_DONE) return false;
+            if (d.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled()) d.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
+            return true;
+        });
+        check.run();
     }
     private void pickMaxw() { pickInts("Largest size", TvSettings.MAXW, Sync.settings(this).maxw, TvSettings::maxwLabel, (s, v) -> s.maxw = v); }
 

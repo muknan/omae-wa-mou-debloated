@@ -23,7 +23,7 @@ using Microsoft.Win32;
 
 [assembly: System.Reflection.AssemblyTitle("Wallhaven Shuffle")]
 [assembly: System.Reflection.AssemblyProduct("Wallhaven Shuffle")]
-[assembly: System.Reflection.AssemblyVersion("2.9.0.0")]
+[assembly: System.Reflection.AssemblyVersion("2.10.0.0")]
 
 namespace WallhavenShuffle
 {
@@ -536,6 +536,7 @@ namespace WallhavenShuffle
         public int CacheLimitGB = 10;        // the whole 1-year list is about 7 GB
         public bool LockScreen = false;      // also put each wallpaper on the lock screen
         public List<string> Sources = new List<string> { "toplist" };   // what it shuffles, mixed: toplist, fav, playlist ids, folder:<path>
+        public string Order = "shuffle";     // shuffle, or fav: the most favourited first
         public string SyncKey = "";          // the owner's key, to connect this PC once (cleared after)
         public string KeepId = "";           // "Keep this wallpaper": the one kept on screen (no automatic changes); "" = none
         public string PlaylistsDir = "";     // where playlists are made; empty = "Playlists" next to the cache folder (same drive: linked, not copied)
@@ -591,6 +592,8 @@ namespace WallhavenShuffle
                     case "Shape": s.Filters.Ratio = v; sawFilters = true; break;
                     case "Period": s.Filters.Range = v; sawFilters = true; break;
                     case "Popularity": if (int.TryParse(v, out n)) s.Filters.Fav = n; sawFilters = true; break;
+                    case "PopularityMax": if (int.TryParse(v, out n)) s.Filters.FavMax = n; break;
+                    case "Order": s.Order = Filters.Orders.Any(r => r[0] == v) ? v : "shuffle"; break;
                     case "Categories": s.Filters.Cats = v; sawFilters = true; break;
                     case "Topic": s.Filters.Topic = v; sawFilters = true; break;
                     case "MaxWidth": if (int.TryParse(v, out n)) s.Filters.MaxWidth = n; sawFilters = true; break;
@@ -632,14 +635,15 @@ namespace WallhavenShuffle
                     "PauseFullScreen=" + (PauseFullScreen ? "1" : "0"), "PauseOnBattery=" + (PauseOnBattery ? "1" : "0"),
                     "Paused=" + (Paused ? "1" : "0"), "StartupDone=" + (StartupDone ? "1" : "0"),
                     "# Server: your wallhaven-shuffle deployment. The toplist's filters (also in the app, under Toplist): Quality 1080+ 1440+ 4k+ 4k 5k+ 8k;",
-                    "# Shape 16x9,16x10 16x9 16x10 21x9,32x9 or empty; Period 1d 3d 1w 1M 3M 6M 1y; Popularity = minimum favourites; Categories general/anime/people as 0/1.",
-                    "Server=" + Server, "Quality=" + Filters.Quality, "Shape=" + Filters.Ratio, "Period=" + Filters.Range, "Popularity=" + Filters.Fav,
+                    "# Shape 16x9,16x10 16x9 16x10 21x9,32x9 or empty; Period 1d 3d 1w 1M 3M 6M 1y; Popularity = minimum favourites,",
+                    "# PopularityMax = maximum (0 = no limit); Categories general/anime/people as 0/1. Order: shuffle, or fav (the most favourited first).",
+                    "Server=" + Server, "Quality=" + Filters.Quality, "Shape=" + Filters.Ratio, "Period=" + Filters.Range, "Popularity=" + Filters.Fav, "PopularityMax=" + Filters.FavMax,
                     "Categories=" + Filters.Cats, "Topic=" + Filters.Topic, "MaxWidth=" + Filters.MaxWidth,
                     "OriginalWallpaper=" + OriginalWallpaper, "OriginalStyle=" + OriginalStyle, "OriginalTile=" + OriginalTile,
                     "# Downloaded originals are kept here (empty = a cache folder next to the app), up to CacheLimitGB.",
                     "CacheDir=" + CacheDir, "CacheLimitGB=" + CacheLimitGB, "LockScreen=" + (LockScreen ? "1" : "0"),
                     "# Sources: what it shuffles, separated by | (toplist, fav, a playlist's id, folder:<path>). KeepId: the wallpaper kept on screen.",
-                    "Sources=" + string.Join("|", Sources), "KeepId=" + KeepId,
+                    "Sources=" + string.Join("|", Sources), "Order=" + Order, "KeepId=" + KeepId,
                     "# Playlists are folders in PlaylistsDir (empty = Playlists next to the cache folder: on the same drive, pictures are linked, not copied).",
                     "PlaylistsDir=" + PlaylistsDir,
                     "# FavouritesDir: where favourites go (empty = Pictures\\Wallhaven Favourites).",
@@ -655,7 +659,8 @@ namespace WallhavenShuffle
 
     // ==================================================================================================== rotation
 
-    // What comes next, and the way back. Each wallpaper in the pool is shown once per round, in random order. The
+    // What comes next, and the way back. Each wallpaper in the pool is shown once per round, in random order (or, with
+    // Order: Most favourites, the most favourited first). The
     // round's order is kept (seen.txt), so the counter is a position: Previous counts down, Next counts up, and a new
     // round starts (at 1) only when its first wallpaper is on screen. History (history.txt, the last 100, across
     // rounds) is what Previous walks back through; Next walks forward through it again before new ones come.
@@ -688,8 +693,9 @@ namespace WallhavenShuffle
 
         // The next new one: one not shown yet this round (when all were, the next round begins), and where possible
         // not one of the last few shown, so the end of one round and the start of the next don't repeat. Changes
-        // nothing (it's also used to get the next one ready ahead of time).
-        public string PickNew(IList<string> pool, string current)
+        // nothing (it's also used to get the next one ready ahead of time). With favourites (Order: Most favourites), the
+        // one with the most of those left (ties: the pool's order); without, a random one.
+        public string PickNew(IList<string> pool, string current, Func<string, int> favourites = null)
         {
             if (pool.Count == 0) return null;
             var fresh = pool.Where(id => !inRound.Contains(id) && id != current).ToList();
@@ -699,6 +705,13 @@ namespace WallhavenShuffle
             var recent = new HashSet<string>(History.Skip(Math.Max(0, History.Count - avoid)));
             var notRecent = fresh.Where(id => !recent.Contains(id)).ToList();
             if (notRecent.Count > 0) fresh = notRecent;
+            if (favourites != null)
+            {
+                string best = fresh[0];
+                int most = favourites(best);
+                foreach (var id in fresh) { int n = favourites(id); if (n > most) { most = n; best = id; } }
+                return best;
+            }
             return fresh[rng.Next(fresh.Count)];
         }
 
@@ -1050,16 +1063,24 @@ namespace WallhavenShuffle
             choices("Period", Filters.Ranges, f.Range, (x, v) => x.Range = v);
             sub.AddSubmenu("Popularity", null, m =>
             {
-                // the presets, the one in use if it was typed in, and Type one…
-                foreach (int n in Filters.Favs.Concat(new[] { f.Fav }).Distinct().OrderBy(x => x)) { int k = n; m.Add(Filters.FavLabel(k), null, delegate { SetFilters(x => x.Fav = k); }).Checked = k == f.Fav; }
-                m.AddSeparator();
-                m.Add("Type one…", Glyphs.Edit, delegate
+                // the presets (a minimum, no upper limit), the one in use if it was typed in (a range too), and Type a range…
+                var all = Filters.Favs.Select(n => new[] { n, 0 }).ToList();
+                if (!all.Any(r => r[0] == f.Fav && r[1] == f.FavMax)) all.Add(new[] { f.Fav, f.FavMax });
+                foreach (var r in all.OrderBy(r => r[0]).ThenBy(r => r[1] == 0 ? int.MaxValue : r[1]))
                 {
-                    string t = FluentDialog.Ask(owner, "Popularity", Filters.FavNote, "Save", f.Fav > 0 ? f.Fav.ToString() : "",
-                        v => Filters.ParseFav(v) >= 0 ? null : "A whole number from 0 to " + Filters.FavMax.ToString("N0"));
-                    if (t != null && Filters.ParseFav(t) != settings.Filters.Fav) { int k = Filters.ParseFav(t); SetFilters(x => x.Fav = k); }
+                    int lo = r[0], hi = r[1];
+                    m.Add(Filters.FavLabel(lo, hi), null, delegate { SetFilters(x => { x.Fav = lo; x.FavMax = hi; }); }).Checked = lo == f.Fav && hi == f.FavMax;
+                }
+                m.AddSeparator();
+                m.Add("Type a range…", Glyphs.Edit, delegate
+                {
+                    var t = FluentDialog.AskRange(owner, "Popularity", Filters.FavNote, "Save", new[] { "At least", "At most" },
+                        new[] { f.Fav > 0 ? f.Fav.ToString() : "", f.FavMax > 0 ? f.FavMax.ToString() : "" }, new[] { "0", "No limit" },
+                        (a, b) => { int lo, hi; return Filters.ParseRange(a, b, out lo, out hi); });
+                    int min, max;
+                    if (t != null && Filters.ParseRange(t[0], t[1], out min, out max) == null) SetFilters(x => { x.Fav = min; x.FavMax = max; });
                 });
-            }, Filters.FavLabel(f.Fav));
+            }, f.PopularityLabel);
             sub.AddSubmenu("Categories", null, m =>
             {
                 var names = new[] { "General", "Anime", "People" };
@@ -1100,7 +1121,7 @@ namespace WallhavenShuffle
             var f = settings.Filters.Copy();
             change(f);
             f.Clean();
-            if (f.ListQuery() == settings.Filters.ListQuery() && f.MaxWidth == settings.Filters.MaxWidth) return;
+            if (f.ListQuery() == settings.Filters.ListQuery() && f.MaxWidth == settings.Filters.MaxWidth && f.FavMax == settings.Filters.FavMax) return;
             settings.Filters = f;
             settings.Save();
             Log("toplist: " + f.Summary);
@@ -1192,10 +1213,12 @@ namespace WallhavenShuffle
             }
             catch (Exception) { return; }   // still being saved: next second
             bool sourceChanged = f.ListUrl != settings.ListUrl, positionChanged = f.Position != settings.Position;
-            bool synced = f.IntervalSeconds != settings.IntervalSeconds || f.Paused != settings.Paused || sourceChanged;
+            bool orderChanged = f.Order != settings.Order;
+            bool synced = f.IntervalSeconds != settings.IntervalSeconds || f.Paused != settings.Paused || sourceChanged || orderChanged || f.Filters.FavMax != settings.Filters.FavMax;
             settings.IntervalSeconds = f.IntervalSeconds; settings.Position = f.Position;
             settings.PauseFullScreen = f.PauseFullScreen; settings.PauseOnBattery = f.PauseOnBattery; settings.Paused = f.Paused;
             settings.Server = f.Server; settings.Filters = f.Filters;
+            if (orderChanged) StartOrder(f.Order);
             if (f.SyncKey.Length > 0 && !Paired) { settings.SyncKey = f.SyncKey; KickSync(); }
             settings.CacheLimitGB = f.CacheLimitGB; settings.LockScreen = f.LockScreen; // CacheDir: takes effect on restart
             settings.PlaylistsDir = f.PlaylistsDir;
@@ -1341,7 +1364,8 @@ namespace WallhavenShuffle
         Wall PickNext()
         {
             var pool = Pool();
-            string id = rot.PickNew(pool.Select(w => w.Id).ToList(), current == null ? null : current.Id);
+            var favs = settings.Order == "fav" ? pool.GroupBy(w => w.Id).ToDictionary(g => g.Key, g => g.First().Favorites) : null;
+            string id = rot.PickNew(pool.Select(w => w.Id).ToList(), current == null ? null : current.Id, favs == null ? null : (Func<string, int>)(k => favs[k]));
             return id == null ? null : pool.First(w => w.Id == id);
         }
 
@@ -1898,7 +1922,7 @@ namespace WallhavenShuffle
         readonly RoundButton nextBtn = new RoundButton(Glyphs.Next, 44, "Next wallpaper  (Ctrl+Alt+Shift+→)");
         readonly RoundButton addBtn = new RoundButton(Glyphs.Add, 40, "Add to playlist");
         readonly RoundButton moreBtn = new RoundButton(Glyphs.More, 40, "More");
-        readonly MenuButton source = new MenuButton(), toplist = new MenuButton(), every = new MenuButton();
+        readonly MenuButton source = new MenuButton(), toplist = new MenuButton(), order = new MenuButton(), every = new MenuButton();
         readonly ToolTip tips = new ToolTip();
         readonly FluentMenu moreMenu = new FluentMenu();
         bool addMenuOpen;
@@ -1935,6 +1959,7 @@ namespace WallhavenShuffle
             var card = new Card { Bounds = new Rectangle(Gutter, y, inner, 0) };
             card.AddRow("Shuffle from", source);
             card.AddRow("Toplist", toplist);
+            card.AddRow("Order", order);
             card.AddRow("Change every", every);
             y = card.Bottom + Gutter;
 
@@ -1972,6 +1997,10 @@ namespace WallhavenShuffle
 
             source.Fill += m => app.FillSourceMenu(m, this);
             toplist.Fill += m => app.FillToplistMenu(m, this);
+            order.Fill += m =>
+            {
+                foreach (var row in Filters.Orders) { var r = row; m.Add(r[1], null, delegate { app.SetOrder(r[0]); LoadValues(); }).Checked = r[0] == s.Order; }
+            };
             every.Fill += m =>
             {
                 foreach (int minutes in Filters.Every)
@@ -2066,6 +2095,7 @@ namespace WallhavenShuffle
         {
             source.Text = app.SourcesSummary;
             toplist.Text = s.Filters.Summary;
+            order.Text = Filters.Label(Filters.Orders, s.Order);
             every.Text = IntervalText(s.IntervalSeconds);
         }
 
@@ -2712,12 +2742,23 @@ namespace WallhavenShuffle
         Size content;                        // the dialog's size; applied again once the frame is gone (it would grow by the caption)
 
         Label codeLabel, body;
+        TextBox box2;                        // Type a range…: the second field (At most), next to the first
+        Func<string, string, string> check2;
+
+        // Two number fields side by side, each with its label above: labels, starting values, and what an empty one means.
+        class Pair { public string[] Labels, Initials, Hints; public Func<string, string, string> Check; }
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, string lParam);
+        static void Hint(TextBox b, string text) { b.HandleCreated += delegate { SendMessage(b.Handle, 0x1501, (IntPtr)1, text); }; }   // EM_SETCUEBANNER, shown while focused too
 
         FluentDialog(string title, string message, string okText, string initial, Func<string, string> check, bool asks) : this(title, message, okText, initial, check, asks, null, true) { }
 
-        FluentDialog(string title, string message, string okText, string initial, Func<string, string> check, bool asks, string code, bool withCancel)
+        FluentDialog(string title, string message, string okText, string initial, Func<string, string> check, bool asks, string code, bool withCancel) : this(title, message, okText, initial, check, asks, code, withCancel, null) { }
+
+        FluentDialog(string title, string message, string okText, string initial, Func<string, string> check, bool asks, string code, bool withCancel, Pair pair)
         {
             this.check = check;
+            if (pair != null) check2 = pair.Check;
             AutoScaleMode = AutoScaleMode.None;
             Font = Theme.Body(10f);
             Text = title;
@@ -2743,7 +2784,32 @@ namespace WallhavenShuffle
             y = body.Bottom + k(16);
             Controls.Add(head); Controls.Add(body);
 
-            if (asks)
+            if (asks && pair != null)
+            {
+                int gap = k(12), half = (w - 2 * pad - gap) / 2, top = y;
+                FieldFrame last = null;
+                for (int i = 0; i < 2; i++)
+                {
+                    var label = new Label { Text = pair.Labels[i], ForeColor = Blend(Theme.TextSecondary), AutoSize = false, Bounds = new Rectangle(pad + i * (half + gap), top, half, k(22)) };
+                    var field = new FieldFrame { Bounds = new Rectangle(label.Left, label.Bottom + k(2), half, k(34)) };
+                    var b = new TextBox { BorderStyle = BorderStyle.None, Text = pair.Initials[i] ?? "", Font = Font, BackColor = Blend(Theme.Field), ForeColor = Theme.Text, MaxLength = 7 };
+                    b.Bounds = new Rectangle(k(11), (field.Height - b.PreferredHeight) / 2 + k(1), field.Width - k(22), b.PreferredHeight);
+                    Hint(b, pair.Hints[i]);
+                    field.Controls.Add(b);
+                    var f = field;
+                    b.GotFocus += delegate { f.Invalidate(); };
+                    b.LostFocus += delegate { f.Invalidate(); };
+                    b.TextChanged += delegate { CheckName(false); };
+                    Controls.Add(label); Controls.Add(field);
+                    if (i == 0) box = b; else box2 = b;
+                    last = field;
+                }
+                y = last.Bottom + k(6);
+                problem = new Label { ForeColor = Theme.Dark ? Color.FromArgb(255, 153, 164) : Color.FromArgb(196, 43, 28), AutoSize = false, Bounds = new Rectangle(pad, y, w - 2 * pad, k(20)) };
+                Controls.Add(problem);
+                y = problem.Bottom + k(12);
+            }
+            else if (asks)
             {
                 // A Windows 11 text box: a rounded field, with the accent line at its foot while it has the focus.
                 var field = new FieldFrame { Bounds = new Rectangle(pad, y, w - 2 * pad, k(34)) };
@@ -2780,8 +2846,8 @@ namespace WallhavenShuffle
         // Live: the reason shown, the button greyed. On Enter / the button: only a good name is taken.
         bool CheckName(bool final)
         {
-            string why = check == null ? null : check(box.Text);
-            bool empty = box.Text.Trim().Length == 0;
+            string why = check2 != null ? check2(box.Text, box2.Text) : check == null ? null : check(box.Text);
+            bool empty = box.Text.Trim().Length == 0 && (box2 == null || box2.Text.Trim().Length == 0);
             problem.Text = why != null && (!empty || final) ? why : "";
             ok.Enabled = why == null;
             return why == null;
@@ -2817,6 +2883,7 @@ namespace WallhavenShuffle
 
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
+            if (keyData == Keys.Enter && box2 != null && box.Focused) { box2.Focus(); box2.SelectAll(); return true; }   // At least, then At most
             if (keyData == Keys.Enter) { if (ActiveControl == cancel) DialogResult = DialogResult.Cancel; else Accept(); return true; }
             if (keyData == Keys.Escape) { DialogResult = DialogResult.Cancel; return true; }
             return base.ProcessCmdKey(ref msg, keyData);
@@ -2837,6 +2904,14 @@ namespace WallhavenShuffle
         {
             using (var d = new FluentDialog(title, message, okText, initial, check, true))
                 return d.ShowOver(owner) == DialogResult.OK ? d.box.Text.Trim() : null;
+        }
+
+        // Two fields side by side (Popularity's At least and At most): both texts (trimmed), or null if cancelled.
+        public static string[] AskRange(Form owner, string title, string message, string okText, string[] labels, string[] initials, string[] hints, Func<string, string, string> check)
+        {
+            var pair = new Pair { Labels = labels, Initials = initials, Hints = hints, Check = check };
+            using (var d = new FluentDialog(title, message, okText, null, null, true, null, true, pair))
+                return d.ShowOver(owner) == DialogResult.OK ? new[] { d.box.Text.Trim(), d.box2.Text.Trim() } : null;
         }
 
         public static bool Confirm(Form owner, string title, string message, string okText) { return Confirm(owner, title, message, okText, true); }
