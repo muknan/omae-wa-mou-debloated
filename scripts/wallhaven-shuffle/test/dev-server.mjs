@@ -3,15 +3,36 @@
 // that show wallpapers from that list and follow the remote's commands.
 //   LIST_ORIGIN=https://<your-project>.vercel.app node test/dev-server.mjs --demo     # then open the printed link
 //   DEMO_AWAY=1 … --demo     # the pretend TV is in another app (not on its home screen)
+//   LOCAL_LIST=1 … --demo    # Most favourited lists (and, without LIST_ORIGIN, all lists) from this checkout, straight
+//                            # to Wallhaven, pages kept in memory the way the CDN keeps them: for list changes not deployed yet
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { handle, memoryStore, listQueryFor } from '../lib/sync.js';
+import { handle, memoryStore, listQueryFor, mostfavQueryFor } from '../lib/sync.js';
+import listHandler from '../api/list.js';
+import pageHandler from '../api/page.js';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 const port = Number(process.env.PORT) || 8787;
 const origin = (process.env.LIST_ORIGIN || '').replace(/\/$/, '');
+const localList = process.env.LOCAL_LIST === '1';
+const memo = new Map();   // LOCAL_LIST: good answers, as the CDN would keep them
+
+// Runs a Vercel handler (LOCAL_LIST) and answers with what it says; a 200 is kept and later served as a cache hit.
+async function local(handler, url, req, res) {
+  const key = url.pathname + url.search;
+  const hit = memo.get(key);
+  if (hit) { res.setHeader('content-type', 'application/json'); res.setHeader('x-vercel-cache', 'HIT'); return res.end(hit); }
+  if (req.headers['x-cached-only'] === '1') { res.statusCode = 404; return res.end('{"error":"not cached"}'); }
+  const out = await new Promise((resolve) => {
+    const vres = { setHeader() {}, status(c) { this.c = c; return this; }, json(j) { resolve({ c: this.c, body: JSON.stringify(j), j }); } };
+    handler({ query: Object.fromEntries(url.searchParams), headers: { host: req.headers.host } }, vres);
+  });
+  if (out.c === 200 && (url.pathname === '/api/page' || out.j.complete)) memo.set(key, out.body);
+  res.statusCode = out.c; res.setHeader('content-type', 'application/json');
+  return res.end(out.body);
+}
 process.env.SYNC_KEY ||= 'dev-key';
 const store = memoryStore();
 const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
@@ -36,6 +57,9 @@ const server = http.createServer(async (req, res) => {
     const vres = { setHeader: (k, v) => res.setHeader(k, v), status(c) { res.statusCode = c; return this; }, json(j) { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(j)); } };
     return handle(store, { method: req.method, query, headers: req.headers, body }, vres);
   }
+  // (the toplist still comes from LIST_ORIGIN when set: a cold one is ~190 pages, minutes at Wallhaven's pace)
+  if (localList && url.pathname === '/api/list' && (url.searchParams.get('sort') === 'fav' || !origin)) return local(listHandler, url, req, res);
+  if (localList && url.pathname === '/api/page') return local(pageHandler, url, req, res);
   if (url.pathname === '/api/list' || url.pathname === '/_vercel/image') {
     // the list, and the screen-sized pictures (the deployment's image resizing), from the real deployment
     if (!origin) { res.statusCode = 502; return res.end('{"error":"set LIST_ORIGIN to use the list"}'); }
@@ -76,6 +100,16 @@ server.listen(port, async () => {
   // Two pretend devices: each shows a wallpaper and follows next / prev / show, as the real apps do: they say a
   // command arrived (ack), the PC changes a second later, the TV when "Projectivy" listens again (30 s after its
   // last change), and both say what Next would show (up).
+  const favLists = new Map();   // query -> { count, of } once the list has come back
+  const favList = (q) => {
+    if (!favLists.has(q)) {
+      favLists.set(q, null);
+      fetch(`http://localhost:${port}/api/list?${q}`, { signal: AbortSignal.timeout(300e3) }).then((r) => r.json())
+        .then((j) => { if (Array.isArray(j.items)) favLists.set(q, { count: j.items.length, of: j.capped ? j.in_range : undefined }); else favLists.delete(q); })
+        .catch(() => favLists.delete(q));
+    }
+    return favLists.get(q);
+  };
   for (const [token, kind] of [[tv.token, 'tv'], [pc.token, 'pc']]) {
     const me = { v: -1, cs: 0, recent: [], cur: null, shown: 37, next: 0, doc: null, up: null, ack: 0, eta: 0, todo: null, changedAt: 0 };
     const randomOne = () => ({ ...pool[Math.floor(Math.random() * pool.length)] });
@@ -90,9 +124,11 @@ server.listen(port, async () => {
       me.held = held; me.every = set?.every;
       if (me.todo && Date.now() >= me.eta) { me.todo(); me.todo = null; me.eta = 0; me.next = Date.now() + everyMs; }
       else if (!me.todo && set && !set.paused && !set.keep && Date.now() > me.next) { showIt(me.up); me.next = Date.now() + everyMs; }
+      const listFav = set ? mostfavQueryFor(set) : '', fl = set?.sources?.includes('mostfav') ? favList(listFav) : null;
       const r = await sync('poll', { token, body: { v: me.v, cs: me.cs, st: {
         up: me.up, ack: { seq: me.ack, eta: me.eta }, paused: !!set?.paused, kept: !!set?.keep, every: set?.every, t: Date.now(), app: `${kind} dev`, away: kind === 'tv' && !!process.env.DEMO_AWAY || undefined, cur: me.cur, shown: me.shown, total: pool.length, next: set && !set.paused && !set.keep ? me.next : 0,
-        recent: me.recent, counts: { toplist: pool.length }, list: set ? listQueryFor(set.filters) : '', base: kind === 'tv' ? 60 : undefined,
+        recent: me.recent, counts: { toplist: pool.length, ...(fl ? { mostfav: fl.count, mostfavOf: fl.of } : {}) }, list: set ? listQueryFor(set.filters) : '',
+        ...(fl ? { listFav } : {}), base: kind === 'tv' ? 60 : undefined,
         local: kind === 'pc' ? [{ key: 'folder:D:\\Photos\\Holidays', name: 'Holidays', count: 48, on: false }] : undefined,
       } } });
       if (r.doc) { me.doc = r.doc; me.v = r.v; }

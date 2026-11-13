@@ -66,7 +66,8 @@ public final class ShuffleService extends Service {
 
     // ---- what to show
 
-    /** The wallpapers this TV shuffles now: its sources mixed, Hidden left out, the width and favourites limits on the toplist. */
+    /** The wallpapers this TV shuffles now: its sources mixed, Hidden left out, the width limit on the lists and
+     *  Most favourited's range on its list. */
     static List<Shuffle.Item> pool(Context c, TvSettings s) {
         Set<String> hidden = Sync.hiddenIds(c);
         Map<String, Shuffle.Item> out = new LinkedHashMap<>();
@@ -74,6 +75,9 @@ public final class ShuffleService extends Service {
             if (src.equals("toplist")) {
                 for (Shuffle.Item w : ListStore.pool(c))
                     if (s.inLimits(w) && !hidden.contains(w.id)) out.put(w.id, w);
+            } else if (src.equals("mostfav")) {
+                for (Shuffle.Item w : ListStore.favPool(c))
+                    if (s.inMostfav(w) && !hidden.contains(w.id) && !out.containsKey(w.id)) out.put(w.id, w);
             } else {
                 for (Shuffle.Item w : Sync.items(c, src)) if (!hidden.contains(w.id)) out.put(w.id, w);
             }
@@ -118,7 +122,7 @@ public final class ShuffleService extends Service {
         List<Shuffle.Item> pool = pool(c, s);
         if (pool.isEmpty()) { p.edit().putBoolean("skip_wait", false).apply(); return null; }
         Shuffle sh = new Shuffle(Shuffle.split(p.getString("round", "")), Shuffle.split(p.getString("history", "")), new java.util.Random(seed(p)));
-        Shuffle.Item w = sh.next(pool, s.order.equals("fav"));
+        Shuffle.Item w = sh.next(pool, s.mostFirst());
         p.edit().putString("round", sh.roundState()).putString("history", sh.historyState()).putInt("shown", sh.shownThisRound(pool))
             .putInt("total", pool.size()).putBoolean("skip_wait", false).putLong("seed", new SecureRandom().nextLong() | 1).apply();
         Log.i(ListStore.TAG, "wallpaper " + w.id + " - " + sh.shownThisRound(pool) + " of " + pool.size());
@@ -202,7 +206,7 @@ public final class ShuffleService extends Service {
         SharedPreferences p = ListStore.prefs(c);
         try { String pending = p.getString("pending_json", ""); if (!pending.isEmpty()) return Sync.item(new JSONObject(pending)); } catch (Exception ignored) { }
         if (pool.isEmpty()) return null;
-        return new Shuffle(Shuffle.split(p.getString("round", "")), Shuffle.split(p.getString("history", "")), new java.util.Random(seed(p))).next(pool, Sync.settings(c).order.equals("fav"));
+        return new Shuffle(Shuffle.split(p.getString("round", "")), Shuffle.split(p.getString("history", "")), new java.util.Random(seed(p))).next(pool, Sync.settings(c).mostFirst());
     }
 
     // The pick's random seed: the same for upcoming() and next() until a wallpaper is picked, then a new one.
@@ -256,6 +260,7 @@ public final class ShuffleService extends Service {
         String id = p.getString("current", "");
         if (id.isEmpty()) return null;
         for (Shuffle.Item w : ListStore.pool(c)) if (w.id.equals(id)) return w;
+        for (Shuffle.Item w : ListStore.favPool(c)) if (w.id.equals(id)) return w;
         return null;
     }
 
@@ -287,11 +292,21 @@ public final class ShuffleService extends Service {
             st.put("ack", new JSONObject().put("seq", p.getInt("ack_seq", 0)).put("eta", p.getLong("change_eta", 0)));
             int toplist = 0;
             for (Shuffle.Item w : ListStore.pool(c)) if (s.inLimits(w)) toplist++;
-            st.put("counts", new JSONObject().put("toplist", toplist));
+            JSONObject counts = new JSONObject().put("toplist", toplist);
+            // Most favourited's, once its list for the range in use is here (the remote waits for listFav to match)
+            String favFor = p.getString(ListStore.MOSTFAV.forKey(), "");
+            if (s.sources.contains("mostfav") && favFor.equals(s.mostfavQuery())) {
+                int n = 0;
+                for (Shuffle.Item w : ListStore.favPool(c)) if (s.inMostfav(w)) n++;
+                counts.put("mostfav", n);
+                if (p.getInt("fav_of", 0) > 0) counts.put("mostfavOf", p.getInt("fav_of", 0));
+                st.put("listFav", favFor);
+            }
+            st.put("counts", counts);
             st.put("list", p.getString("list_for", ""));
             st.put("base", base / 1000);
             if (s.sources.isEmpty()) st.put("note", "Nothing to shuffle: turn something on in Shuffle from");
-            else if (pool.isEmpty()) st.put("note", s.sources.contains("toplist") ? "Getting the list…" : "Those playlists are empty");
+            else if (pool.isEmpty()) st.put("note", s.sources.contains("toplist") || s.sources.contains("mostfav") ? "Getting the list…" : "Those playlists are empty");
         } catch (Exception e) { Log.w(ListStore.TAG, "status: " + e); }
         return st;
     }

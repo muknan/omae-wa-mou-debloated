@@ -34,7 +34,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * is open), with one small request; the playlists come down only when they changed.
  */
 final class Sync {
-    static final String VERSION = "1.20";
+    static final String VERSION = "1.21";
 
     // ---- settings (always local; mirrored to the service when paired)
 
@@ -71,14 +71,17 @@ final class Sync {
     private static void settingsChanged(Context c, TvSettings a, TvSettings b) {
         if (!a.listQuery().equals(b.listQuery()) || !ListStore.server(c).isEmpty() && !ListStore.prefs(c).getString("list_for", "").equals(b.listQuery()))
             ListStore.refreshNow(c, null);
-        boolean newPool = !a.sources.equals(b.sources) || a.maxw != b.maxw || a.favmax != b.favmax;
-        // A new order starts a new round, so Most favourites begins at the most favourited one (as on the PC).
-        if (!a.order.equals(b.order)) ListStore.prefs(c).edit().putString("round", "").apply();
+        if (b.sources.contains("mostfav") && (!a.mostfavQuery().equals(b.mostfavQuery()) || !a.sources.contains("mostfav")) && !ListStore.server(c).isEmpty())
+            ListStore.refreshNow(c, ListStore.MOSTFAV, null);
+        boolean range = a.mfFav != b.mfFav || a.mfFavmax != b.mfFavmax, order = !a.mfOrder.equals(b.mfOrder);
+        boolean newPool = !a.sources.equals(b.sources) || a.maxw != b.maxw || (range && b.sources.contains("mostfav"));
+        // A new order starts a new round, so Most first begins at the most favourited one (as on the PC).
+        if (order && b.sources.contains("mostfav")) ListStore.prefs(c).edit().putString("round", "").apply();
         // Resuming, or no longer keeping one, starts the interval again from now (as on the PC): the next change is a
         // whole "Change every" away, not due at once because the last one was long ago.
         if ((a.paused && !b.paused) || (!a.keep.isEmpty() && b.keep.isEmpty())) ListStore.prefs(c).edit().putLong("changed_at", System.currentTimeMillis()).apply();
         if (newPool && !b.paused && b.keep.isEmpty()) ShuffleService.skipWait(c);
-        if (newPool || a.paused != b.paused || !a.keep.equals(b.keep) || a.every != b.every || !a.order.equals(b.order)) statusChanged(c);
+        if (newPool || a.paused != b.paused || !a.keep.equals(b.keep) || a.every != b.every || order || range) statusChanged(c);
         notifyListeners();
     }
 
@@ -109,9 +112,10 @@ final class Sync {
         JSONObject f = o.optJSONObject("filters");
         if (f != null) {
             s.quality = f.optString("quality", s.quality); s.ratio = f.optString("ratio", s.ratio); s.range = f.optString("range", s.range);
-            s.cats = f.optString("cats", s.cats); s.q = f.optString("q", ""); s.fav = f.optInt("fav", s.fav); s.favmax = f.optInt("favmax", 0); s.maxw = f.optInt("maxw", s.maxw);
+            s.cats = f.optString("cats", s.cats); s.q = f.optString("q", ""); s.fav = f.optInt("fav", s.fav); s.maxw = f.optInt("maxw", s.maxw);
         }
-        s.order = o.optString("order", "shuffle");
+        JSONObject m = o.optJSONObject("mostfav");
+        if (m != null) { s.mfFav = m.optInt("fav", 250); s.mfFavmax = m.optInt("favmax", 0); s.mfOrder = m.optString("order", "top"); }
         s.every = o.optInt("every", s.every);
         s.paused = o.optBoolean("paused", false);
         s.keep = o.optString("keep", "");
@@ -121,8 +125,9 @@ final class Sync {
     static JSONObject toJson(TvSettings s) {
         try {
             JSONObject f = new JSONObject().put("quality", s.quality).put("ratio", s.ratio).put("range", s.range).put("cats", s.cats)
-                .put("q", s.q).put("fav", s.fav).put("favmax", s.favmax).put("maxw", s.maxw);
-            return new JSONObject().put("sources", new JSONArray(s.sources)).put("filters", f).put("order", s.order).put("every", s.every)
+                .put("q", s.q).put("fav", s.fav).put("maxw", s.maxw);
+            JSONObject m = new JSONObject().put("fav", s.mfFav).put("favmax", s.mfFavmax).put("order", s.mfOrder);
+            return new JSONObject().put("sources", new JSONArray(s.sources)).put("filters", f).put("mostfav", m).put("every", s.every)
                 .put("paused", s.paused).put("keep", s.keep);
         } catch (Exception e) { throw new IllegalStateException(e); }
     }
@@ -439,7 +444,7 @@ final class Sync {
             case "next": ShuffleService.skipWait(c); break;
             case "prev": ShuffleService.previous(c); break;
             case "show": { Shuffle.Item w = item(cmd.optJSONObject("item")); if (w != null) ShuffleService.show(c, w); break; }
-            case "refresh": ListStore.refreshNow(c, null); break;
+            case "refresh": ListStore.refreshNow(c, null); if (settings(c).sources.contains("mostfav")) ListStore.refreshNow(c, ListStore.MOSTFAV, null); break;
             default: break;
         }
     }

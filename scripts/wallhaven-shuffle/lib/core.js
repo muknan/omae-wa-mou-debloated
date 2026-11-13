@@ -2,8 +2,9 @@
 // Env vars (all optional): TOP_RANGE, RESOLUTIONS (exact) or ATLEAST (minimum, e.g. 3840x2160) with RATIOS
 // (e.g. 16x9,16x10), MAX_WIDTH (e.g. 3840: skip 5K/8K, which small TVs can't decode comfortably), MIN_FAVORITES, MAX_FAVORITES,
 // CATEGORIES (e.g. 110 = no People), PURITY, SLOT_MINUTES, SET_SIZE, WALLHAVEN_API_KEY.
-// Each can also come from the request (?range=&res=&atleast=&ratios=&maxw=&fav=&favmax=&cats=&purity=&q=), which wins.
+// Each can also come from the request (?sort=&range=&res=&atleast=&ratios=&maxw=&fav=&favmax=&cats=&purity=&q=), which wins.
 // q is an optional topic (Wallhaven's own search, e.g. "nature" or "night city"): the toplist of just those.
+// sort=fav is "Most favourited": all of Wallhaven, most favourited first (no period), instead of the toplist.
 
 // Wallpapers per set (one set per time window). The plugin asks for a set about once an hour and Projectivy keeps
 // it for that hour, showing a random one from it every "Update delay" minutes (not in order: random picks, with
@@ -38,7 +39,8 @@ export function listParams(query = {}) {
   // (sketchy/NSFW need an API key). Defaults match Wallhaven's site: all categories, SFW only.
   const cats = /^[01]{3}$/.test(query.cats || '') ? query.cats : (process.env.CATEGORIES || '111');
   const purity = /^[01]{3}$/.test(query.purity || '') ? query.purity : (process.env.PURITY || '100');
-  return { range, res, atleast, ratios, maxw, fav, favmax, cats, purity, q: normTopic(query.q) };
+  const sort = query.sort === 'fav' ? 'fav' : 'toplist';
+  return { sort, range, res, atleast, ratios, maxw, fav, favmax, cats, purity, q: normTopic(query.q) };
 }
 
 // A topic as every app writes it (lower case; letters, digits, spaces and hyphens; single spaces), so one topic is
@@ -51,7 +53,8 @@ export function normTopic(q) {
 // What Wallhaven is asked for: the CDN cache key of /api/page. Commas stay as they are (res and ratios are checked
 // to be digits, x and commas), so the address is exactly the one people type, e.g. the Windows app's ListUrl, and
 // both share one cached copy.
-export const pageQuery = (p) => `range=${p.range}` + (p.atleast ? `&atleast=${p.atleast}` : `&res=${p.res}`) +
+// Most favourited has no period: sort=fav takes its place, so toplist addresses stay the ones they always were.
+export const pageQuery = (p) => (p.sort === 'fav' ? 'sort=fav' : `range=${p.range}`) + (p.atleast ? `&atleast=${p.atleast}` : `&res=${p.res}`) +
   (p.ratios ? `&ratios=${p.ratios}` : '') + `&cats=${p.cats}&purity=${p.purity}` + (p.q ? `&q=${encodeURIComponent(p.q)}` : '');
 // ... plus the filters applied while putting the list together: the CDN cache key of /api/list. favmax only when set,
 // so the address without one stays the one the apps have always asked for (and its cached copy).
@@ -83,8 +86,8 @@ export async function getJson(url, ms, headers = {}) {
 // so Wallhaven's 45 requests/minute limit is shared too. Each attempt gets 15 s: a stalled Wallhaven must not
 // hold the function until Vercel kills it.
 export async function fetchToplistPage(p, page) {
-  const url = 'https://wallhaven.cc/api/v1/search?sorting=toplist' +
-    `&topRange=${p.range}` + (p.atleast ? `&atleast=${p.atleast}` : `&resolutions=${encodeURIComponent(p.res)}`) +
+  const url = 'https://wallhaven.cc/api/v1/search?' + (p.sort === 'fav' ? 'sorting=favorites&order=desc' : `sorting=toplist&topRange=${p.range}`) +
+    (p.atleast ? `&atleast=${p.atleast}` : `&resolutions=${encodeURIComponent(p.res)}`) +
     (p.ratios ? `&ratios=${encodeURIComponent(p.ratios)}` : '') + `&categories=${p.cats}&purity=${p.purity}&page=${page}` +
     (p.q ? `&q=${encodeURIComponent(p.q)}` : '') + (API_KEY ? `&apikey=${API_KEY}` : '');
   for (let attempt = 0; ; attempt++) {

@@ -110,6 +110,7 @@ namespace WallhavenShuffle
             var list = new List<SourceInfo>
             {
                 new SourceInfo { Key = "toplist", Name = "Toplist", Glyph = Glyphs.Globe, Count = walls.Count },
+                new SourceInfo { Key = "mostfav", Name = "Most favourited", Glyph = Glyphs.Star, Count = favWalls.Count > 0 || favFor.Length > 0 ? favWalls.Count(InMostFav) : -1 },
                 new SourceInfo { Key = "fav", Name = "Favourites", Folder = favouritesDir, Glyph = Glyphs.Heart, Count = doc.Find("fav").Items.Count }
             };
             foreach (var p in doc.Own)
@@ -121,6 +122,7 @@ namespace WallhavenShuffle
         public SourceInfo SourceByKey(string key) { return Sources().FirstOrDefault(x => x.Key == key); }
         public bool IsOn(string key) { return settings.Sources.Contains(key); }
         bool ToplistOn { get { return IsOn("toplist"); } }
+        bool MostFavOn { get { return IsOn("mostfav"); } }
         bool OnlyToplist { get { return settings.Sources.Count == 1 && ToplistOn; } }
 
         public string SourceFolder(string key) { var s = SourceByKey(key); return s == null ? null : s.Folder; }
@@ -151,7 +153,7 @@ namespace WallhavenShuffle
             {
                 foreach (var k in settings.Sources)
                 {
-                    if (k == "toplist") { if (!string.IsNullOrEmpty(settings.Server)) return true; continue; }
+                    if (k == "toplist" || k == "mostfav") { if (!string.IsNullOrEmpty(settings.Server)) return true; continue; }
                     string f = SourceFolder(k);
                     if (f != null && (Directory.Exists(f) || k == "fav" || !k.StartsWith("folder:"))) return true;
                 }
@@ -207,10 +209,9 @@ namespace WallhavenShuffle
         {
             var hidden = doc.Hidden;
             var byKey = new Dictionary<string, Wall>(StringComparer.OrdinalIgnoreCase);
-            int maxw = settings.Filters.MaxWidth, favMax = settings.Filters.FavMax;
             foreach (var key in settings.Sources)
             {
-                if (key != "toplist")
+                if (key != "toplist" && key != "mostfav")
                 {
                     string folder = SourceFolder(key);
                     if (folder == null) continue;
@@ -225,35 +226,24 @@ namespace WallhavenShuffle
             if (ToplistOn)
                 foreach (var w in walls)
                     if (!hidden.Contains(w.Id) && !byKey.ContainsKey(w.Id) && InToplistLimits(w)) byKey[w.Id] = w;
+            if (MostFavOn)
+                foreach (var w in favWalls)
+                    if (!hidden.Contains(w.Id) && !byKey.ContainsKey(w.Id) && InMostFav(w)) byKey[w.Id] = w;
             return byKey.Values.ToList();
         }
 
-        // The limits each app applies to the toplist itself: the largest size and the most favourites.
+        // The limit each app applies to the lists itself: the largest size.
         bool InToplistLimits(Wall w)
         {
             var f = settings.Filters;
-            return (f.MaxWidth == 0 || WidthOf(w) <= f.MaxWidth) && (f.FavMax == 0 || w.Favorites <= f.FavMax);
+            return f.MaxWidth == 0 || WidthOf(w) <= f.MaxWidth;
         }
 
-        // Order changed (here, from another device, or in settings.ini): a new round, so Most favourites starts at the
-        // most favourited one rather than at whatever this round hasn't shown yet.
-        public void SetOrder(string order)
+        // In Most favourited's range as it is now (a narrower range applies at once; a wider one waits for its list).
+        bool InMostFav(Wall w)
         {
-            if (order == settings.Order || !Filters.Orders.Any(r => r[0] == order)) return;
-            StartOrder(order);
-            settings.Save();
-            MarkSettingsDirty();
-            Changed();
-        }
-
-        void StartOrder(string order)
-        {
-            settings.Order = order;
-            rot.LoadRound(new string[0]);
-            WriteList(RoundFile, rot.Round);
-            prepared = null;
-            Log("order: " + Filters.Label(Filters.Orders, order));
-            if (!busy && Pool().Count > 0) PrepareNext();
+            var m = settings.MostFav;
+            return InToplistLimits(w) && w.Favorites >= m.Fav && (m.FavMax == 0 || w.Favorites <= m.FavMax);
         }
 
         static int WidthOf(Wall w) { int x; var r = w.Resolution ?? ""; int i = r.IndexOf('x'); return i > 0 && int.TryParse(r.Substring(0, i), out x) ? x : 0; }
@@ -270,6 +260,7 @@ namespace WallhavenShuffle
                 if (Directory.Exists(folder))
                 {
                     var byId = new Dictionary<string, Wall>();
+                    foreach (var w in favWalls) byId[w.Id] = w;
                     foreach (var w in walls) byId[w.Id] = w;
                     foreach (var f in new DirectoryInfo(folder).EnumerateFiles())
                     {
@@ -542,7 +533,7 @@ namespace WallhavenShuffle
             if (current != null && current.IsLocal)
             {
                 string moved = map(current.LocalPath);
-                if (moved != current.LocalPath) current = Wall.Local(moved, walls.FirstOrDefault(x => x.Id == Path.GetFileNameWithoutExtension(moved)));
+                if (moved != current.LocalPath) current = Wall.Local(moved, Listed(Path.GetFileNameWithoutExtension(moved)));
             }
             folderCache.Clear();
         }
@@ -648,7 +639,8 @@ namespace WallhavenShuffle
             var snap = doc.Copy();
             var names = new Dictionary<string, string>(folderNames);
             var files = folderFiles.ToDictionary(kv => kv.Key, kv => new HashSet<string>(kv.Value));
-            var meta = walls.ToDictionary(w => w.Id, w => w);
+            var meta = new Dictionary<string, Wall>();
+            foreach (var w in favWalls.Concat(walls)) meta[w.Id] = w;
             string root = PlaylistsRoot, fav = favouritesDir;
             ThreadPool.QueueUserWorkItem(delegate
             {
@@ -814,7 +806,7 @@ namespace WallhavenShuffle
                 Every = Math.Max(1, (int)Math.Round(settings.IntervalSeconds / 60.0)),
                 Paused = settings.Paused,
                 Keep = settings.KeepId,
-                Order = settings.Order
+                MostFav = settings.MostFav.Copy()
             };
         }
 
@@ -925,9 +917,8 @@ namespace WallhavenShuffle
             var remote = DeviceSettings.FromDict(s as Dictionary<string, object>);
             if (remote == null || remote.Signature == LocalDeviceSettings().Signature) return;
             bool listChanged = remote.Filters.ListQuery() != settings.Filters.ListQuery();
-            if (remote.Filters.FavMax != settings.Filters.FavMax) prepared = null;
             settings.Filters = remote.Filters;
-            if (remote.Order != settings.Order) StartOrder(remote.Order);
+            if (!remote.MostFav.Same(settings.MostFav)) ApplyMostFav(remote.MostFav);
             if (remote.Every * 60 != settings.IntervalSeconds) { settings.IntervalSeconds = remote.Every * 60; nextChange = DateTime.Now.AddSeconds(Math.Min(settings.IntervalSeconds, Math.Max(0, (nextChange - DateTime.Now).TotalSeconds))); }
             if (remote.Paused != settings.Paused) { settings.Paused = remote.Paused; if (!settings.Paused) nextChange = DateTime.Now.AddSeconds(settings.IntervalSeconds); }
             if (remote.Keep != settings.KeepId)
@@ -937,9 +928,9 @@ namespace WallhavenShuffle
             }
             settings.Save();
             Log("settings changed on another device");
-            var next = remote.Sources.Where(k => k == "toplist" || doc.Find(k) != null).ToList();
+            var next = remote.Sources.Where(k => k == "toplist" || k == "mostfav" || doc.Find(k) != null).ToList();
             next.AddRange(settings.Sources.Where(k => k.StartsWith("folder:")));
-            if (listChanged) { nextListRefresh = DateTime.MinValue; prepared = null; }
+            if (listChanged) { nextListRefresh = DateTime.MinValue; nextFavRefresh = DateTime.MinValue; prepared = null; }
             SetSources(next, false);
             if (window != null && !window.IsDisposed) window.LoadValues();
         }
@@ -957,7 +948,7 @@ namespace WallhavenShuffle
             {
                 case "next": Next(from); break;
                 case "prev": Log("previous (" + from + ")"); Previous(); break;
-                case "refresh": nextListRefresh = DateTime.MinValue; Log("a fresh list (asked from the remote)"); break;
+                case "refresh": nextListRefresh = DateTime.MinValue; nextFavRefresh = DateTime.MinValue; Log("a fresh list (asked from the remote)"); break;
                 case "local":
                 {
                     object key, on;
@@ -974,7 +965,7 @@ namespace WallhavenShuffle
                     if (d == null) break;
                     var it = SyncDoc.MakeItem(Convert.ToString(d["id"]), d.ContainsKey("ext") ? Convert.ToString(d["ext"]) : "jpg", d.ContainsKey("res") ? Convert.ToString(d["res"]) : "", 0);
                     if (it == null) break;
-                    var w = walls.FirstOrDefault(x => x.Id == it.Id) ?? new Wall { Id = it.Id, Image = it.Image, Page = it.Page, Resolution = it.Res, Favorites = -1, Extension = "." + it.Ext };
+                    var w = Listed(it.Id) ?? new Wall { Id = it.Id, Image = it.Image, Page = it.Page, Resolution = it.Res, Favorites = -1, Extension = "." + it.Ext };
                     if (busy) break;
                     ReleaseKeep("another wallpaper was sent");
                     Log("showing " + it.Id + " (sent from another device)");
@@ -988,7 +979,7 @@ namespace WallhavenShuffle
         Dictionary<string, object> StatusForRemote(out string thumbFor)
         {
             thumbFor = null;
-            var st = new Dictionary<string, object> { { "app", "pc 2.10" } };
+            var st = new Dictionary<string, object> { { "app", "pc 2.11" } };
             if (current != null)
             {
                 var item = ItemOf(current);
@@ -1016,12 +1007,20 @@ namespace WallhavenShuffle
             {
                 string id = rot.History[i];
                 if (id.IndexOf('\\') >= 0) { string n = Path.GetFileNameWithoutExtension(id); if (SyncDoc.IsWallId(n)) id = n; else { recent.Add(new Dictionary<string, object> { { "local", true }, { "name", n } }); continue; } }
-                var w = walls.FirstOrDefault(x => x.Id == id) ?? ItemWall(id);
+                var w = Listed(id) ?? ItemWall(id);
                 recent.Add(new Dictionary<string, object> { { "id", id }, { "ext", w != null ? w.Extension.TrimStart('.') : "jpg" }, { "res", w != null ? w.Resolution : "" }, { "fav", w != null ? Math.Max(0, w.Favorites) : 0 } });
             }
             st["recent"] = recent.ToArray();
             st["local"] = folders.Select(f => (object)new Dictionary<string, object> { { "key", "folder:" + f }, { "name", FolderLabel(f) }, { "count", FolderPool(f).Count }, { "on", IsOn("folder:" + f) } }).ToArray();
-            st["counts"] = new Dictionary<string, object> { { "toplist", walls.Count(InToplistLimits) } };
+            var counts = new Dictionary<string, object> { { "toplist", walls.Count(InToplistLimits) } };
+            // Most favourited's, once its list for the range in use is here (the remote waits for listFav to match)
+            if (MostFavOn && favFor.Length > 0 && favFor == settings.Filters.MostFavQuery(settings.MostFav))
+            {
+                counts["mostfav"] = favWalls.Count(InMostFav);
+                if (favOf > 0) counts["mostfavOf"] = favOf;
+                st["listFav"] = favFor;
+            }
+            st["counts"] = counts;
             st["list"] = listFor;
             if (!HasSource || settings.Sources.Count == 0) st["note"] = "Nothing to shuffle: turn something on in Shuffle from";
             return st;

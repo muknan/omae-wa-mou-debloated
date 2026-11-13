@@ -23,14 +23,15 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.function.Function;
 
 /**
- * The toplist, kept on the TV. It's downloaded from the wallhaven-shuffle service's /api/list for this TV's filters
- * (TvSettings.listQuery; with no time
+ * The lists, kept on the TV: the toplist, and Most favourited (all of Wallhaven by favourites, the part in its
+ * range). Each is downloaded from the wallhaven-shuffle service's /api/list for this TV's settings (with no time
  * limit to speak of: the service may need a couple of minutes to put a cold list together) and saved as a compact
- * file of just what this TV shows (pool.tsv, ~100 KB), so a request reads a small file in milliseconds instead of
- * waiting on the network or parsing 1.5 MB of JSON every minute. An old copy keeps working while a new one is
- * fetched, and if the service can't be reached the old one simply stays.
+ * file of just what this TV shows (pool.tsv, mostfav.tsv; ~100 KB), so a request reads a small file in milliseconds
+ * instead of waiting on the network or parsing 1.5 MB of JSON every minute. An old copy keeps working while a new
+ * one is fetched, and if the service can't be reached the old one simply stays.
  */
 final class ListStore {
     static final String TAG = "WallhavenShuffle";
@@ -39,11 +40,31 @@ final class ListStore {
     static final long RETRY_AFTER_MS = 10L * 60 * 1000;          // after a failed download
     static final long HUNG_AFTER_MS = 6L * 60 * 1000;            // a download running longer than this no longer blocks new ones
 
-    private static List<Shuffle.Item> cached = Collections.emptyList();
-    private static long cachedStamp = -1;
+    /** One list: its file, its keys in the settings (prefix_time, _tried, _for, _size), and the query it's for. */
+    static final class Kind {
+        final String file, key, name;
+        final Function<TvSettings, String> query;
+        final boolean emptyOk;                                     // Most favourited: a range with nothing in it is an answer
+        private List<Shuffle.Item> cached = Collections.emptyList();
+        private long cachedStamp = -1;
+        // One download at a time. A request that comes while one runs (the settings were just changed) isn't
+        // dropped: the running one goes round again with the current settings when it's done. One running for over
+        // HUNG_AFTER_MS (a hung connection) no longer blocks new ones, and its result is thrown away.
+        private final Object gate = new Object();
+        private long running;                                      // when the running download started; 0 = none
+        private boolean again;
+        private int generation;
+        Kind(String file, String key, String name, Function<TvSettings, String> query, boolean emptyOk) {
+            this.file = file; this.key = key; this.name = name; this.query = query; this.emptyOk = emptyOk;
+        }
+        String forKey() { return key + "_for"; }
+    }
+    // (the toplist keeps the keys it always had: list_time, list_tried, list_for, list_size)
+    static final Kind TOPLIST = new Kind("pool.tsv", "list", "the list", TvSettings::listQuery, false);
+    static final Kind MOSTFAV = new Kind("mostfav.tsv", "fav", "Most favourited", TvSettings::mostfavQuery, true);
 
     static SharedPreferences prefs(Context c) { return c.getSharedPreferences(PREFS, Context.MODE_PRIVATE); }
-    static File poolFile(Context c) { return new File(c.getFilesDir(), "pool.tsv"); }
+    static File poolFile(Context c) { return new File(c.getFilesDir(), TOPLIST.file); }
 
     /** The service's address (https://<project>.vercel.app): set on its own, or the start of the old list address. */
     static String server(Context c) {
@@ -57,75 +78,82 @@ final class ListStore {
     }
 
     /** The toplist this TV has, every width (the width limit is applied when the pool is put together). */
-    static synchronized List<Shuffle.Item> pool(Context c) {
-        File f = poolFile(c);
-        long stamp = f.exists() ? f.lastModified() * 31 + f.length() : 0;   // time and size: a new file is never missed
-        if (stamp == cachedStamp) return cached;
-        List<Shuffle.Item> items = new ArrayList<>();
-        if (stamp != 0) {
-            try (BufferedReader r = new BufferedReader(new InputStreamReader(new FileInputStream(f), StandardCharsets.UTF_8))) {
-                for (String line; (line = r.readLine()) != null; ) {
-                    String[] p = line.split("\t", -1);
-                    if (p.length >= 6) items.add(new Shuffle.Item(p[0], p[1], p[2], p[3], toInt(p[4]), toInt(p[5])));
+    static List<Shuffle.Item> pool(Context c) { return pool(c, TOPLIST); }
+    /** Most favourited's list as last fetched (its range is applied again when the pool is put together). */
+    static List<Shuffle.Item> favPool(Context c) { return pool(c, MOSTFAV); }
+
+    static List<Shuffle.Item> pool(Context c, Kind k) {
+        synchronized (k) {
+            File f = new File(c.getFilesDir(), k.file);
+            long stamp = f.exists() ? f.lastModified() * 31 + f.length() + 1 : 0;   // time and size: a new file is never missed
+            if (stamp == k.cachedStamp) return k.cached;
+            List<Shuffle.Item> items = new ArrayList<>();
+            if (stamp != 0) {
+                try (BufferedReader r = new BufferedReader(new InputStreamReader(new FileInputStream(f), StandardCharsets.UTF_8))) {
+                    for (String line; (line = r.readLine()) != null; ) {
+                        String[] p = line.split("\t", -1);
+                        if (p.length >= 6) items.add(new Shuffle.Item(p[0], p[1], p[2], p[3], toInt(p[4]), toInt(p[5])));
+                    }
+                } catch (Exception e) {
+                    Log.w(TAG, "couldn't read the saved list: " + e);
                 }
-            } catch (Exception e) {
-                Log.w(TAG, "couldn't read the saved list: " + e);
             }
+            k.cached = Collections.unmodifiableList(items);
+            k.cachedStamp = stamp;
+            return k.cached;
         }
-        cached = Collections.unmodifiableList(items);
-        cachedStamp = stamp;
-        return cached;
     }
 
-    /** Starts a download in the background if the saved list is old enough (or missing). Never blocks. */
+    /** Starts downloads in the background for the lists that are old enough (or missing, or for other settings):
+     *  the toplist always (playlists use its details), Most favourited while it's on. Never blocks. */
     static void refreshIfDue(final Context context) {
         final Context c = context.getApplicationContext();
+        TvSettings s = Sync.settings(c);
+        refreshIfDue(c, TOPLIST, s);
+        if (s.sources.contains("mostfav")) refreshIfDue(c, MOSTFAV, s);
+    }
+
+    private static void refreshIfDue(Context c, Kind k, TvSettings s) {
         SharedPreferences p = prefs(c);
         long now = System.currentTimeMillis();
-        long last = p.getLong("list_time", 0), tried = p.getLong("list_tried", 0);
-        boolean due = !poolFile(c).exists() || now - last > REFRESH_AFTER_MS || !p.getString("list_for", "").equals(Sync.settings(c).listQuery());
+        long last = p.getLong(k.key + "_time", 0), tried = p.getLong(k.key + "_tried", 0);
+        boolean due = !new File(c.getFilesDir(), k.file).exists() || now - last > REFRESH_AFTER_MS || !p.getString(k.forKey(), "").equals(k.query.apply(s));
         if (!due || now - tried < RETRY_AFTER_MS || server(c).isEmpty()) return;
-        refreshNow(c, null);
+        refreshNow(c, k, null);
     }
 
     interface Done { void done(String result); }
 
-    // One download at a time. A request that comes while one runs (the address was just changed) isn't dropped: the
-    // running one goes round again with the current settings when it's done. One running for over HUNG_AFTER_MS (a
-    // hung connection) no longer blocks new ones, and its result is thrown away.
-    private static final Object gate = new Object();
-    private static long running;                                   // when the running download started; 0 = none
-    private static boolean again;
-    private static int generation;
+    /** Downloads the toplist now, in the background; done (if any) gets a one-line result. */
+    static void refreshNow(final Context context, final Done done) { refreshNow(context, TOPLIST, done); }
 
-    /** Downloads the list now, in the background; done (if any) gets a one-line result. */
-    static void refreshNow(final Context context, final Done done) {
+    static void refreshNow(final Context context, final Kind k, final Done done) {
         final Context c = context.getApplicationContext();
         final int gen;
-        synchronized (gate) {
+        synchronized (k.gate) {
             long now = System.currentTimeMillis();
-            if (running != 0 && now - running < HUNG_AFTER_MS) { again = true; return; }
-            running = now; again = false; gen = ++generation;
+            if (k.running != 0 && now - k.running < HUNG_AFTER_MS) { k.again = true; return; }
+            k.running = now; k.again = false; gen = ++k.generation;
         }
-        prefs(c).edit().putLong("list_tried", System.currentTimeMillis()).apply();
+        prefs(c).edit().putLong(k.key + "_tried", System.currentTimeMillis()).apply();
         new Thread(() -> {
             String result;
             while (true) {
-                try { result = download(c, gen); }
-                catch (Exception e) { result = "couldn't get the list: " + e.getMessage(); Log.w(TAG, result); }
-                synchronized (gate) {
-                    if (gen != generation) return;                 // a newer download took over
-                    if (!again) { running = 0; break; }
-                    again = false; running = System.currentTimeMillis();
+                try { result = download(c, k, gen); }
+                catch (Exception e) { result = "couldn't get " + k.name + ": " + e.getMessage(); Log.w(TAG, result); }
+                synchronized (k.gate) {
+                    if (gen != k.generation) return;               // a newer download took over
+                    if (!k.again) { k.running = 0; break; }
+                    k.again = false; k.running = System.currentTimeMillis();
                 }
             }
             if (done != null) done.done(result);
-        }, "list-download").start();
+        }, k.key + "-download").start();
     }
 
-    private static String download(Context c, int gen) throws Exception {
+    private static String download(Context c, Kind k, int gen) throws Exception {
         SharedPreferences p = prefs(c);
-        String query = Sync.settings(c).listQuery(), server = server(c);   // read now: the latest settings
+        String query = k.query.apply(Sync.settings(c)), server = server(c);   // read now: the latest settings
         if (server.isEmpty()) throw new IllegalStateException("no service address set");
         String url = server + "/api/list?" + query;
         HttpURLConnection http = (HttpURLConnection) new URL(url).openConnection();
@@ -150,7 +178,9 @@ final class ListStore {
             throw new IllegalStateException("that address doesn't give a wallpaper list (use the service's /api/list link)");
         }
         boolean complete = root.optBoolean("complete", true);
-        File tmp = new File(c.getFilesDir(), "pool.tsv.new");
+        // Most favourited: when its range holds more than one list takes, about how many it holds
+        int of = root.optBoolean("capped", false) ? root.optInt("in_range", 0) : 0;
+        File tmp = new File(c.getFilesDir(), k.file + ".new");
         int kept = 0;
         try (Writer w = new OutputStreamWriter(new FileOutputStream(tmp), StandardCharsets.UTF_8)) {
             for (int i = 0; i < arr.length(); i++) {
@@ -163,31 +193,33 @@ final class ListStore {
                 kept++;
             }
         }
-        if (kept == 0) { tmp.delete(); throw new IllegalStateException("no wallpapers match these filters"); }
+        if (kept == 0 && !(k.emptyOk && complete)) { tmp.delete(); throw new IllegalStateException("no wallpapers match these filters"); }
 
         // The service marks a list it couldn't read in full (Wallhaven's rate limit) as incomplete; it's filled in a
         // few minutes later. Such a list never replaces a fuller saved one (another try comes after RETRY_AFTER_MS).
-        int saved = pool(c).size();
-        boolean sameList = query.equals(p.getString("list_for", ""));
+        int saved = pool(c, k).size();
+        boolean sameList = query.equals(p.getString(k.forKey(), ""));
         if (!complete && kept < saved && sameList) {
             tmp.delete();
-            String r = "list partial (" + kept + "), kept the saved one (" + saved + ")";
+            String r = k.name + " partial (" + kept + "), kept the saved one (" + saved + ")";
             Log.i(TAG, r);
             return r;
         }
-        synchronized (gate) {
-            if (gen != generation || !query.equals(Sync.settings(c).listQuery())) {   // the filters changed meanwhile
+        synchronized (k.gate) {
+            if (gen != k.generation || !query.equals(k.query.apply(Sync.settings(c)))) {   // the settings changed meanwhile
                 tmp.delete();
-                return "settings changed: getting the list again";
+                return "settings changed: getting " + k.name + " again";
             }
-            File f = poolFile(c);
+            File f = new File(c.getFilesDir(), k.file);
             if (!tmp.renameTo(f)) { f.delete(); if (!tmp.renameTo(f)) throw new IllegalStateException("couldn't save the list"); }
         }
         // A partial list (when nothing fuller was saved) is used, but not counted as fresh: the next try fills it in.
-        p.edit().putLong("list_time", complete ? System.currentTimeMillis() : 0).putInt("list_size", kept).putString("list_for", query).apply();
+        p.edit().putLong(k.key + "_time", complete ? System.currentTimeMillis() : 0).putInt(k.key + "_size", kept)
+            .putInt(k.key + "_of", of).putString(k.forKey(), query).apply();
         ShuffleService.poolMayHaveChanged(c);
         Sync.statusChanged(c);
-        String result = "list: " + kept + " wallpapers" + (complete ? "" : " (partial, filled in at the next try)");
+        String result = (k == TOPLIST ? "list" : k.name) + ": " + kept + " wallpapers" + (of > kept ? " (the most favourited of about " + of + ")" : "")
+            + (complete ? "" : " (partial, filled in at the next try)");
         Log.i(TAG, result);
         return result;
     }

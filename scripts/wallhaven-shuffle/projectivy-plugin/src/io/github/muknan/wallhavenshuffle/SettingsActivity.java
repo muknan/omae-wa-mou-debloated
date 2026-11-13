@@ -210,7 +210,6 @@ public final class SettingsActivity extends Activity implements Sync.Listener {
         box.setOrientation(LinearLayout.VERTICAL);
         LinearLayout g1 = group(box, null);
         row(g1, "Shuffle from", () -> sourcesLabel(), v -> pickSources());
-        row(g1, "Order", () -> TvSettings.ORDER.get(Sync.settings(this).order), v -> pickMap("Order", TvSettings.ORDER, Sync.settings(this).order, (s, k) -> s.order = k));
         row(g1, "Change every", () -> TvSettings.everyLabel(Sync.settings(this).every), v -> pickEvery());
         row(g1, "Hidden wallpapers", () -> { int n = Sync.hiddenIds(this).size(); return n == 0 ? "" : String.format(Locale.US, "%,d", n); }, v -> pickHidden());
 
@@ -223,6 +222,11 @@ public final class SettingsActivity extends Activity implements Sync.Listener {
         row(g2, "Topic", () -> Sync.settings(this).q.isEmpty() ? "Any" : Sync.settings(this).q, v -> pickTopic());
         row(g2, "Largest size", () -> TvSettings.maxwLabel(Sync.settings(this).maxw), v -> pickMaxw());
 
+        LinearLayout gm = group(box, "Most favourited");
+        row(gm, "Popularity", () -> Sync.settings(this).mostfavLabel(), v -> pickMostfav());
+        row(gm, "Order", () -> TvSettings.ORDER.get(Sync.settings(this).mfOrder), v -> pickMap("Order", TvSettings.ORDER, Sync.settings(this).mfOrder, (s, k) -> s.mfOrder = k));
+        note(box, () -> mostfavNote() + "\n" + TvSettings.ORDER_NOTE);
+
         LinearLayout g3 = group(box, "Sync");
         row(g3, () -> Sync.paired(this) ? "Synced as " + Sync.deviceName(this) : "Pair with your phone or PC",
             () -> Sync.paired(this) ? (Sync.reachable() ? "On" : "Can’t reach the service") : "", v -> { if (Sync.paired(this)) renameDevice(); else pair(); });
@@ -234,7 +238,10 @@ public final class SettingsActivity extends Activity implements Sync.Listener {
 
         LinearLayout g4 = group(box, "Service");
         rowBelow(g4, "Address", () -> ListStore.server(this).replaceFirst("^https?://", ""), v -> editServer());
-        row(g4, "Get a fresh list now", () -> listLabel(), v -> { toast("Getting the list…"); ListStore.refreshNow(this, r -> ui.post(() -> { toast(r); refresh(); })); });
+        row(g4, "Get a fresh list now", () -> listLabel(), v -> {
+            toast("Getting the list…");
+            if (Sync.settings(this).sources.contains("mostfav")) ListStore.refreshNow(this, ListStore.MOSTFAV, r -> ui.post(this::refresh));
+            ListStore.refreshNow(this, r -> ui.post(() -> { toast(r); refresh(); })); });
         space(box, 40);   // the last row clear of the screen edge when the list is scrolled to the end
         return box;
     }
@@ -344,10 +351,24 @@ public final class SettingsActivity extends Activity implements Sync.Listener {
         List<String> names = new ArrayList<>();
         for (String k : s.sources) {
             if (k.equals("toplist")) names.add("Toplist");
+            else if (k.equals("mostfav")) names.add("Most favourited");
             else { JSONObject p = Sync.playlist(this, k); if (p != null) names.add(p.optString("name")); }
         }
         if (names.isEmpty()) return "Nothing yet";
         return names.size() <= 2 ? String.join(", ", names) : names.get(0) + " + " + (names.size() - 1) + " more";
+    }
+
+    // Under the Most favourited rows: what it is and what this TV has of it.
+    private String mostfavNote() {
+        TvSettings s = Sync.settings(this);
+        String shared = "All of Wallhaven, sorted by favourites. Quality, shape, categories and topic are the Toplist’s.";
+        if (!s.sources.contains("mostfav")) return "Off: turn it on in Shuffle from. " + shared;
+        if (!ListStore.prefs(this).getString(ListStore.MOSTFAV.forKey(), "").equals(s.mostfavQuery())) return "Getting the list… " + shared;
+        int n = 0;
+        for (Shuffle.Item w : ListStore.favPool(this)) if (s.inMostfav(w)) n++;
+        int of = ListStore.prefs(this).getInt("fav_of", 0);
+        return (of > n ? String.format(Locale.US, "The %,d most favourited of about %,d in this range. ", n, of)
+            : String.format(Locale.US, n == 1 ? "%,d wallpaper in this range. " : "%,d wallpapers in this range. ", n)) + shared;
     }
 
     private String listLabel() {
@@ -387,23 +408,45 @@ public final class SettingsActivity extends Activity implements Sync.Listener {
         pickInts("Change every", TvSettings.EVERY, Sync.settings(this).every, TvSettings::everyLabel, (s, v) -> s.every = v);
         if (base >= 90_000) toast("Projectivy asks about every " + Math.round(base / 60000.0) + " min, so the TV can’t change faster than that");
     }
-    // Popularity: the presets (a minimum, no upper limit), the one in use if it was typed in (a range too), and Type a
-    // range… (two fields: the remote's number keys or the keyboard).
+    // The toplist's Popularity: the presets, the one in use if it was typed in, and Type one….
     private void pickFav() {
+        int cur = Sync.settings(this).fav;
+        java.util.TreeSet<Integer> set = new java.util.TreeSet<>();
+        for (int n : TvSettings.FAVS) set.add(n);
+        set.add(cur);
+        Integer[] values = set.toArray(new Integer[0]);
+        String[] labels = new String[values.length + 1];
+        int at = -1;
+        for (int i = 0; i < values.length; i++) { labels[i] = TvSettings.favLabel(values[i]); if (values[i] == cur) at = i; }
+        labels[values.length] = "Type one…";
+        dialog("Popularity").setSingleChoiceItems(labels, at, (d, i) -> {
+            d.dismiss();
+            if (i < values.length) { change((s, v) -> s.fav = v, values[i]); return; }
+            editText("Popularity", cur > 0 ? String.valueOf(cur) : "", "e.g. 75", TvSettings.TOPLIST_FAV_NOTE, InputType.TYPE_CLASS_NUMBER, v -> {
+                int n = TvSettings.parseFav(v);
+                if (n < 0) toast(String.format(Locale.US, "A whole number from 0 to %,d", TvSettings.FAV_MAX));
+                else if (n != Sync.settings(this).fav) change((s, x) -> s.fav = x, n);
+            });
+        }).show();
+    }
+
+    // Most favourited's Popularity: the presets (a minimum, no upper limit), the one in use if it was typed in (a range
+    // too), and Type a range… (two fields: the remote's number keys or the keyboard).
+    private void pickMostfav() {
         TvSettings now = Sync.settings(this);
         List<int[]> all = new ArrayList<>();
         boolean inList = false;
-        for (int n : TvSettings.FAVS) { all.add(new int[]{n, 0}); inList |= n == now.fav && now.favmax == 0; }
-        if (!inList) all.add(new int[]{now.fav, now.favmax});
+        for (int n : TvSettings.MOSTFAV_FAVS) { all.add(new int[]{n, 0}); inList |= n == now.mfFav && now.mfFavmax == 0; }
+        if (!inList) all.add(new int[]{now.mfFav, now.mfFavmax});
         java.util.Collections.sort(all, (a, b) -> a[0] != b[0] ? Integer.compare(a[0], b[0]) : Integer.compare(a[1] == 0 ? Integer.MAX_VALUE : a[1], b[1] == 0 ? Integer.MAX_VALUE : b[1]));
         String[] labels = new String[all.size() + 1];
         int at = -1;
-        for (int i = 0; i < all.size(); i++) { labels[i] = TvSettings.favLabel(all.get(i)[0], all.get(i)[1]); if (all.get(i)[0] == now.fav && all.get(i)[1] == now.favmax) at = i; }
+        for (int i = 0; i < all.size(); i++) { labels[i] = TvSettings.favLabel(all.get(i)[0], all.get(i)[1]); if (all.get(i)[0] == now.mfFav && all.get(i)[1] == now.mfFavmax) at = i; }
         labels[all.size()] = "Type a range…";
         dialog("Popularity").setSingleChoiceItems(labels, at, (d, i) -> {
             d.dismiss();
-            if (i < all.size()) { int[] r = all.get(i); change((s, v) -> { s.fav = v[0]; s.favmax = v[1]; }, r); return; }
-            editRange(now.fav, now.favmax);
+            if (i < all.size()) { int[] r = all.get(i); change((s, v) -> { s.mfFav = v[0]; s.mfFavmax = v[1]; }, r); return; }
+            editRange(now.mfFav, now.mfFavmax);
         }).show();
     }
 
@@ -438,7 +481,7 @@ public final class SettingsActivity extends Activity implements Sync.Listener {
             .setPositiveButton("Save", (x, w) -> {
                 int[] r = TvSettings.parseRange(fields[0].getText().toString(), fields[1].getText().toString(), null);
                 TvSettings now = Sync.settings(this);
-                if (r != null && (r[0] != now.fav || r[1] != now.favmax)) change((s, v) -> { s.fav = v[0]; s.favmax = v[1]; }, r);
+                if (r != null && (r[0] != now.mfFav || r[1] != now.mfFavmax)) change((s, v) -> { s.mfFav = v[0]; s.mfFavmax = v[1]; }, r);
             }).setNegativeButton("Cancel", null).show();
         Runnable check = () -> {
             String[] err = new String[1];
@@ -466,6 +509,7 @@ public final class SettingsActivity extends Activity implements Sync.Listener {
         final List<String> keys = new ArrayList<>();
         List<String> labels = new ArrayList<>();
         keys.add("toplist"); labels.add("Toplist");
+        keys.add("mostfav"); labels.add("Most favourited");
         if (Sync.playlist(this, "fav") != null) { keys.add("fav"); labels.add("Favourites  (" + Sync.items(this, "fav").size() + ")"); }
         for (JSONObject p : Sync.ownPlaylists(this)) { keys.add(p.optString("id")); labels.add(p.optString("name") + "  (" + p.optJSONArray("items").length() + ")"); }
         boolean[] on = new boolean[keys.size()];
@@ -725,6 +769,15 @@ public final class SettingsActivity extends Activity implements Sync.Listener {
     }
 
     private void row(LinearLayout group, String label, Text value, View.OnClickListener click) { row(group, () -> label, value, click); }
+
+    // A note under a group (what it is, how many): smaller, dimmer, kept current like the rows.
+    private void note(LinearLayout parent, Text t) {
+        TextView v = text("", 15, FG2, false);
+        v.setPadding(dp(4), dp(10), dp(4), 0);
+        v.setLineSpacing(0, 1.15f);
+        parent.addView(v);
+        refreshers.add(() -> v.setText(t.get()));
+    }
 
     // A row whose value is too long for the right side (the address): the value on its own line under the label.
     private void rowBelow(LinearLayout group, String label, Text value, View.OnClickListener click) {

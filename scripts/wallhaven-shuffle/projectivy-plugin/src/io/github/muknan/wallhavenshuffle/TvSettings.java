@@ -7,7 +7,8 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * What this TV shuffles and how: its sources, toplist filters, how often it changes, pause and keep. The same
+ * What this TV shuffles and how: its sources, toplist filters, Most favourited's range and order, how often it
+ * changes, pause and keep. The same
  * settings (and the same choices) as the service's lib/sync.js, which keeps a copy per device so the remote and the
  * Windows app can change them. Plain Java (no Android), so it's tested on the PC.
  */
@@ -17,9 +18,10 @@ final class TvSettings {
     static final Map<String, String> QUALITY_SIZE = new LinkedHashMap<>();   // "atleast" size, or "=" + exact sizes
     static final Map<String, String> RATIO = new LinkedHashMap<>();
     static final Map<String, String> RANGE = new LinkedHashMap<>();
-    /** The order the pool is shown in (the same words as the remote's Browse): shuffled, or the most favourited first. */
+    /** Most favourited's order: from the most favourited down, or shuffled. */
     static final Map<String, String> ORDER = new LinkedHashMap<>();
     static final int[] FAVS = {0, 10, 25, 50, 100, 250, 500, 1000};
+    static final int[] MOSTFAV_FAVS = {100, 250, 500, 1000, 2000};
     static final int[] MAXW = {0, 3840, 5120};
     static final int[] EVERY = {1, 2, 5, 10, 15, 30, 60, 120, 180, 360, 720, 1440};
     static final String[] TOPICS = {"nature", "landscape", "mountains", "forest", "ocean", "space", "city", "night", "sunset", "winter", "architecture", "minimalism", "abstract", "digital art", "cars"};
@@ -37,15 +39,19 @@ final class TvSettings {
         RATIO.put("", "Any");
         RANGE.put("1d", "Past day"); RANGE.put("3d", "Past 3 days"); RANGE.put("1w", "Past week"); RANGE.put("1M", "Past month");
         RANGE.put("3M", "Past 3 months"); RANGE.put("6M", "Past 6 months"); RANGE.put("1y", "Past year");
-        ORDER.put("shuffle", "Shuffled"); ORDER.put("fav", "Most favourites");
+        ORDER.put("top", "Most first"); ORDER.put("shuffle", "Shuffled");
     }
     private static void quality(String key, String label, String size) { QUALITY.put(key, label); QUALITY_SIZE.put(key, size); }
 
     List<String> sources = new ArrayList<>();
     String quality = "4k+", ratio = "16x9,16x10", range = "1y", cats = "110", q = "";
-    int fav = 50, favmax = 0, maxw = 3840, every = 1;   // Popularity: at least fav favourites and, if favmax > 0, at most favmax
+    int fav = 50, maxw = 3840, every = 1;   // Popularity: at least fav favourites
+    // Most favourited (all of Wallhaven by favourites, with the toplist's quality, shape, categories and topic): at
+    // least mfFav and, if mfFavmax > 0, at most mfFavmax favourites; played Most first (top) or shuffled
+    int mfFav = 250, mfFavmax = 0;
+    String mfOrder = "top";
     boolean paused;
-    String keep = "", order = "shuffle";
+    String keep = "";
 
     /** A TV's first settings: the toplist the plugin always showed (a year of 4K and up, widescreen, no People, 50+). */
     static TvSettings defaults() {
@@ -58,7 +64,8 @@ final class TvSettings {
         TvSettings s = new TvSettings();
         s.sources = new ArrayList<>(sources);
         s.quality = quality; s.ratio = ratio; s.range = range; s.cats = cats; s.q = q;
-        s.fav = fav; s.favmax = favmax; s.maxw = maxw; s.every = every; s.paused = paused; s.keep = keep; s.order = order;
+        s.fav = fav; s.maxw = maxw; s.every = every; s.paused = paused; s.keep = keep;
+        s.mfFav = mfFav; s.mfFavmax = mfFavmax; s.mfOrder = mfOrder;
         return s;
     }
 
@@ -70,15 +77,16 @@ final class TvSettings {
         if (cats == null || !cats.matches("[01]{3}") || cats.equals("000")) cats = "110";
         q = normTopic(q);
         if (fav < 0 || fav > FAV_MAX) fav = 50;
-        if (favmax < 0 || favmax > FAV_MAX || favmax < fav) favmax = 0;   // a minimum raised past it: no upper limit
-        if (!ORDER.containsKey(order)) order = "shuffle";
+        if (mfFav < 0 || mfFav > FAV_MAX) mfFav = 250;
+        if (mfFavmax < 0 || mfFavmax > FAV_MAX || (mfFavmax > 0 && mfFavmax < mfFav)) mfFavmax = 0;   // a minimum raised past it: no upper limit
+        if (!ORDER.containsKey(mfOrder)) mfOrder = "top";
         boolean okW = false;
         for (int w : MAXW) okW |= w == maxw;
         if (!okW) maxw = 3840;
         if (every < 1 || every > 1440) every = 1;
         if (keep == null) keep = "";
         List<String> ok = new ArrayList<>();
-        for (String k : sources) if (k != null && k.matches("toplist|fav|p_[a-z0-9]{4,24}") && !ok.contains(k)) ok.add(k);
+        for (String k : sources) if (k != null && k.matches("toplist|mostfav|fav|p_[a-z0-9]{4,24}") && !ok.contains(k)) ok.add(k);
         sources = ok;
         return this;
     }
@@ -90,17 +98,23 @@ final class TvSettings {
     }
 
     /** The /api/list query for these filters, character for character the service's listQueryFor (lib/sync.js),
-     *  so the TV, the PC and the remote share one cached list. No width limit or favourites maximum: the TV applies
-     *  maxw and favmax itself. */
-    String listQuery() {
+     *  so the TV, the PC and the remote share one cached list. No width limit: the TV applies maxw itself. */
+    String listQuery() { return query("range=" + range, fav, 0); }
+
+    /** Most favourited's: the service's mostfavQueryFor (these filters, its own range instead of the period and minimum). */
+    String mostfavQuery() { return query("sort=fav", mfFav, mfFavmax); }
+
+    private String query(String head, int min, int max) {
         String size = QUALITY_SIZE.get(quality);
-        StringBuilder b = new StringBuilder("range=").append(range);
+        StringBuilder b = new StringBuilder(head);
         if (size.startsWith("=")) b.append("&res=").append(size.substring(1));
         else b.append("&atleast=").append(size);
         if (!ratio.isEmpty()) b.append("&ratios=").append(ratio);
         b.append("&cats=").append(cats).append("&purity=100");
         if (!q.isEmpty()) b.append("&q=").append(q.replace(" ", "%20"));
-        b.append("&fav=").append(fav).append("&maxw=0");
+        b.append("&fav=").append(min);
+        if (max > 0) b.append("&favmax=").append(max);
+        b.append("&maxw=0");
         return b.toString();
     }
 
@@ -115,6 +129,8 @@ final class TvSettings {
     // A number typed in: digits (commas and spaces allowed, as in 1,500), 0 to 100,000; -1 if it isn't one.
     static final int FAV_MAX = 100000;
     static final String FAV_NOTE = "How many people favourited a wallpaper on Wallhaven. Leave At most empty for no upper limit.";
+    static final String TOPLIST_FAV_NOTE = "Only wallpapers with at least this many favourites on Wallhaven. 0 shows any.";
+    static final String ORDER_NOTE = "Most first goes from the most favourited down. Anything else you shuffle from joins in by its favourites.";
     static int parseFav(String v) {
         String t = v == null ? "" : v.replaceAll("[\\s,]", "");
         if (!t.matches("\\d{1,6}")) return -1;
@@ -138,9 +154,16 @@ final class TvSettings {
         return min == 0 ? "Any" : String.format(Locale.US, "%,d+ favourites", min);
     }
     static String favLabel(int n) { return favLabel(n, 0); }
-    String popularityLabel() { return favLabel(fav, favmax); }
-    /** A toplist wallpaper inside the limits the TV applies itself: the largest size and the most favourites. */
-    boolean inLimits(Shuffle.Item w) { return (maxw == 0 || w.width <= maxw) && (favmax == 0 || w.favorites <= favmax); }
+    String popularityLabel() { return favLabel(fav); }
+    String mostfavLabel() { return favLabel(mfFav, mfFavmax); }
+    /** The settings row: the range, and Shuffled only when shuffled (Most first goes without saying). */
+    String mostfavSummary() { return mostfavLabel() + (mfOrder.equals("shuffle") ? "\u00a0· " + ORDER.get(mfOrder) : ""); }
+    /** A listed wallpaper inside the limit the TV applies itself: the largest size. */
+    boolean inLimits(Shuffle.Item w) { return maxw == 0 || w.width <= maxw; }
+    /** In Most favourited's range as it is now (a narrower range applies at once; a wider one waits for its list). */
+    boolean inMostfav(Shuffle.Item w) { return inLimits(w) && w.favorites >= mfFav && (mfFavmax == 0 || w.favorites <= mfFavmax); }
+    /** Most first: the pool plays from the most favourited down (only while Most favourited is on). */
+    boolean mostFirst() { return sources.contains("mostfav") && mfOrder.equals("top"); }
     static String maxwLabel(int w) { return w == 0 ? "Any" : w == 3840 ? "Up to 4K" : "Up to 5K"; }
     String catsLabel() {
         List<String> on = new ArrayList<>();

@@ -168,9 +168,12 @@ main {
 .item.has-icon + .item::before, .item + .item.has-icon::before { left: 52px; }
 button.item:active, a.item:active, label.item:active { background: var(--raised-2); }
 .item > .icon { color: var(--fg-2); }
-.item .label { flex: 1; min-width: 0; }
+.item .label { flex: 1 1 auto; min-width: 0; }
+/* beside a value the name keeps its width (a sliver of shrinking was enough to cut it) and the value wraps instead */
+.item:has(> .value) .label { flex-shrink: 0; max-width: 65%; }
 .item .label small { display: block; color: var(--fg-3); font-size: 13px; margin-top: 1px; }
-.item .value { color: var(--fg-2); font-size: 15px; text-align: right; min-width: 0; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* a long value takes more lines, balanced, on a narrow screen rather than being cut (three only at 320 px) */
+.item .value { flex: 0 1000 auto; color: var(--fg-2); font-size: 15px; line-height: 1.3; text-align: right; min-width: 0; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; text-wrap: balance; }
 .item .chev { width: 16px; height: 16px; color: var(--fg-3); }
 .item.danger, .item.danger > .icon { color: var(--danger); }
 .item.accent { color: var(--accent); }

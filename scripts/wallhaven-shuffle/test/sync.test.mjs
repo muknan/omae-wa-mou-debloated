@@ -1,7 +1,7 @@
 // node --test test/   (no dependencies: an in-memory store stands in for Upstash)
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { handle, memoryStore, applyOp, emptyDoc, normSettings, defaultSettings, listQueryFor, checkName, K } from '../lib/sync.js';
+import { handle, memoryStore, applyOp, emptyDoc, normSettings, defaultSettings, listQueryFor, mostfavQueryFor, checkName, K } from '../lib/sync.js';
 import { listParams, listQuery, passes } from '../lib/core.js';
 
 process.env.SYNC_KEY = 'test-key-0123456789';
@@ -216,27 +216,72 @@ test('a device\'s clock offset is kept with its status (its own clock is not)', 
   assert.ok(st.skew >= 4900 && st.skew < 6000, `skew ${st.skew}`);
 });
 
-test('favourites range and order: kept, checked, shared list, and a minimum raised past the maximum clears it', () => {
+test('Most favourited: its own range and order, a minimum raised past the maximum clears it, its own list query', () => {
   const base = defaultSettings('tv');
-  assert.equal(base.filters.favmax, 0);
-  assert.equal(base.order, 'shuffle');
-  let s = normSettings({ order: 'fav', filters: { fav: 200, favmax: 1000 } }, base);
-  assert.equal(s.order, 'fav');
-  assert.equal(s.filters.fav, 200);
-  assert.equal(s.filters.favmax, 1000);
-  // each app applies the maximum itself, so the list (and its cached copy) is the one without it
-  assert.equal(listQueryFor(s.filters), 'range=1y&atleast=3840x2160&ratios=16x9,16x10&cats=110&purity=100&fav=200&maxw=0');
-  assert.equal(normSettings({ order: 'newest', filters: { favmax: -1 } }, s).order, 'fav');
-  assert.equal(normSettings({ filters: { favmax: 100001 } }, s).filters.favmax, 1000);
-  assert.equal(normSettings({ filters: { favmax: 1.5 } }, s).filters.favmax, 1000);
-  // an app from before ranges sends only a new minimum: above the maximum, there's no upper limit any more
-  assert.equal(normSettings({ filters: { fav: 2000 } }, s).filters.favmax, 0);
-  assert.equal(normSettings({ filters: { fav: 1000 } }, s).filters.favmax, 1000);   // equal is fine: exactly 1,000
-  // settings saved before ranges (no favmax, no order) come out with them
-  const old = structuredClone(base); delete old.filters.favmax; delete old.order;
-  const up = normSettings({ filters: { fav: 25 } }, old);
-  assert.equal(up.filters.favmax, 0);
-  assert.equal(up.order, 'shuffle');
+  assert.deepEqual(base.mostfav, { fav: 250, favmax: 0, order: 'top' });
+  assert.equal(base.order, undefined);
+  assert.equal(base.filters.favmax, undefined);
+  let s = normSettings({ sources: ['toplist', 'mostfav'], mostfav: { fav: 200, favmax: 1000, order: 'shuffle' } }, base);
+  assert.deepEqual(s.sources, ['toplist', 'mostfav']);
+  assert.deepEqual(s.mostfav, { fav: 200, favmax: 1000, order: 'shuffle' });
+  // the toplist's filters (quality, shape, categories, topic) with its own range in place of the period and minimum
+  assert.equal(mostfavQueryFor(s), 'sort=fav&atleast=3840x2160&ratios=16x9,16x10&cats=110&purity=100&fav=200&favmax=1000&maxw=0');
+  assert.equal(listQueryFor(s.filters), 'range=1y&atleast=3840x2160&ratios=16x9,16x10&cats=110&purity=100&fav=50&maxw=0');
+  assert.equal(normSettings({ mostfav: { order: 'newest', favmax: -1 } }, s).mostfav.order, 'shuffle');
+  assert.equal(normSettings({ mostfav: { favmax: 100001 } }, s).mostfav.favmax, 1000);
+  assert.equal(normSettings({ mostfav: { fav: 2000 } }, s).mostfav.favmax, 0);
+  assert.equal(normSettings({ mostfav: { fav: 1000 } }, s).mostfav.favmax, 1000);   // equal is fine: exactly 1,000
+  // what the first range build (PC 2.10) saved on the toplist goes; settings from before get Most favourited's defaults
+  const old = structuredClone(base); delete old.mostfav; old.order = 'fav'; old.filters.favmax = 900;
+  const up = normSettings({ order: 'fav', filters: { favmax: 500, fav: 25 } }, old);
+  assert.deepEqual(up.mostfav, { fav: 250, favmax: 0, order: 'top' });
+  assert.equal(up.order, undefined);
+  assert.equal(up.filters.favmax, undefined);
+  assert.equal(up.filters.fav, 25);
+});
+
+// A fake Wallhaven behind /api/page: n wallpapers, favourites going down from the top, 24 a page. Counts the pages read.
+async function fakeList(query, n) {
+  const all = Array.from({ length: n }, (_, i) => ({ id: 'w' + String(i).padStart(5, '0'), path: 'https://w/' + i + '.jpg', favorites: n - i, dimension_x: 3840 }));
+  const asked = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const u = new URL(url), page = Number(u.searchParams.get('n'));
+    asked.push(page);
+    return new Response(JSON.stringify({ data: all.slice((page - 1) * 24, page * 24), last_page: Math.ceil(n / 24) }), { headers: { 'x-vercel-cache': 'HIT' } });
+  };
+  try {
+    const { default: list } = await import('../api/list.js');
+    const req = { query: Object.fromEntries(new URLSearchParams(query)), headers: { host: 'localhost:1' } };
+    const out = await new Promise((resolve) => {
+      const res = { setHeader() {}, status(code) { this.code = code; return this; }, json(j) { resolve({ code: this.code, ...j }); } };
+      list(req, res);
+    });
+    return { ...out, asked: new Set(asked).size };
+  } finally { globalThis.fetch = realFetch; }
+}
+
+test('/api/list sort=fav reads only the pages its range covers, and all of the range', async () => {
+  const r = await fakeList('sort=fav&atleast=3840x2160&fav=1000&favmax=3000&maxw=0', 24 * 1000);   // 24,000 wallpapers, 1,000 pages
+  assert.equal(r.code, 200);
+  const favs = r.items.map((w) => w.favorites).sort((a, b) => a - b);
+  assert.equal(favs.length, 2001);
+  assert.deepEqual([favs[0], favs.at(-1)], [1000, 3000]);
+  assert.ok(r.asked < 120, `read ${r.asked} pages`);   // the 84-page slice and ~20 to find it, not 1,000
+  assert.equal(r.capped, false);
+  assert.equal(r.complete, true);
+  // no minimum: the most favourited MAX_PAGES (4,800), marked capped
+  const top = await fakeList('sort=fav&atleast=3840x2160&fav=0&maxw=0', 24 * 1000);
+  assert.equal(top.items.length, 4800);
+  assert.equal(Math.min(...top.items.map((w) => w.favorites)), 24000 - 4799);
+  assert.equal(top.capped, true);
+  // a range nothing is in: empty, not an error
+  const none = await fakeList('sort=fav&atleast=3840x2160&fav=90000&maxw=0', 24 * 10);
+  assert.equal(none.code, 200);
+  assert.equal(none.items.length, 0);
+  // the toplist still reads from the top
+  const tl = await fakeList('range=1y&atleast=3840x2160&fav=0&maxw=0', 24 * 5);
+  assert.equal(tl.items.length, 120);
 });
 
 test('/api/list and search read the range: favmax only in the address when set; below the minimum it means none', () => {

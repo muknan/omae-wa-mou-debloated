@@ -4,7 +4,11 @@ A Wallhaven toplist for the TV and the PC, shuffled, walking through the whole l
 both in step. One Vercel project with no dependencies.
 
 - `api/list.js` puts the whole toplist together from the cached pages; `api/page.js` reads one page from Wallhaven
-  (each page is cached by Vercel's CDN on its own). The apps ask for `/api/list?<filters>`.
+  (each page is cached by Vercel's CDN on its own). The apps ask for `/api/list?<filters>`. With `sort=fav` it's
+  Most favourited instead: all of Wallhaven sorted by favourites (hundreds of thousands of wallpapers, far too many to
+  fetch). Favourites only fall from page to page, so a range like 500 to 1,000 is one run of pages: it finds where
+  that run starts and ends by halving (about a dozen cached page reads) and reads only those pages, at most 200
+  (4,800 wallpapers, the most favourited of the range when it holds more).
 - `api/v1/search.js` answers Projectivy's Booru plugin (`<Booru URL>/api/v1/search?...`) with the current set.
 - `api/sync.js` (`/api/sync/<action>`) is the sync for the apps and the remote; `public/` is the remote itself.
 - `lib/core.js` has the shared list code and settings, `lib/sync.js` the sync.
@@ -28,14 +32,15 @@ favourites, playlists (folders of hard links, no duplicate files) and folders of
 Open the deployment's address on a phone (or any browser) for the remote:
 
 - **Now**: what each device shows, with Keep, Previous, Pause, Next and ♡; what it shuffles (any mix of the toplist,
-  Favourites and playlists, and a PC's own folders), its toplist filters (popularity can be a range, like 200 to
-  1,000 favourites), its order (shuffled, or the most favourited first), and how often it changes. Tap the picture for
+  Most favourited, Favourites and playlists, and a PC's own folders), its toplist filters, Most favourited's range
+  (like 500 to 1,000 favourites) and order (Most first or Shuffled), and how often it changes. Tap the picture for
   the rest: show it on another device, add it to a playlist, never show it again, open it on Wallhaven. Swipe it for
   Next and Previous; on a computer, ← and → do the same and the space bar pauses.
 - **Playlists**: the same on every device. Each device picks which ones it shuffles. Add a wallpaper by its
   Wallhaven link. Hidden is a grid of what's never shown: tap the ones to let back, then Show again
   (with Undo).
-- **Browse**: a device's toplist as a grid, by most favourites, newest or shuffled, to add to playlists.
+- **Browse**: a device's toplist or Most favourited as a grid, by most favourites, newest or shuffled, to add to
+  playlists.
 - **Devices**: pair a TV, PC or browser with the 6-digit code it shows; rename or sign out any of them.
 
 It works as an app on the phone's home screen (Add to Home screen). Changes reach a device within its next check-in:

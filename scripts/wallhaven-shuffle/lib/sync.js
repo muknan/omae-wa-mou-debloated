@@ -111,10 +111,12 @@ export const FAVS = [0, 10, 25, 50, 100, 250, 500, 1000];
 export const MAXW = { 0: 'Any', 3840: 'Up to 4K', 5120: 'Up to 5K' };
 export const EVERY = [1, 2, 5, 10, 15, 30, 60, 120, 180, 360, 720, 1440];
 export const TOPICS = ['nature', 'landscape', 'mountains', 'forest', 'ocean', 'space', 'city', 'night', 'sunset', 'winter', 'architecture', 'minimalism', 'abstract', 'digital art', 'cars'];
-// The order a device shows its pool in: shuffled, or the most favourited first (the same words as Browse).
-export const ORDER = { shuffle: 'Shuffled', fav: 'Most favourites' };
+// Most favourited (all of Wallhaven by favourites, a favourites range): played from the top down, or shuffled.
+export const ORDER = { top: 'Most first', shuffle: 'Shuffled' };
+export const MOSTFAV_FAVS = [100, 250, 500, 1000, 2000];
 export const FAV_MAX = 100000;
-export const PRESETS = { quality: QUALITY, ratio: RATIO, range: RANGE, fav: FAVS, maxw: MAXW, every: EVERY, topics: TOPICS, order: ORDER };
+export const PRESETS = { quality: QUALITY, ratio: RATIO, range: RANGE, fav: FAVS, maxw: MAXW, every: EVERY, topics: TOPICS, order: ORDER, mostfav: MOSTFAV_FAVS };
+const defaultMostfav = () => ({ fav: 250, favmax: 0, order: 'top' });
 
 export const MAX_ITEMS = 5000, MAX_PLAYLISTS = 100, MAX_DEVICES = 30;
 const KINDS = new Set(['tv', 'pc', 'web']);
@@ -125,8 +127,9 @@ export function defaultSettings(kind) {
     sources: ['toplist'],
     // The same list the apps used before sync (1 year of 4K+, widescreen, no People, 50+ favourites); a TV skips
     // anything wider than 4K, which its decoder handles slowly.
-    filters: { quality: '4k+', ratio: '16x9,16x10', range: '1y', fav: 50, favmax: 0, cats: '110', maxw: kind === 'tv' ? 3840 : 0, q: '' },
-    order: 'shuffle',
+    filters: { quality: '4k+', ratio: '16x9,16x10', range: '1y', fav: 50, cats: '110', maxw: kind === 'tv' ? 3840 : 0, q: '' },
+    // Most favourited's own part; quality, shape, categories and topic are the filters above, shared with the toplist
+    mostfav: defaultMostfav(),
     every: kind === 'tv' ? 1 : 15,
     paused: false,
     keep: '',
@@ -137,33 +140,47 @@ export function defaultSettings(kind) {
 export function normSettings(patch, base) {
   const out = structuredClone(base);
   const s = patch && typeof patch === 'object' ? patch : {};
-  if (Array.isArray(s.sources)) out.sources = [...new Set(s.sources.filter((x) => typeof x === 'string' && /^(toplist|fav|p_[a-z0-9]{4,24})$/.test(x)))].slice(0, MAX_PLAYLISTS + 2);
+  if (Array.isArray(s.sources)) out.sources = [...new Set(s.sources.filter((x) => typeof x === 'string' && /^(toplist|mostfav|fav|p_[a-z0-9]{4,24})$/.test(x)))].slice(0, MAX_PLAYLISTS + 2);
   if (s.filters && typeof s.filters === 'object') {
     const f = s.filters, o = out.filters;
     if (Object.hasOwn(QUALITY, f.quality)) o.quality = f.quality;
     if (typeof f.ratio === 'string' && Object.hasOwn(RATIO, f.ratio)) o.ratio = f.ratio;
     if (Object.hasOwn(RANGE, f.range)) o.range = f.range;
     if (Number.isInteger(f.fav) && f.fav >= 0 && f.fav <= FAV_MAX) o.fav = f.fav;
-    if (Number.isInteger(f.favmax) && f.favmax >= 0 && f.favmax <= FAV_MAX) o.favmax = f.favmax;
-    // a minimum raised past the maximum (an app from before ranges sends only fav): no upper limit then
-    if (!Number.isInteger(o.favmax) || o.favmax < o.fav) o.favmax = 0;
     if (/^[01]{3}$/.test(f.cats) && f.cats !== '000') o.cats = f.cats;
     if (Number.isInteger(f.maxw) && Object.hasOwn(MAXW, f.maxw)) o.maxw = f.maxw;
     if (f.q !== undefined) o.q = normTopic(f.q);
   }
-  if (Object.hasOwn(ORDER, s.order)) out.order = s.order;
-  if (!Object.hasOwn(ORDER, out.order)) out.order = 'shuffle';
+  // Most favourited: a favourites range (favmax 0 = no upper limit) and an order
+  if (!out.mostfav || typeof out.mostfav !== 'object') out.mostfav = defaultMostfav();
+  if (s.mostfav && typeof s.mostfav === 'object') {
+    const m = s.mostfav, o = out.mostfav;
+    if (Number.isInteger(m.fav) && m.fav >= 0 && m.fav <= FAV_MAX) o.fav = m.fav;
+    if (Number.isInteger(m.favmax) && m.favmax >= 0 && m.favmax <= FAV_MAX) o.favmax = m.favmax;
+    if (Object.hasOwn(ORDER, m.order)) o.order = m.order;
+  }
+  const m = out.mostfav;
+  if (!Number.isInteger(m.fav)) m.fav = 250;
+  if (!Number.isInteger(m.favmax) || (m.favmax && m.favmax < m.fav)) m.favmax = 0; // a minimum raised past the maximum: no upper limit
+  if (!Object.hasOwn(ORDER, m.order)) m.order = 'top';
+  // gone since Most favourited (2026-11): the toplist's maximum and the order of the whole mix
+  delete out.order; delete out.filters.favmax;
   if (Number.isInteger(s.every) && s.every >= 1 && s.every <= 1440) out.every = s.every;
   if (typeof s.paused === 'boolean') out.paused = s.paused;
   if (typeof s.keep === 'string' && s.keep.length <= 400) out.keep = s.keep;
   return out;
 }
 
-// The /api/list query for a device's filters: always without the width limit and the favourites maximum, which each
-// app applies itself, so devices with the same filters share one cached list.
+// The /api/list query for a device's filters: always without the width limit, which each app applies itself, so
+// devices with the same filters share one cached list.
 export function listQueryFor(f) {
   const q = QUALITY[f.quality] || QUALITY['4k+'];
   return listQuery({ range: f.range, res: q.res || '', atleast: q.atleast || '', ratios: f.ratio, cats: f.cats, purity: '100', q: f.q, fav: f.fav, maxw: 0 });
+}
+// ... and for its Most favourited: the same filters with its own favourites range instead of the period and minimum.
+export function mostfavQueryFor(settings) {
+  const f = settings.filters, m = settings.mostfav || defaultMostfav(), q = QUALITY[f.quality] || QUALITY['4k+'];
+  return listQuery({ sort: 'fav', res: q.res || '', atleast: q.atleast || '', ratios: f.ratio, cats: f.cats, purity: '100', q: f.q, fav: m.fav, favmax: m.favmax, maxw: 0 });
 }
 
 // ---- the document
@@ -495,7 +512,7 @@ const ACTIONS = {
     const hashes = (await store.pipe(ids.map((i) => ['HGETALL', K.dev(i)]))).map(hashObj);
     const status = {}, wake = [];
     ids.forEach((i, n) => {
-      status[i] = { ...statusOf(hashes[n], now), list: listQueryFor(doc.devices[i].settings.filters) };
+      status[i] = { ...statusOf(hashes[n], now), list: listQueryFor(doc.devices[i].settings.filters), listFav: mostfavQueryFor(normSettings({}, doc.devices[i].settings)) };
       if ((Number(hashes[n].live) || 0) < now + 60e3) wake.push(['HSET', K.dev(i), 'live', now + 120e3]);
     });
     // Devices poll every few seconds while a remote is open and in use (an idle one asks with quiet=1).

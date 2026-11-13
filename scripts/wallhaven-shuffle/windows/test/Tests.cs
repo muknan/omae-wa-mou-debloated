@@ -87,17 +87,23 @@ namespace WallhavenShuffle
                 Ok(Filters.ParseRange("", "0", out lo, out hi) == "At most: 1 or more, or empty", "At most 0: says why");
                 Ok(Filters.ParseRange("abc", "", out lo, out hi).StartsWith("At least:") && Filters.ParseRange("1", "200000", out lo, out hi).StartsWith("At most:"), "bad numbers: says which field");
             }
-            var rg = new Filters { Fav = 200, FavMax = 1000 }.Clean();
-            Ok(rg.FavMax == 1000 && rg.ListQuery() == "range=1y&atleast=3840x2160&ratios=16x9,16x10&cats=110&purity=100&fav=200&maxw=0", "the maximum stays out of the list query (each app applies it): " + rg.ListQuery());
-            Ok(new Filters { Fav = 2000, FavMax = 1000 }.Clean().FavMax == 0 && new Filters { FavMax = -3 }.Clean().FavMax == 0 && new Filters { FavMax = 100001 }.Clean().FavMax == 0, "a maximum below the minimum or out of range: no upper limit");
+            // Most favourited: its own range and order; the rest of its filters are the toplist's.
             {
-                var dsr = new DeviceSettings { Order = "fav", Filters = new Filters { Fav = 200, FavMax = 1000 } };
+                var tf = new Filters { Fav = 200 }.Clean();
+                Ok(tf.ListQuery() == "range=1y&atleast=3840x2160&ratios=16x9,16x10&cats=110&purity=100&fav=200&maxw=0", "the toplist's list query: a minimum only: " + tf.ListQuery());
+                var mf = new MostFav { Fav = 200, FavMax = 1000 }.Clean();
+                Ok(tf.MostFavQuery(mf) == "sort=fav&atleast=3840x2160&ratios=16x9,16x10&cats=110&purity=100&fav=200&favmax=1000&maxw=0", "Most favourited's query, the service's mostfavQueryFor: " + tf.MostFavQuery(mf));
+                Ok(tf.MostFavQuery(new MostFav()) == "sort=fav&atleast=3840x2160&ratios=16x9,16x10&cats=110&purity=100&fav=250&maxw=0", "no upper limit: no favmax in it");
+                Ok(new MostFav { Fav = 2000, FavMax = 1000 }.Clean().FavMax == 0 && new MostFav { FavMax = -3 }.Clean().FavMax == 0 && new MostFav { FavMax = 100001 }.Clean().FavMax == 0 && new MostFav { Fav = 500, FavMax = 500 }.Clean().FavMax == 500, "a maximum below the minimum or out of range: no upper limit; equal is fine");
+                Ok(new MostFav { Order = "fav" }.Clean().Order == "top" && new MostFav { Fav = -1 }.Clean().Fav == 250, "an unknown order or a bad minimum: the defaults");
+                Ok(new MostFav { Fav = 500, FavMax = 1000 }.Summary == "500 to 1,000 favourites" && new MostFav { Order = "shuffle" }.Summary == "250+ favourites\u00a0· Shuffled", "the row: the range, and Shuffled only when shuffled");
+                var dsr = new DeviceSettings { Sources = new List<string> { "mostfav" }, MostFav = new MostFav { Fav = 200, FavMax = 1000, Order = "shuffle" } };
                 var dsr2 = DeviceSettings.FromDict(Json.Parse(Json.Write(dsr.ToDict())) as Dictionary<string, object>);
-                Ok(dsr2.Order == "fav" && dsr2.Filters.FavMax == 1000 && dsr2.Filters.Fav == 200 && dsr2.Signature == dsr.Signature, "order and the maximum go to the service and back");
-                var old = DeviceSettings.FromDict(Json.Parse("{\"filters\":{\"fav\":50},\"order\":\"weird\"}") as Dictionary<string, object>);
-                Ok(old.Order == "shuffle" && old.Filters.FavMax == 0, "settings from before (no maximum, an unknown order): shuffled, no upper limit");
+                Ok(dsr2.Sources.SequenceEqual(new[] { "mostfav" }) && dsr2.MostFav.Same(dsr.MostFav) && dsr2.Signature == dsr.Signature, "Most favourited goes to the service and back");
+                var old = DeviceSettings.FromDict(Json.Parse("{\"filters\":{\"fav\":50,\"favmax\":300},\"order\":\"fav\"}") as Dictionary<string, object>);
+                Ok(old.MostFav.Same(new MostFav()) && !old.ToDict().ContainsKey("order") && !Json.Write(old.ToDict()).Contains("favmax\":300"), "settings from round 1 (a toplist maximum, a whole-mix order): dropped, Most favourited's defaults");
             }
-            // Order: Most favourites. The most favourited one not shown this round, round after round; shuffled stays random.
+            // Most first: the most favourited one not shown this round, round after round; shuffled stays random.
             {
                 var favOf = new Dictionary<string, int> { { "a", 10 }, { "b", 900 }, { "c", 50 }, { "d", 900 }, { "e", -1 } };
                 var pool = new List<string> { "a", "b", "c", "d", "e" };
@@ -357,24 +363,93 @@ namespace WallhavenShuffle
                     };
                     int was = s.Filters.Fav;
                     var popA = popularity();
-                    Ok(popA.Last().Text == "Type a range…" && popA[popA.Count - 2] is ToolStripSeparator && popA.OfType<ToolStripMenuItem>().Count(x => x.Checked) == 1, "Popularity ends with Type a range…");
+                    Ok(popA.Last().Text == "Type one…" && popA[popA.Count - 2] is ToolStripSeparator && popA.OfType<ToolStripMenuItem>().Count(x => x.Checked) == 1 && !popA.Any(x => x.Text.Contains(" to ")), "the toplist's Popularity: minimums, then Type one…");
                     app.SetFilters(x => x.Fav = 1500);
                     var popB = popularity().OfType<ToolStripMenuItem>().Select(x => x.Text + (x.Checked ? "*" : "")).ToList();
                     Ok(popB.IndexOf("1,500+ favourites*") == popB.IndexOf("1,000+ favourites") + 1, "a typed-in one shows in its place, checked: " + string.Join(" | ", popB));
-                    app.SetFilters(x => { x.Fav = 200; x.FavMax = 1000; });
-                    var popC = popularity().OfType<ToolStripMenuItem>().Select(x => x.Text + (x.Checked ? "*" : "")).ToList();
-                    Ok(popC.IndexOf("200 to 1,000 favourites*") == popC.IndexOf("100+ favourites") + 1 && !popC.Contains("1,500+ favourites"), "a range shows in its place, checked: " + string.Join(" | ", popC));
-                    Ok(Settings.Load().Filters.FavMax == 1000, "settings.ini keeps the maximum");
-                    // a preset: a minimum again, no upper limit
                     popularity().OfType<ToolStripMenuItem>().First(x => x.Text == "50+ favourites").PerformClick();
-                    for (int k = 0; k < 20 && s.Filters.FavMax != 0; k++) { Application.DoEvents(); System.Threading.Thread.Sleep(10); }
-                    Ok(s.Filters.Fav == 50 && s.Filters.FavMax == 0, "picking a preset clears the maximum");
-                    app.SetFilters(x => { x.Fav = was; x.FavMax = 0; });
-                    // Order: a new round, kept in settings.ini
-                    app.SetOrder("fav");
-                    Ok(s.Order == "fav" && Settings.Load().Order == "fav", "Order: Most favourites is saved");
-                    app.SetOrder("shuffle");
-                    Ok(Settings.Load().Order == "shuffle", "and back to Shuffled");
+                    for (int k = 0; k < 20 && s.Filters.Fav != 50; k++) { Application.DoEvents(); System.Threading.Thread.Sleep(10); }
+                    Ok(s.Filters.Fav == 50 && Settings.Load().Filters.Fav == 50, "picking a preset saves it");
+                    app.SetFilters(x => x.Fav = was);
+                }
+
+                // Most favourited ▸ Popularity (presets, a typed range in its place, Type a range…) and Order
+                {
+                    Func<string, List<ToolStripItem>> mostFavMenu = title =>
+                    {
+                        var menu = new FluentMenu();
+                        app.FillMostFavMenu(menu, null);
+                        var top = menu.Items.OfType<ToolStripMenuItem>().First(x => x.Text == title);
+                        menu.Show(new Point(-3000, -3000));
+                        for (int k = 0; k < 10; k++) { Application.DoEvents(); System.Threading.Thread.Sleep(5); }
+                        top.ShowDropDown();
+                        for (int k = 0; k < 10; k++) { Application.DoEvents(); System.Threading.Thread.Sleep(5); }
+                        var items = top.DropDownItems.Cast<ToolStripItem>().ToList();
+                        menu.Close();
+                        return items;
+                    };
+                    Func<List<ToolStripItem>, string> texts = l => string.Join("|", l.OfType<ToolStripMenuItem>().Select(x => x.Text + (x.Checked ? "*" : "")));
+                    var mp = mostFavMenu("Popularity");
+                    Ok(texts(mp) == "100+ favourites|250+ favourites*|500+ favourites|1,000+ favourites|2,000+ favourites|Type a range…" && mp[mp.Count - 2] is ToolStripSeparator, "Most favourited's Popularity: " + texts(mp));
+                    app.SetMostFav(x => { x.Fav = 500; x.FavMax = 1000; });
+                    var mp2 = texts(mostFavMenu("Popularity"));
+                    Ok(mp2.Contains("250+ favourites|500 to 1,000 favourites*|500+ favourites"), "a range shows in its place (narrower first, as on the remote), checked: " + mp2);
+                    Ok(Settings.Load().MostFav.Fav == 500 && Settings.Load().MostFav.FavMax == 1000, "settings.ini keeps the range");
+                    var mo = mostFavMenu("Order");
+                    Ok(texts(mo) == "Most first*|Shuffled", "Order: " + texts(mo));
+                    mo.OfType<ToolStripMenuItem>().First(x => x.Text == "Shuffled").PerformClick();
+                    for (int k = 0; k < 20 && s.MostFav.Order != "shuffle"; k++) { Application.DoEvents(); System.Threading.Thread.Sleep(10); }
+                    Ok(s.MostFav.Order == "shuffle" && Settings.Load().MostFav.Order == "shuffle", "Shuffled is saved");
+                    var turnOn = new FluentMenu();
+                    app.FillMostFavMenu(turnOn, null);
+                    Ok(turnOn.Items.Cast<ToolStripItem>().Last().Text == "Turn Most favourited on", "while it's off, the menu offers to turn it on");
+                    turnOn.Dispose();
+
+                    // its list joins the pool: inside the range, no duplicates, hidden left out; Most first from the top
+                    var oldSources = s.Sources.ToList();
+                    Func<string, int, Wall> mk = (id, favN) => Wall.Make(id, "https://w.wallhaven.cc/full/" + id.Substring(0, 2) + "/wallhaven-" + id + ".jpg", "https://wallhaven.cc/w/" + id, "3840x2160", favN);
+                    SetF(app, "favWalls", new List<Wall> { mk("mf0001", 1200), mk("mf0002", 900), mk("mf0003", 700), mk("mf0004", 450), mk("abc123", 600) });
+                    SetF(app, "walls", new List<Wall> { mk("abc123", 600), mk("tp0001", 80) });
+                    app.SetMostFav(x => x.Order = "top");
+                    s.Sources = new List<string> { "mostfav" };
+                    var mfPool = ((List<Wall>)Call(app, "Pool")).Select(w => w.Id).OrderBy(x => x).ToList();
+                    Ok(string.Join(",", mfPool) == "abc123,mf0002,mf0003", "only the ones in 500 to 1,000: " + string.Join(",", mfPool));
+                    var srcInfo = app.SourceByKey("mostfav");
+                    Ok(srcInfo != null && srcInfo.Name == "Most favourited" && srcInfo.Count == 3 && app.Sources()[1].Key == "mostfav", "Shuffle from lists it second, with its count");
+                    s.Sources = new List<string> { "mostfav", "toplist" };
+                    var both = ((List<Wall>)Call(app, "Pool")).Select(w => w.Id).ToList();
+                    Ok(both.Count == 4 && both.Count(x => x == "abc123") == 1, "with the toplist: each once: " + string.Join(",", both));
+                    SetF(app, "current", null);
+                    var first = (Wall)Call(app, "PickNext");
+                    Ok(first != null && first.Id == "mf0002", "Most first: the most favourited first: " + (first == null ? "none" : first.Id));
+                    var mst = (Dictionary<string, object>)Call(app, "StatusForRemote", new object[] { null });
+                    Ok(!mst.ContainsKey("listFav"), "no count for the remote before its list for this range is here");
+                    SetF(app, "favFor", s.Filters.MostFavQuery(s.MostFav)); SetF(app, "favOf", 4800);
+                    mst = (Dictionary<string, object>)Call(app, "StatusForRemote", new object[] { null });
+                    var counts = (Dictionary<string, object>)mst["counts"];
+                    Ok((string)mst["listFav"] == s.Filters.MostFavQuery(s.MostFav) && (int)counts["mostfav"] == 3 && (int)counts["mostfavOf"] == 4800, "the remote gets its query, count and the range's size");
+                    s.Sources = oldSources;
+                    app.SetMostFav(x => { x.Fav = 250; x.FavMax = 0; x.Order = "top"; });
+
+                    // the window's row: a long value widens its button (never cut while the name leaves room), a short one shrinks it back
+                    using (var form = new Form { StartPosition = FormStartPosition.Manual, Location = new Point(-4000, -4000), ShowInTaskbar = false, ClientSize = new Size((int)(424 * Theme.Scale), (int)(60 * Theme.Scale)) })
+                    {
+                        var btn = new MenuButton();
+                        var row = new Row("Most favourited", btn, false) { Bounds = new Rectangle(0, 0, (int)(422 * Theme.Scale), (int)(56 * Theme.Scale)) };
+                        form.Controls.Add(row);
+                        btn.Text = new MostFav { Fav = 500, FavMax = 1000, Order = "shuffle" }.Summary;   // set before it has a handle, as the window does
+                        form.Show();
+                        for (int k = 0; k < 10; k++) { Application.DoEvents(); System.Threading.Thread.Sleep(5); }
+                        float text, name;
+                        using (var gr = btn.CreateGraphics()) { text = Theme.Measure(gr, btn.Text, btn.Font).Width; name = Theme.Measure(gr, row.Text, row.Font).Width; }
+                        int wide = btn.Width;
+                        Ok(wide - 48 * Theme.Scale >= text && btn.Left >= 20 * Theme.Scale + name, "a long value fits its button (" + wide + " wide for " + Math.Ceiling(text) + ") and leaves the name whole");
+                        btn.Text = "2 minutes";
+                        Application.DoEvents();
+                        Ok(btn.Width == (int)Math.Round(200 * Theme.Scale), "a short value: back to the usual width (" + btn.Width + ")");
+                        form.Close();
+                    }
+                    SetF(app, "favWalls", new List<Wall>()); SetF(app, "favFor", ""); SetF(app, "favOf", 0);
                 }
             }
             finally
