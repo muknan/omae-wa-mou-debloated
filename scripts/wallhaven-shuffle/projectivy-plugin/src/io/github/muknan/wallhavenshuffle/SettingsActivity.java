@@ -7,6 +7,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Outline;
+import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.StateListDrawable;
@@ -83,7 +84,13 @@ public final class SettingsActivity extends Activity implements Sync.Listener {
         columns.addView(leftColumn(), new LinearLayout.LayoutParams(dp(500), ViewGroup.LayoutParams.WRAP_CONTENT));
         View gap = new View(this);
         columns.addView(gap, new LinearLayout.LayoutParams(dp(44), 1));
-        ScrollView list = new ScrollView(this);
+        // Moving to a row scrolls it in with a heading's height to spare above and below, so a group's first row
+        // brings its heading with it and its last row the note under it (plain ScrollView stops at the row's edge).
+        ScrollView list = new ScrollView(this) {
+            @Override protected int computeScrollDeltaToGetChildRectOnScreen(Rect r) {
+                return super.computeScrollDeltaToGetChildRectOnScreen(new Rect(r.left, r.top - dp(64), r.right, r.bottom + dp(64)));
+            }
+        };
         list.setVerticalScrollBarEnabled(false);
         list.setClipToPadding(false);
         list.addView(rightColumn());
