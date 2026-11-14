@@ -11,7 +11,7 @@
   };
   let token = store.get('whs.token');
   const S = { doc: null, status: {}, presets: null, me: null, online: true, inFlight: 0 };
-  const UI = { dev: store.get('whs.dev'), hiddenSel: new Set(), pending: {}, settleAt: {}, localWant: {}, heroes: {}, shown: {}, browse: { dev: store.get('whs.browseDev'), src: store.get('whs.browseSrc') === 'mostfav' ? 'mostfav' : 'toplist', sort: 'fav', withHidden: false } };
+  const UI = { dev: store.get('whs.dev'), hiddenSel: new Set(), pending: {}, settleAt: {}, localWant: {}, heroes: {}, shown: {}, browse: { dev: store.get('whs.browseDev'), sort: 'fav', withHidden: false } };
   const lists = new Map(); // list query -> { items, error, loading, at }
   const sheets = new Set(); // open sheets' refill functions, so they follow changes made elsewhere
 
@@ -256,15 +256,26 @@
     if (String(maxText).trim() && max < Math.max(min, 1)) return { err: `At most: ${nf.format(Math.max(min, 1))} or more, or empty` };
     return { fav: min, favmax: max };
   }
-  // Most favourited: all of Wallhaven by favourites, in a range, played from the top down or shuffled
+  // Wallhaven: one source, sorted one of two ways, as on wallhaven.cc. Toplist: the most popular of a period, with a
+  // minimum. Most favourited: all of Wallhaven by favourites, a range, played from the top down or shuffled.
+  const SORT = { toplist: 'Toplist', fav: 'Most favourited' };
+  const SORT_NOTE = { toplist: 'Wallhaven’s most popular over a period.', fav: 'All of Wallhaven, from the most favourited down.' };
   const ORDER = { top: 'Most first', shuffle: 'Shuffled' };
   const ORDER_NOTE = 'Most first goes from the most favourited down. Anything else you shuffle from joins in by its favourites.';
   const MAX_LIST = 4800;   // the most a Most favourited list holds (the service's 200 pages)
   const mostfavOf = (s) => s.mostfav || { fav: 250, favmax: 0, order: 'top' };
-  // the row: the range, and the order when it isn't the one the name already says (Most first). SEP keeps the dot
-  // with the word before it when a value wraps.
+  const sortOf = (s) => (s.sort === 'fav' ? 'fav' : 'toplist');
+  // SEP keeps the dot with the word before it when a value wraps.
   const SEP = ' · ';
-  const mostfavSummary = (m) => (m.order === 'shuffle' ? `${favLabel(m.fav, m.favmax)}${SEP}${ORDER.shuffle}` : favLabel(m.fav, m.favmax));
+  // a range in few words, for the Wallhaven row: 250+, 500 to 1,000, Up to 1,000 (nothing when it's any)
+  const favShort = (min, max = 0) => (max ? (min ? `${nf.format(min)} to ${nf.format(max)}` : `Up to ${nf.format(max)}`) : min ? `${nf.format(min)}+` : '');
+  // The Wallhaven row, the same words on the TV and PC: its sort and what sets it apart (the period, or the range and
+  // Shuffled when it isn't the order the name already says), and a topic if there is one.
+  function wallhavenSummary(s) {
+    const f = s.filters, m = mostfavOf(s);
+    const parts = sortOf(s) === 'fav' ? [SORT.fav, favShort(m.fav, m.favmax), m.order === 'shuffle' ? ORDER.shuffle : null] : [SORT.toplist, S.presets.range[f.range]];
+    return [...parts, f.q ? `“${f.q}”` : null].filter(Boolean).join(SEP);
+  }
   const kindIcon = (k) => (k === 'tv' ? 'tv' : k === 'pc' ? 'pc' : 'web');
   const kindName = (k) => (k === 'tv' ? 'TV' : k === 'pc' ? 'PC' : 'Browser');
   function presence(id) {
@@ -327,7 +338,7 @@
       for (const dev of Object.values(d.devices)) if (dev.settings) dev.settings.sources = dev.settings.sources.filter((s) => s !== o.pl);
     } else if (o.op === 'settings') {
       const s = d.devices[o.device]?.settings;
-      if (s) { const { filters, ...rest } = o.patch; Object.assign(s, rest); if (filters) Object.assign(s.filters, filters); }
+      if (s) { const { filters, mostfav, ...rest } = o.patch; Object.assign(s, rest); if (filters) Object.assign(s.filters, filters); if (mostfav) s.mostfav = { ...mostfavOf(s), ...mostfav }; }
     } else if (o.op === 'name') { const dev = d.devices[o.device]; if (dev) dev.name = o.name; }
   }
 
@@ -733,15 +744,10 @@
   }
   function sourcesSummary(id) {
     const s = S.doc.devices[id].settings;
-    const names = s.sources.map((k) => (k === 'toplist' ? 'Toplist' : k === 'mostfav' ? 'Most favourited' : findPl(k)?.name)).filter(Boolean)
+    const names = s.sources.map((k) => (k === 'toplist' ? 'Wallhaven' : findPl(k)?.name)).filter(Boolean)
       .concat(localsOf(id).filter((l) => l.on).map((l) => l.name));
     if (!names.length) return 'Nothing yet';
     return names.length <= 2 ? names.join(', ') : `${names[0]} + ${names.length - 1} more`;
-  }
-  const sharedSummary = (f) => [S.presets.quality[f.quality]?.label, f.q ? `“${f.q}”` : null].filter(Boolean).join(SEP);
-  function filtersSummary(f) {
-    const pr = S.presets;
-    return [pr.quality[f.quality]?.label, pr.range[f.range], f.q ? `“${f.q}”` : null].filter(Boolean).join(SEP);
   }
 
   function pendingLabel(p, name) {
@@ -804,8 +810,7 @@
     const none = !s.sources.length && !localsOf(id).some((l) => l.on);
     const settings = group(
       item({ label: 'Shuffle from', value: sourcesSummary(id), onclick: () => sourcesSheet(id), cls: none ? 'warn' : '' }),
-      item({ label: 'Toplist', value: filtersSummary(s.filters), onclick: () => filtersSheet(id) }),
-      item({ label: 'Most favourited', value: mostfavSummary(mostfavOf(s)), onclick: () => mostfavSheet(id) }),
+      item({ label: 'Wallhaven', value: wallhavenSummary(s), onclick: () => wallhavenSheet(id) }),
       selectItem({ label: 'Change every', value: s.every, id: `every-${id}`, options: S.presets.every.map((m) => [m, everyLabel(m)]), onchange: (v) => setSettings(id, { every: Number(v) }) }));
 
     const hiddenIds = new Set(findPl('hidden').items.map((x) => x.id));
@@ -831,8 +836,7 @@
       put(body, 
         h('div', { class: 'pad' }, h('p', { class: 'note' }, `Turn on any mix. ${d.name} goes through all of them in one round, with no repeats.`)),
         group(
-          switchItem({ label: 'Toplist', sub: st.counts?.toplist != null ? `${plural(st.counts.toplist, 'wallpaper')} with its filters` : 'Wallhaven’s most popular, with its filters', on: s.sources.includes('toplist'), id: `src-${id}-toplist`, onchange: () => toggleSource(id, 'toplist') }),
-          switchItem({ label: 'Most favourited', sub: st.counts?.mostfav != null ? `${plural(st.counts.mostfav, 'wallpaper')}, ${favLabel(mostfavOf(s).fav, mostfavOf(s).favmax)}` : 'All of Wallhaven, most favourited first', on: s.sources.includes('mostfav'), id: `src-${id}-mostfav`, onchange: () => toggleSource(id, 'mostfav') }),
+          switchItem({ label: 'Wallhaven', sub: listCount(id) != null ? `${plural(listCount(id), 'wallpaper')}${SEP}${SORT[sortOf(s)]}` : SORT[sortOf(s)], on: s.sources.includes('toplist'), id: `src-${id}-toplist`, onchange: () => toggleSource(id, 'toplist') }),
           switchItem({ label: 'Favourites', sub: plural(findPl('fav').items.length, 'wallpaper'), on: s.sources.includes('fav'), id: `src-${id}-fav`, onchange: () => toggleSource(id, 'fav') })),
         userPlaylists().length ? [groupLabel('Playlists'), group(userPlaylists().map((p) => switchItem({
           label: p.name, sub: plural(p.items.length, 'wallpaper'), on: s.sources.includes(p.id), id: `src-${id}-${p.id}`, onchange: () => toggleSource(id, p.id),
@@ -845,41 +849,81 @@
     });
   }
 
-  function browseFrom(id, src) {
-    Object.assign(UI.browse, { dev: id, src });
-    store.set('whs.browseDev', id); store.set('whs.browseSrc', src);
+  function browseFrom(id) {
+    UI.browse.dev = id;
+    store.set('whs.browseDev', id);
     location.hash = '#/browse';
   }
+  // How many the device's Wallhaven list holds, once it has the list for its settings as they are now (null before).
+  function listCount(id) {
+    const stat = S.status[id] || {}, st = stat.st || {};
+    return st.list === stat.list && st.counts?.toplist != null ? st.counts.toplist : null;
+  }
 
-  function mostfavSheet(id) {
-    sheet('Most favourited', (body, close) => {
+  // Wallhaven: Sort by, then the sort's own rows, then the filters both sorts share, then how many that comes to.
+  function wallhavenSheet(id) {
+    sheet('Wallhaven', (body, close) => {
       const d = S.doc.devices[id];
       if (!d) return close();
-      const s = d.settings, m = mostfavOf(s), pr = S.presets, stat = S.status[id] || {}, st = stat.st || {};
+      const s = d.settings, f = s.filters, m = mostfavOf(s), sort = sortOf(s), pr = S.presets, stat = S.status[id] || {}, st = stat.st || {};
+      const setF = (patch) => setSettings(id, { filters: patch });
       const setM = (patch) => setSettings(id, { mostfav: patch });
-      const on = s.sources.includes('mostfav');
-      const matches = st.listFav === stat.listFav && st.counts?.mostfav != null;
-      const count = !matches ? null
-        : st.counts.mostfavOf > MAX_LIST ? `${d.name} has the ${nf.format(st.counts.mostfav)} most favourited of about ${nf.format(st.counts.mostfavOf)} in this range.`
-          : `${plural(st.counts.mostfav, 'wallpaper')} match on ${d.name}.`;
-      put(body,
-        h('div', { class: 'pad' }, h('p', { class: 'note' }, 'All of Wallhaven, sorted by favourites. Quality, shape, categories and topic are the Toplist’s.')),
-        group(
+      const on = s.sources.includes('toplist');
+      const cats = ['General', 'Anime', 'People'];
+      const topic = h('input', { class: 'inline', id: `topic-${id}`, value: f.q, placeholder: 'Any', list: `topics-${id}`, maxlength: 40, enterkeyhint: 'done', autocomplete: 'off', 'aria-label': 'Topic',
+        onchange: (e) => setF({ q: e.target.value }), onkeydown: (e) => { if (e.key === 'Enter') e.target.blur(); } });
+      const n = listCount(id);
+      const count = n == null ? null
+        : sort === 'fav' && st.counts.toplistOf > MAX_LIST ? `${d.name} has the ${nf.format(n)} most favourited of about ${nf.format(st.counts.toplistOf)} in this range.`
+          : `${plural(n, 'wallpaper')} match on ${d.name}.`;
+      // Sort by: two choices, both in view, like wallhaven.cc's; the rows under it follow it
+      const seg = h('div', { class: 'seg', role: 'radiogroup', 'aria-label': 'Sort by' }, Object.entries(SORT).map(([k, label]) =>
+        h('button', { type: 'button', role: 'radio', 'aria-checked': String(k === sort), 'data-sort': k, onclick: () => { if (k !== sortOf(S.doc.devices[id]?.settings || {})) setSettings(id, { sort: k }); } }, label)));
+      const own = sort === 'fav'
+        ? [
           // the presets (a minimum), the one in use if it was typed in (a range too), and Type a range…
           selectItem({ label: 'Popularity', value: favKey(m), id: `mf-${id}`, options: favOptions(pr.mostfav || [100, 250, 500, 1000, 2000], m),
             onchange: async (v) => {
-              if (v !== 'type') { const [a, b = '0'] = v.split('-'); return setM({ fav: Number(a), favmax: Number(b) }); }
+              if (v !== 'type') { const [lo, hi = '0'] = v.split('-'); return setM({ fav: Number(lo), favmax: Number(hi) }); }
               sheets.forEach((r) => r());   // the select shows the one in use again while typing
               const r = await rangePrompt(m.fav, m.favmax || 0);
               const now = mostfavOf(S.doc.devices[id]?.settings || {});
               if (r && (r.fav !== now.fav || r.favmax !== (now.favmax || 0))) setM(r);
             } }),
-          selectItem({ label: 'Order', value: Object.hasOwn(ORDER, m.order) ? m.order : 'top', id: `mo-${id}`, options: Object.entries(ORDER), onchange: (v) => setM({ order: v }) })),
-        h('div', { class: 'pad', style: { marginTop: '-8px' } }, h('p', { class: 'note', style: { fontSize: '13.5px', color: 'var(--fg-3)' } }, ORDER_NOTE)),
+          selectItem({ label: 'Order', value: Object.hasOwn(ORDER, m.order) ? m.order : 'top', id: `mo-${id}`, options: Object.entries(ORDER), onchange: (v) => setM({ order: v }) })]
+        : [
+          selectItem({ label: 'Period', value: f.range, id: `p-${id}`, options: Object.entries(pr.range), onchange: (v) => setF({ range: v }) }),
+          // the presets, the one in use if it was typed in, and Type one…
+          selectItem({ label: 'Popularity', value: f.fav, id: `f-${id}`, options: [...[...new Set([...pr.fav, f.fav])].sort((x, y) => x - y).map((k) => [k, favLabel(k)]), ['type', 'Type one…']],
+            onchange: async (v) => {
+              if (v !== 'type') return setF({ fav: Number(v) });
+              sheets.forEach((r) => r());   // the select shows the one in use again while typing
+              const t = await prompt('Popularity', { value: f.fav ? String(f.fav) : '', placeholder: 'e.g. 75', note: TOPLIST_FAV_NOTE, inputmode: 'numeric',
+                check: (x) => { const k = parseNum(x); return Number.isNaN(k) || k > FAV_MAX ? `A whole number from 0 to ${nf.format(FAV_MAX)}` : null; } });
+              if (t != null && parseNum(t) !== S.doc.devices[id]?.settings.filters.fav) setF({ fav: parseNum(t) });
+            } })];
+      const small = (text) => h('div', { class: 'pad', style: { marginTop: '-8px' } }, h('p', { class: 'note', style: { fontSize: '13.5px', color: 'var(--fg-3)' } }, text));
+      put(body,
+        h('div', { class: 'pad' }, seg, h('p', { class: 'note' }, SORT_NOTE[sort])),
+        group(own),
+        sort === 'fav' ? small(ORDER_NOTE) : null,
+        groupLabel('Filters'),
+        group(
+          selectItem({ label: 'Quality', value: f.quality, id: `q-${id}`, options: Object.entries(pr.quality).map(([k, v]) => [k, v.label]), onchange: (v) => setF({ quality: v }) }),
+          selectItem({ label: 'Shape', value: f.ratio, id: `r-${id}`, options: Object.entries(pr.ratio), onchange: (v) => setF({ ratio: v }) }),
+          selectItem({ label: 'Largest size', value: f.maxw, id: `w-${id}`, options: Object.entries(pr.maxw), onchange: (v) => setF({ maxw: Number(v) }) })),
+        groupLabel('Categories'),
+        group(cats.map((label, i) => switchItem({ label, on: f.cats[i] === '1', id: `c-${id}-${i}`, onchange: (v) => {
+          const next = f.cats.split(''); next[i] = v ? '1' : '0';
+          if (next.join('') === '000') { toast('Keep at least one category'); sheets.forEach((r) => r()); return; }
+          setF({ cats: next.join('') });
+        } }))),
+        group(h('div', { class: 'item' }, h('span', { class: 'label' }, 'Topic'), topic, h('datalist', { id: `topics-${id}` }, pr.topics.map((t) => h('option', { value: t }))))),
+        small('Optional. A Wallhaven search, like nature or night city.'),
         h('div', { class: 'pad' }, h('p', { class: 'note' }, !on ? `Off: turn it on to show these on ${d.name}.`
-          : count || (stat.online && !st.away ? `${d.name} is getting the list for this range.` : `${d.name} gets the new list when it’s back${st.away ? ' on its home screen' : ' on'}.`))),
-        group(on ? null : item({ ic: 'plus', label: 'Shuffle from these too', cls: 'accent', chev: false, onclick: () => toggleSource(id, 'mostfav') }),
-          item({ ic: 'browse', label: 'Browse them', onclick: () => { close(); browseFrom(id, 'mostfav'); } })));
+          : count || (stat.online && !st.away ? `${d.name} is getting the list.` : `${d.name} gets the new list when it’s back${st.away ? ' on its home screen' : ' on'}.`))),
+        group(on ? null : item({ ic: 'plus', label: 'Shuffle from these too', cls: 'accent', chev: false, onclick: () => toggleSource(id, 'toplist') }),
+          item({ ic: 'browse', label: 'Browse them', onclick: () => { close(); browseFrom(id); } })));
     });
   }
 
@@ -892,44 +936,6 @@
     return [...all.map((x) => [favKey(x), favLabel(x.fav, x.favmax)]), ['type', 'Type a range…']];
   }
 
-  function filtersSheet(id) {
-    sheet('Toplist', (body, close) => {
-      const d = S.doc.devices[id];
-      if (!d) return close();
-      const f = d.settings.filters, pr = S.presets, stat = S.status[id] || {}, st = stat.st || {};
-      const setF = (patch) => setSettings(id, { filters: patch });
-      const cats = ['General', 'Anime', 'People'];
-      const topic = h('input', { class: 'inline', id: `topic-${id}`, value: f.q, placeholder: 'Any', list: `topics-${id}`, maxlength: 40, enterkeyhint: 'done', autocomplete: 'off', 'aria-label': 'Topic',
-        onchange: (e) => setF({ q: e.target.value }), onkeydown: (e) => { if (e.key === 'Enter') e.target.blur(); } });
-      const matches = st.list === stat.list && st.counts?.toplist != null;
-      put(body, 
-        group(
-          selectItem({ label: 'Quality', value: f.quality, id: `q-${id}`, options: Object.entries(pr.quality).map(([k, v]) => [k, v.label]), onchange: (v) => setF({ quality: v }) }),
-          selectItem({ label: 'Shape', value: f.ratio, id: `r-${id}`, options: Object.entries(pr.ratio), onchange: (v) => setF({ ratio: v }) }),
-          selectItem({ label: 'Period', value: f.range, id: `p-${id}`, options: Object.entries(pr.range), onchange: (v) => setF({ range: v }) }),
-          // the presets, the one in use if it was typed in, and Type one…
-          selectItem({ label: 'Popularity', value: f.fav, id: `f-${id}`, options: [...[...new Set([...pr.fav, f.fav])].sort((a, b) => a - b).map((n) => [n, favLabel(n)]), ['type', 'Type one…']],
-            onchange: async (v) => {
-              if (v !== 'type') return setF({ fav: Number(v) });
-              sheets.forEach((r) => r());   // the select shows the one in use again while typing
-              const t = await prompt('Popularity', { value: f.fav ? String(f.fav) : '', placeholder: 'e.g. 75', note: TOPLIST_FAV_NOTE, inputmode: 'numeric',
-                check: (x) => { const n = parseNum(x); return Number.isNaN(n) || n > FAV_MAX ? `A whole number from 0 to ${nf.format(FAV_MAX)}` : null; } });
-              if (t != null && parseNum(t) !== S.doc.devices[id]?.settings.filters.fav) setF({ fav: parseNum(t) });
-            } }),
-          selectItem({ label: 'Largest size', value: f.maxw, id: `w-${id}`, options: Object.entries(pr.maxw), onchange: (v) => setF({ maxw: Number(v) }) })),
-        groupLabel('Categories'),
-        group(cats.map((label, i) => switchItem({ label, on: f.cats[i] === '1', id: `c-${id}-${i}`, onchange: (on) => {
-          const next = f.cats.split(''); next[i] = on ? '1' : '0';
-          if (next.join('') === '000') { toast('Keep at least one category'); sheets.forEach((r) => r()); return; }
-          setF({ cats: next.join('') });
-        } }))),
-        group(h('div', { class: 'item' }, h('span', { class: 'label' }, 'Topic'), topic, h('datalist', { id: `topics-${id}` }, pr.topics.map((t) => h('option', { value: t }))))),
-        h('div', { class: 'pad', style: { marginTop: '-8px' } }, h('p', { class: 'note', style: { fontSize: '13.5px', color: 'var(--fg-3)' } }, 'Optional. A Wallhaven search, like nature or night city.')),
-        h('div', { class: 'pad' }, h('p', { class: 'note' }, matches ? `${plural(st.counts.toplist, 'wallpaper')} match on ${d.name}.` : stat.online && !st.away ? `${d.name} is getting the list for these filters.` : `${d.name} gets the new list when it’s back${st.away ? ' on its home screen' : ' on'}.`)),
-        group(item({ ic: 'browse', label: 'Browse them', onclick: () => { close(); browseFrom(id, 'toplist'); } })));
-    });
-  }
-
   function deviceSheet(id) {
     sheet(S.doc.devices[id]?.name, (body, close) => {
       const d = S.doc.devices[id], stat = S.status[id] || {};
@@ -938,7 +944,7 @@
       put(body, 
         h('div', { class: 'pad' }, h('p', { class: 'note' }, [kindName(d.kind), app, id === S.me ? 'this browser' : stat.seen ? `seen ${ago(stat.seen)}` : null].filter(Boolean).join(' · '))),
         group(
-          d.settings ? item({ ic: 'refresh', label: 'Get a fresh toplist', chev: false, onclick: () => { close(); command(id, { type: 'refresh' }, `${d.name} is getting a fresh list`); } }) : null,
+          d.settings ? item({ ic: 'refresh', label: 'Get a fresh list', chev: false, onclick: () => { close(); command(id, { type: 'refresh' }, `${d.name} is getting a fresh list`); } }) : null,
           item({ ic: 'edit', label: 'Rename', chev: false, onclick: async () => {
             close();
             const name = await prompt('Rename', { value: d.name, check: (v) => (v.trim() ? null : 'Type a name') });
@@ -1106,11 +1112,11 @@
   function viewBrowse() {
     const devs = devicesWithSettings();
     const head = h('div', { class: 'title pad' }, h('h1', {}, 'Browse'));
-    if (!devs.length) return h('div', {}, head, h('div', { class: 'empty' }, h('h2', {}, 'Nothing to browse yet'), h('p', {}, 'Pair a TV or PC first. Browse shows its toplist or Most favourited, with its filters.')));
+    if (!devs.length) return h('div', {}, head, h('div', { class: 'empty' }, h('h2', {}, 'Nothing to browse yet'), h('p', {}, 'Pair a TV or PC first. Browse shows its Wallhaven list, with its filters.')));
     const B = UI.browse;
     if (!S.doc.devices[B.dev]?.settings) B.dev = devs[0][0];
-    const d = S.doc.devices[B.dev], f = d.settings.filters, fav = B.src === 'mostfav';
-    const query = fav ? S.status[B.dev]?.listFav : S.status[B.dev]?.list;
+    const d = S.doc.devices[B.dev], f = d.settings.filters, fav = sortOf(d.settings) === 'fav';
+    const query = S.status[B.dev]?.list;
     if (query) loadList(query);
     const L = (query && lists.get(query)) || { loading: true };
     const hidden = new Set(findPl('hidden').items.map((x) => x.id));
@@ -1123,17 +1129,16 @@
 
     return h('div', {}, head,
       group(
-        selectItem({ label: 'Show', value: B.src, id: 'browse-src', options: [['toplist', 'Toplist'], ['mostfav', 'Most favourited']], onchange: (v) => { B.src = v; store.set('whs.browseSrc', v); changed(); } }),
         selectItem({ label: 'Filters of', value: B.dev, id: 'browse-dev', options: devs.map(([id, x]) => [id, x.name]), onchange: (v) => { B.dev = v; store.set('whs.browseDev', v); changed(); } }),
         selectItem({ label: 'Order', value: B.sort, id: 'browse-sort', options: [['fav', 'Most favourites'], ['new', 'Newest'], ['shuffle', 'Shuffled']], onchange: (v) => { B.sort = v; B.seed = 0; changed(); } }),
         switchItem({ label: 'Show hidden ones', on: B.withHidden, id: 'browse-hidden', onchange: (on) => { B.withHidden = on; changed(); } })),
-      h('p', { class: 'lede pad', style: { margin: '14px 0 16px' } }, fav ? `${sharedSummary(f)} · ${favLabel(mostfavOf(d.settings).fav, mostfavOf(d.settings).favmax)}` : filtersSummary(f),
+      h('p', { class: 'lede pad', style: { margin: '14px 0 16px' } }, [S.presets.quality[f.quality]?.label, wallhavenSummary(d.settings)].filter(Boolean).join(SEP),
         L.items ? `${SEP}${plural(total, 'wallpaper').replace(' ', ' ')}${L.capped ? `, the most favourited of about ${nf.format(L.in_range)}` : ''}` : ''),
       L.error && !L.items ? h('div', { class: 'empty' }, h('h2', {}, 'Couldn’t get the list'), h('p', {}, L.error), h('button', { class: 'btn', onclick: () => { lists.delete(query); changed(); } }, 'Try again'))
         : !L.items ? h('div', {}, h('p', { class: 'lede pad' }, fav ? 'Getting Most favourited. A range nobody asked for lately can take a few minutes.' : 'Getting the toplist. One nobody asked for lately can take a minute.'),
             h('div', { class: 'photos', 'aria-hidden': 'true' }, Array.from({ length: 12 }, () => h('div', { class: 'photo ghost' }))))
-          : items.length ? photoGrid(items, { key: `browse-${B.src}-${B.dev}-${B.sort}` })
-            : h('div', { class: 'empty' }, h('h2', {}, 'Nothing matches'), h('p', {}, fav ? `Widen ${d.name}’s Most favourited range on the Now page.` : `Loosen ${d.name}’s toplist filters on the Now page.`)));
+          : items.length ? photoGrid(items, { key: `browse-${query}-${B.dev}-${B.sort}` })
+            : h('div', { class: 'empty' }, h('h2', {}, 'Nothing matches'), h('p', {}, fav ? `Widen ${d.name}’s Most favourited range on the Now page.` : `Loosen ${d.name}’s Wallhaven filters on the Now page.`)));
   }
 
   // ---------- Devices

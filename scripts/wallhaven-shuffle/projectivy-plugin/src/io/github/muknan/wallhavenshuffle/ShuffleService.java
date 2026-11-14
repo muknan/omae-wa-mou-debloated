@@ -66,18 +66,18 @@ public final class ShuffleService extends Service {
 
     // ---- what to show
 
-    /** The wallpapers this TV shuffles now: its sources mixed, Hidden left out, the width limit on the lists and
-     *  Most favourited's range on its list. */
+    /** The wallpapers this TV shuffles now: its sources mixed, Hidden left out; Wallhaven's list for its sort (the
+     *  toplist's, or Most favourited's in its range), with the width limit. */
     static List<Shuffle.Item> pool(Context c, TvSettings s) {
         Set<String> hidden = Sync.hiddenIds(c);
         Map<String, Shuffle.Item> out = new LinkedHashMap<>();
         for (String src : s.sources) {
-            if (src.equals("toplist")) {
+            if (src.equals("toplist") && s.byFav()) {
+                for (Shuffle.Item w : ListStore.favPool(c))
+                    if (s.inMostfav(w) && !hidden.contains(w.id)) out.put(w.id, w);
+            } else if (src.equals("toplist")) {
                 for (Shuffle.Item w : ListStore.pool(c))
                     if (s.inLimits(w) && !hidden.contains(w.id)) out.put(w.id, w);
-            } else if (src.equals("mostfav")) {
-                for (Shuffle.Item w : ListStore.favPool(c))
-                    if (s.inMostfav(w) && !hidden.contains(w.id) && !out.containsKey(w.id)) out.put(w.id, w);
             } else {
                 for (Shuffle.Item w : Sync.items(c, src)) if (!hidden.contains(w.id)) out.put(w.id, w);
             }
@@ -290,23 +290,27 @@ public final class ShuffleService extends Service {
             if (up != null) st.put("up", Sync.itemJson(up));
             // the last command from the remote it has seen, and when the change it asked for is expected
             st.put("ack", new JSONObject().put("seq", p.getInt("ack_seq", 0)).put("eta", p.getLong("change_eta", 0)));
-            int toplist = 0;
-            for (Shuffle.Item w : ListStore.pool(c)) if (s.inLimits(w)) toplist++;
-            JSONObject counts = new JSONObject().put("toplist", toplist);
-            // Most favourited's, once its list for the range in use is here (the remote waits for listFav to match)
+            // Wallhaven's list for the sort in use: what it's for and how many (the remote shows the count once list
+            // matches its settings); by favourites only once that range's list is here, with about how many the range
+            // holds when it holds more than one list takes
+            JSONObject counts = new JSONObject();
             String favFor = p.getString(ListStore.MOSTFAV.forKey(), "");
-            if (s.sources.contains("mostfav") && favFor.equals(s.mostfavQuery())) {
+            if (!s.byFav()) {
+                int n = 0;
+                for (Shuffle.Item w : ListStore.pool(c)) if (s.inLimits(w)) n++;
+                counts.put("toplist", n);
+                st.put("list", p.getString("list_for", ""));
+            } else if (favFor.equals(s.mostfavQuery())) {
                 int n = 0;
                 for (Shuffle.Item w : ListStore.favPool(c)) if (s.inMostfav(w)) n++;
-                counts.put("mostfav", n);
-                if (p.getInt("fav_of", 0) > 0) counts.put("mostfavOf", p.getInt("fav_of", 0));
-                st.put("listFav", favFor);
+                counts.put("toplist", n);
+                if (p.getInt("fav_of", 0) > 0) counts.put("toplistOf", p.getInt("fav_of", 0));
+                st.put("list", favFor);
             }
             st.put("counts", counts);
-            st.put("list", p.getString("list_for", ""));
             st.put("base", base / 1000);
             if (s.sources.isEmpty()) st.put("note", "Nothing to shuffle: turn something on in Shuffle from");
-            else if (pool.isEmpty()) st.put("note", s.sources.contains("toplist") || s.sources.contains("mostfav") ? "Getting the list…" : "Those playlists are empty");
+            else if (pool.isEmpty()) st.put("note", s.wallhavenOn() ? "Getting the list…" : "Those playlists are empty");
         } catch (Exception e) { Log.w(ListStore.TAG, "status: " + e); }
         return st;
     }

@@ -213,19 +213,24 @@ public final class SettingsActivity extends Activity implements Sync.Listener {
         row(g1, "Change every", () -> TvSettings.everyLabel(Sync.settings(this).every), v -> pickEvery());
         row(g1, "Hidden wallpapers", () -> { int n = Sync.hiddenIds(this).size(); return n == 0 ? "" : String.format(Locale.US, "%,d", n); }, v -> pickHidden());
 
-        LinearLayout g2 = group(box, "Toplist");
-        row(g2, "Quality", () -> TvSettings.QUALITY.get(Sync.settings(this).quality), v -> pickMap("Quality", TvSettings.QUALITY, Sync.settings(this).quality, (s, k) -> s.quality = k));
-        row(g2, "Shape", () -> TvSettings.RATIO.get(Sync.settings(this).ratio), v -> pickMap("Shape", TvSettings.RATIO, Sync.settings(this).ratio, (s, k) -> s.ratio = k));
-        row(g2, "Period", () -> TvSettings.RANGE.get(Sync.settings(this).range), v -> pickMap("Period", TvSettings.RANGE, Sync.settings(this).range, (s, k) -> s.range = k));
-        row(g2, "Popularity", () -> Sync.settings(this).popularityLabel(), v -> pickFav());
-        row(g2, "Categories", () -> Sync.settings(this).catsLabel(), v -> pickCats());
-        row(g2, "Topic", () -> Sync.settings(this).q.isEmpty() ? "Any" : Sync.settings(this).q, v -> pickTopic());
-        row(g2, "Largest size", () -> TvSettings.maxwLabel(Sync.settings(this).maxw), v -> pickMaxw());
+        // Wallhaven: Sort by, then the two rows of that sort (they change with it), then the filters both share.
+        LinearLayout g2 = group(box, "Wallhaven");
+        row(g2, "Sort by", () -> TvSettings.SORT.get(Sync.settings(this).sort), v -> pickMap("Sort by", TvSettings.SORT, Sync.settings(this).sort, (s, k) -> s.sort = k));
+        row(g2, () -> Sync.settings(this).byFav() ? "Popularity" : "Period",
+            () -> { TvSettings s = Sync.settings(this); return s.byFav() ? s.mostfavLabel() : TvSettings.RANGE.get(s.range); },
+            v -> { if (Sync.settings(this).byFav()) pickMostfav(); else pickMap("Period", TvSettings.RANGE, Sync.settings(this).range, (s, k) -> s.range = k); });
+        row(g2, () -> Sync.settings(this).byFav() ? "Order" : "Popularity",
+            () -> { TvSettings s = Sync.settings(this); return s.byFav() ? TvSettings.ORDER.get(s.mfOrder) : s.popularityLabel(); },
+            v -> { if (Sync.settings(this).byFav()) pickMap("Order", TvSettings.ORDER, Sync.settings(this).mfOrder, (s, k) -> s.mfOrder = k); else pickFav(); });
+        note(box, () -> Sync.settings(this).byFav() ? TvSettings.SORT_NOTE_FAV + " " + TvSettings.ORDER_NOTE : TvSettings.SORT_NOTE_TOPLIST);
 
-        LinearLayout gm = group(box, "Most favourited");
-        row(gm, "Popularity", () -> Sync.settings(this).mostfavLabel(), v -> pickMostfav());
-        row(gm, "Order", () -> TvSettings.ORDER.get(Sync.settings(this).mfOrder), v -> pickMap("Order", TvSettings.ORDER, Sync.settings(this).mfOrder, (s, k) -> s.mfOrder = k));
-        note(box, () -> mostfavNote() + "\n" + TvSettings.ORDER_NOTE);
+        LinearLayout gf = group(box, "Filters");
+        row(gf, "Quality", () -> TvSettings.QUALITY.get(Sync.settings(this).quality), v -> pickMap("Quality", TvSettings.QUALITY, Sync.settings(this).quality, (s, k) -> s.quality = k));
+        row(gf, "Shape", () -> TvSettings.RATIO.get(Sync.settings(this).ratio), v -> pickMap("Shape", TvSettings.RATIO, Sync.settings(this).ratio, (s, k) -> s.ratio = k));
+        row(gf, "Categories", () -> Sync.settings(this).catsLabel(), v -> pickCats());
+        row(gf, "Topic", () -> Sync.settings(this).q.isEmpty() ? "Any" : Sync.settings(this).q, v -> pickTopic());
+        row(gf, "Largest size", () -> TvSettings.maxwLabel(Sync.settings(this).maxw), v -> pickMaxw());
+        note(box, this::wallhavenNote);
 
         LinearLayout g3 = group(box, "Sync");
         row(g3, () -> Sync.paired(this) ? "Synced as " + Sync.deviceName(this) : "Pair with your phone or PC",
@@ -240,7 +245,7 @@ public final class SettingsActivity extends Activity implements Sync.Listener {
         rowBelow(g4, "Address", () -> ListStore.server(this).replaceFirst("^https?://", ""), v -> editServer());
         row(g4, "Get a fresh list now", () -> listLabel(), v -> {
             toast("Getting the list…");
-            if (Sync.settings(this).sources.contains("mostfav")) ListStore.refreshNow(this, ListStore.MOSTFAV, r -> ui.post(this::refresh));
+            if (Sync.settings(this).mostfavOn()) ListStore.refreshNow(this, ListStore.MOSTFAV, r -> ui.post(this::refresh));
             ListStore.refreshNow(this, r -> ui.post(() -> { toast(r); refresh(); })); });
         space(box, 40);   // the last row clear of the screen edge when the list is scrolled to the end
         return box;
@@ -350,25 +355,25 @@ public final class SettingsActivity extends Activity implements Sync.Listener {
         TvSettings s = Sync.settings(this);
         List<String> names = new ArrayList<>();
         for (String k : s.sources) {
-            if (k.equals("toplist")) names.add("Toplist");
-            else if (k.equals("mostfav")) names.add("Most favourited");
+            if (k.equals("toplist")) names.add("Wallhaven");
             else { JSONObject p = Sync.playlist(this, k); if (p != null) names.add(p.optString("name")); }
         }
         if (names.isEmpty()) return "Nothing yet";
         return names.size() <= 2 ? String.join(", ", names) : names.get(0) + " + " + (names.size() - 1) + " more";
     }
 
-    // Under the Most favourited rows: what it is and what this TV has of it.
-    private String mostfavNote() {
+    // Under Wallhaven's filters: whether it's on, and what this TV has of its list for these settings.
+    private String wallhavenNote() {
         TvSettings s = Sync.settings(this);
-        String shared = "All of Wallhaven, sorted by favourites. Quality, shape, categories and topic are the Toplist’s.";
-        if (!s.sources.contains("mostfav")) return "Off: turn it on in Shuffle from. " + shared;
-        if (!ListStore.prefs(this).getString(ListStore.MOSTFAV.forKey(), "").equals(s.mostfavQuery())) return "Getting the list… " + shared;
+        if (!s.wallhavenOn()) return "Off: turn on Wallhaven in Shuffle from to show these.";
+        String key = s.byFav() ? ListStore.MOSTFAV.forKey() : "list_for";
+        if (!ListStore.prefs(this).getString(key, "").equals(s.activeQuery())) return "Getting the list…";
         int n = 0;
-        for (Shuffle.Item w : ListStore.favPool(this)) if (s.inMostfav(w)) n++;
-        int of = ListStore.prefs(this).getInt("fav_of", 0);
-        return (of > n ? String.format(Locale.US, "The %,d most favourited of about %,d in this range. ", n, of)
-            : String.format(Locale.US, n == 1 ? "%,d wallpaper in this range. " : "%,d wallpapers in this range. ", n)) + shared;
+        if (s.byFav()) { for (Shuffle.Item w : ListStore.favPool(this)) if (s.inMostfav(w)) n++; }
+        else for (Shuffle.Item w : ListStore.pool(this)) if (s.inLimits(w)) n++;
+        int of = s.byFav() ? ListStore.prefs(this).getInt("fav_of", 0) : 0;
+        return of > n ? String.format(Locale.US, "The %,d most favourited of about %,d in this range.", n, of)
+            : String.format(Locale.US, n == 1 ? "%,d wallpaper matches." : "%,d wallpapers match.", n);
     }
 
     private String listLabel() {
@@ -508,8 +513,7 @@ public final class SettingsActivity extends Activity implements Sync.Listener {
         TvSettings s = Sync.settings(this);
         final List<String> keys = new ArrayList<>();
         List<String> labels = new ArrayList<>();
-        keys.add("toplist"); labels.add("Toplist");
-        keys.add("mostfav"); labels.add("Most favourited");
+        keys.add("toplist"); labels.add("Wallhaven  (" + TvSettings.SORT.get(s.sort) + ")");
         if (Sync.playlist(this, "fav") != null) { keys.add("fav"); labels.add("Favourites  (" + Sync.items(this, "fav").size() + ")"); }
         for (JSONObject p : Sync.ownPlaylists(this)) { keys.add(p.optString("id")); labels.add(p.optString("name") + "  (" + p.optJSONArray("items").length() + ")"); }
         boolean[] on = new boolean[keys.size()];

@@ -26,23 +26,24 @@ toplist, the same one the TV uses. It is one exe with no installer and no .NET S
 **Use it**
 - **Double-click** the tray icon for the next wallpaper. **Right-click** it for the everyday actions and **Open
   Wallhaven Shuffle**: a Windows 11 style flyout with the wallpaper, the controls 📌 ♡ ⏮ ⏯ ⏭ ⋯ and three settings
-  (**Shuffle from**, **Toplist**, **Change wallpaper every**). ← and → also go back and forward. Click anywhere else
+  (**Shuffle from**, **Wallhaven**, **Change every**). ← and → also go back and forward. Click anywhere else
   or press Esc to close it.
 - **Keep this wallpaper** (📌, the tray menu, or `Ctrl+Alt+Shift+K`): no more changes until you take it off again.
   It's remembered across restarts. Next, Previous or another source take it off as well; Pause is separate.
-- **Shuffle from** is a list of switches: the **Toplist**, **Most favourited**, **Favourites**, your **playlists**
+- **Shuffle from** is a list of switches: **Wallhaven**, **Favourites**, your **playlists**
   and **folders of your own pictures**, in any mix. One round goes through all of them together, with no repeats, and each mix keeps its
-  own round (the toplist alone carries on where it was).
-- **Toplist** picks which toplist: quality (Full HD and up … 4K and up, exactly 4K, 5K, 8K), shape (widescreen,
-  16:9, 16:10, ultrawide, any), period (past day … past year), popularity (at least this many favourites on Wallhaven:
-  a preset, or **Type one…**), categories (General, Anime, People), an optional topic (a Wallhaven search, like
-  *nature* or *night city*) and the largest size. These are the same choices as on the TV and in the remote; the list
-  comes from `/api/list` with them.
-- **Most favourited**: all of Wallhaven sorted by favourites, with the toplist's quality, shape, categories and topic.
-  **Popularity** is its range (a preset like 500+, or **Type a range…** with At least and At most, e.g. 500 to 1,000;
-  an empty At most is no upper limit); **Order** is **Most first** (the most favourited one not shown yet this round
-  comes next, and anything else you shuffle from joins in by its favourites) or **Shuffled**. Changing the order
-  starts a new round, so Most first begins at the top. Its list is fetched only while it's on.
+  own round (Wallhaven alone carries on where it was).
+- **Wallhaven** picks which of its wallpapers. **Sort by** comes first, as on wallhaven.cc: **Toplist** (the most
+  popular over a **Period**, past day … past year, with a **Popularity** minimum: a preset, or **Type one…**) or
+  **Most favourited** (all of Wallhaven by favourites: **Popularity** is a range, a preset like 500+ or **Type a
+  range…** with At least and At most, e.g. 500 to 1,000, an empty At most being no upper limit; **Order** is **Most
+  first**, the most favourited one not shown yet this round next and anything else you shuffle from joining in by its
+  favourites, or **Shuffled**). Then the filters both share: quality (Full HD and up … 4K and up, exactly 4K, 5K, 8K),
+  shape (widescreen, 16:9, 16:10, ultrawide, any), categories (General, Anime, People), an optional topic (a Wallhaven
+  search, like *nature* or *night city*) and the largest size. The row reads like *Toplist · Past year* or *Most
+  favourited · 500 to 1,000*. These are the same choices and words as on the TV and in the remote; only the list for
+  the sort in use is fetched (`/api/list`). Changing the sort or the order starts a new round. Settings from 2.11 with
+  Most favourited on become Wallhaven sorted by it (`Sort=fav` in settings.ini).
 - Hotkeys:
 
   | Keys | Action |

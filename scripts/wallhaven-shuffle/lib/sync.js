@@ -111,11 +111,13 @@ export const FAVS = [0, 10, 25, 50, 100, 250, 500, 1000];
 export const MAXW = { 0: 'Any', 3840: 'Up to 4K', 5120: 'Up to 5K' };
 export const EVERY = [1, 2, 5, 10, 15, 30, 60, 120, 180, 360, 720, 1440];
 export const TOPICS = ['nature', 'landscape', 'mountains', 'forest', 'ocean', 'space', 'city', 'night', 'sunset', 'winter', 'architecture', 'minimalism', 'abstract', 'digital art', 'cars'];
-// Most favourited (all of Wallhaven by favourites, a favourites range): played from the top down, or shuffled.
+// Wallhaven's wallpapers, sorted one of two ways (as on wallhaven.cc): its toplist for a period, or all of it by
+// favourites (Most favourited: a favourites range, played from the top down or shuffled).
+export const SORT = { toplist: 'Toplist', fav: 'Most favourited' };
 export const ORDER = { top: 'Most first', shuffle: 'Shuffled' };
 export const MOSTFAV_FAVS = [100, 250, 500, 1000, 2000];
 export const FAV_MAX = 100000;
-export const PRESETS = { quality: QUALITY, ratio: RATIO, range: RANGE, fav: FAVS, maxw: MAXW, every: EVERY, topics: TOPICS, order: ORDER, mostfav: MOSTFAV_FAVS };
+export const PRESETS = { quality: QUALITY, ratio: RATIO, range: RANGE, fav: FAVS, maxw: MAXW, every: EVERY, topics: TOPICS, order: ORDER, mostfav: MOSTFAV_FAVS, sort: SORT };
 const defaultMostfav = () => ({ fav: 250, favmax: 0, order: 'top' });
 
 export const MAX_ITEMS = 5000, MAX_PLAYLISTS = 100, MAX_DEVICES = 30;
@@ -124,11 +126,12 @@ const KIND_NAME = { tv: 'TV', pc: 'PC', web: 'Browser' };
 
 export function defaultSettings(kind) {
   return {
-    sources: ['toplist'],
+    sources: ['toplist'],   // 'toplist' = Wallhaven (by its sort), as it always was
+    sort: 'toplist',
     // The same list the apps used before sync (1 year of 4K+, widescreen, no People, 50+ favourites); a TV skips
     // anything wider than 4K, which its decoder handles slowly.
     filters: { quality: '4k+', ratio: '16x9,16x10', range: '1y', fav: 50, cats: '110', maxw: kind === 'tv' ? 3840 : 0, q: '' },
-    // Most favourited's own part; quality, shape, categories and topic are the filters above, shared with the toplist
+    // Most favourited's own part; quality, shape, categories and topic are the filters above, whichever the sort
     mostfav: defaultMostfav(),
     every: kind === 'tv' ? 1 : 15,
     paused: false,
@@ -141,6 +144,10 @@ export function normSettings(patch, base) {
   const out = structuredClone(base);
   const s = patch && typeof patch === 'object' ? patch : {};
   if (Array.isArray(s.sources)) out.sources = [...new Set(s.sources.filter((x) => typeof x === 'string' && /^(toplist|mostfav|fav|p_[a-z0-9]{4,24})$/.test(x)))].slice(0, MAX_PLAYLISTS + 2);
+  if (Object.hasOwn(SORT, s.sort)) out.sort = s.sort;
+  // Most favourited was a source of its own for a day (2.11 / 1.21): it's Wallhaven sorted by favourites now
+  if (out.sources.includes('mostfav')) { out.sources = [...new Set(out.sources.map((x) => (x === 'mostfav' ? 'toplist' : x)))]; out.sort = 'fav'; }
+  if (!Object.hasOwn(SORT, out.sort)) out.sort = 'toplist';
   if (s.filters && typeof s.filters === 'object') {
     const f = s.filters, o = out.filters;
     if (Object.hasOwn(QUALITY, f.quality)) o.quality = f.quality;
@@ -183,6 +190,9 @@ export function mostfavQueryFor(settings) {
   return listQuery({ sort: 'fav', res: q.res || '', atleast: q.atleast || '', ratios: f.ratio, cats: f.cats, purity: '100', q: f.q, fav: m.fav, favmax: m.favmax, maxw: 0 });
 }
 
+// The list a device shuffles from Wallhaven: its toplist's, or its Most favourited's, by its sort.
+export const activeQueryFor = (settings) => (settings.sort === 'fav' ? mostfavQueryFor(settings) : listQueryFor(settings.filters));
+
 // ---- the document
 
 export const emptyDoc = () => ({
@@ -199,6 +209,13 @@ function upgrade(doc) {
   if (!Array.isArray(d.playlists)) d.playlists = [];
   for (const b of emptyDoc().playlists.reverse()) if (!d.playlists.some((p) => p.id === b.id)) d.playlists.unshift(b);
   if (!d.devices || typeof d.devices !== 'object') d.devices = {};
+  // settings saved by an older service read as today's (Most favourited as a source became Wallhaven's sort); saved
+  // in that form with the next change
+  for (const dev of Object.values(d.devices)) {
+    if (dev && dev.settings && typeof dev.settings === 'object' && dev.settings.filters) {
+      try { dev.settings = normSettings({}, dev.settings); } catch { /* left as it was */ }
+    }
+  }
   d.v = Number(d.v) || 0;
   return d;
 }
@@ -512,7 +529,7 @@ const ACTIONS = {
     const hashes = (await store.pipe(ids.map((i) => ['HGETALL', K.dev(i)]))).map(hashObj);
     const status = {}, wake = [];
     ids.forEach((i, n) => {
-      status[i] = { ...statusOf(hashes[n], now), list: listQueryFor(doc.devices[i].settings.filters), listFav: mostfavQueryFor(normSettings({}, doc.devices[i].settings)) };
+      status[i] = { ...statusOf(hashes[n], now), list: activeQueryFor(normSettings({}, doc.devices[i].settings)) };
       if ((Number(hashes[n].live) || 0) < now + 60e3) wake.push(['HSET', K.dev(i), 'live', now + 120e3]);
     });
     // Devices poll every few seconds while a remote is open and in use (an idle one asks with quiet=1).

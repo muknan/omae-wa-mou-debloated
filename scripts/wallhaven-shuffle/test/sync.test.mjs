@@ -1,7 +1,7 @@
 // node --test test/   (no dependencies: an in-memory store stands in for Upstash)
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { handle, memoryStore, applyOp, emptyDoc, normSettings, defaultSettings, listQueryFor, mostfavQueryFor, checkName, K } from '../lib/sync.js';
+import { handle, memoryStore, applyOp, emptyDoc, normSettings, defaultSettings, listQueryFor, mostfavQueryFor, activeQueryFor, checkName, K } from '../lib/sync.js';
 import { listParams, listQuery, passes } from '../lib/core.js';
 
 process.env.SYNC_KEY = 'test-key-0123456789';
@@ -206,6 +206,23 @@ test('a warm server reads the version, not the whole doc, and still sees every c
   assert.ok(after.doc.playlists.some((p) => p.name === 'Fresh'));
 });
 
+test('a document saved before Wallhaven had a sort reads as Wallhaven sorted by favourites, with nothing written', async () => {
+  const { store, pc } = await setup();
+  const raw = JSON.parse(await store.cmd('GET', K.doc));
+  const s = raw.devices[pc.id].settings;
+  s.sources = ['mostfav', 'fav']; delete s.sort; s.mostfav = { fav: 500, favmax: 1000, order: 'top' };
+  raw.v += 1; await store.cmd('SET', K.doc, JSON.stringify(raw)); await store.cmd('SET', K.ver, String(raw.v));
+  const st = await call(store, 'state', { token: pc.token });
+  const got = st.doc.devices[pc.id].settings;
+  assert.deepEqual(got.sources, ['toplist', 'fav']);
+  assert.equal(got.sort, 'fav');
+  assert.deepEqual(got.mostfav, { fav: 500, favmax: 1000, order: 'top' });
+  assert.equal(st.v, raw.v, 'reading does not bump the version');
+  // a device without settings (the remote) and a current one are left as they are
+  const again = await call(store, 'state', { token: pc.token });
+  assert.deepEqual(again.doc.devices[pc.id].settings, got);
+});
+
 test('a device\'s clock offset is kept with its status (its own clock is not)', async () => {
   const { store, pc } = await setup();
   await call(store, 'poll', { token: pc.token, body: { v: -1 } });
@@ -216,14 +233,26 @@ test('a device\'s clock offset is kept with its status (its own clock is not)', 
   assert.ok(st.skew >= 4900 && st.skew < 6000, `skew ${st.skew}`);
 });
 
-test('Most favourited: its own range and order, a minimum raised past the maximum clears it, its own list query', () => {
+test('Wallhaven, sorted by Toplist or Most favourited: one source, its range and order, the list for its sort', () => {
   const base = defaultSettings('tv');
+  assert.equal(base.sort, 'toplist');
   assert.deepEqual(base.mostfav, { fav: 250, favmax: 0, order: 'top' });
   assert.equal(base.order, undefined);
   assert.equal(base.filters.favmax, undefined);
-  let s = normSettings({ sources: ['toplist', 'mostfav'], mostfav: { fav: 200, favmax: 1000, order: 'shuffle' } }, base);
-  assert.deepEqual(s.sources, ['toplist', 'mostfav']);
+  assert.equal(activeQueryFor(base), listQueryFor(base.filters), 'sorted as the toplist: the toplist');
+  let s = normSettings({ sort: 'fav', mostfav: { fav: 200, favmax: 1000, order: 'shuffle' } }, base);
+  assert.deepEqual(s.sources, ['toplist']);
+  assert.equal(s.sort, 'fav');
+  assert.equal(activeQueryFor(s), mostfavQueryFor(s), 'sorted by favourites: Most favourited');
+  assert.equal(normSettings({ sort: 'newest' }, s).sort, 'fav', 'an unknown sort is left out');
   assert.deepEqual(s.mostfav, { fav: 200, favmax: 1000, order: 'shuffle' });
+  // Most favourited as a source of its own (PC 2.11, TV 1.21) becomes Wallhaven sorted by favourites
+  const mid = normSettings({ sources: ['mostfav', 'fav'] }, base);
+  assert.deepEqual(mid.sources, ['toplist', 'fav']);
+  assert.equal(mid.sort, 'fav');
+  const stored = { ...structuredClone(base), sources: ['toplist', 'mostfav'] };
+  const both = normSettings({}, stored);
+  assert.deepEqual([both.sources, both.sort], [['toplist'], 'fav'], 'stored that way: the same');
   // the toplist's filters (quality, shape, categories, topic) with its own range in place of the period and minimum
   assert.equal(mostfavQueryFor(s), 'sort=fav&atleast=3840x2160&ratios=16x9,16x10&cats=110&purity=100&fav=200&favmax=1000&maxw=0');
   assert.equal(listQueryFor(s.filters), 'range=1y&atleast=3840x2160&ratios=16x9,16x10&cats=110&purity=100&fav=50&maxw=0');

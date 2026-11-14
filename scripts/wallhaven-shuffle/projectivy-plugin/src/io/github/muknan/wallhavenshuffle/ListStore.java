@@ -105,12 +105,12 @@ final class ListStore {
     }
 
     /** Starts downloads in the background for the lists that are old enough (or missing, or for other settings):
-     *  the toplist always (playlists use its details), Most favourited while it's on. Never blocks. */
+     *  the toplist always (playlists use its details), Most favourited while Wallhaven is sorted by it. Never blocks. */
     static void refreshIfDue(final Context context) {
         final Context c = context.getApplicationContext();
         TvSettings s = Sync.settings(c);
         refreshIfDue(c, TOPLIST, s);
-        if (s.sources.contains("mostfav")) refreshIfDue(c, MOSTFAV, s);
+        if (s.mostfavOn()) refreshIfDue(c, MOSTFAV, s);
     }
 
     private static void refreshIfDue(Context c, Kind k, TvSettings s) {

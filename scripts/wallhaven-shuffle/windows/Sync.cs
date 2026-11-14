@@ -33,6 +33,8 @@ namespace WallhavenShuffle
         public static readonly int[] Favs = { 0, 10, 25, 50, 100, 250, 500, 1000 };
         public static readonly int[] Widths = { 0, 3840, 5120 };
         public static readonly int[] Every = { 1, 2, 5, 10, 15, 30, 60, 120, 180, 360, 720, 1440 };
+        // Wallhaven, sorted one of two ways (as on wallhaven.cc): its toplist for a period, or all of it by favourites.
+        public static readonly string[][] Sorts = { new[] { "toplist", "Toplist" }, new[] { "fav", "Most favourited" } };
         // Most favourited: played from the most favourited down, or shuffled; its preset minimums.
         public static readonly string[][] Orders = { new[] { "top", "Most first" }, new[] { "shuffle", "Shuffled" } };
         public static readonly int[] MostFavFavs = { 100, 250, 500, 1000, 2000 };
@@ -74,6 +76,23 @@ namespace WallhavenShuffle
             if (m < 1440) return m == 60 ? "1 hour" : (m / 60) + " hours";
             return "1 day";
         }
+        // A range in few words, for the Wallhaven row: 250+, 500 to 1,000, Up to 1,000 ("" when it's any).
+        public static string FavShort(int min, int max)
+        {
+            if (max > 0) return (min > 0 ? min.ToString("N0") + " to " : "Up to ") + max.ToString("N0");
+            return min > 0 ? min.ToString("N0") + "+" : "";
+        }
+        // The Wallhaven row, the same words as the remote's and the TV's: its sort and what sets it apart (the period,
+        // or the range and Shuffled when it isn't the order the name already says), and a topic if there is one.
+        public static string WallhavenSummary(string sort, Filters f, MostFav m)
+        {
+            var parts = sort == "fav"
+                ? new List<string> { Label(Sorts, "fav"), FavShort(m.Fav, m.FavMax), m.Order == "shuffle" ? Label(Orders, "shuffle") : "" }
+                : new List<string> { Label(Sorts, "toplist"), Label(Ranges, f.Range) };
+            if (f.Topic.Length > 0) parts.Add("“" + f.Topic + "”");
+            return string.Join(" · ", parts.Where(p => p.Length > 0));
+        }
+        public static string CleanSort(string sort) { return sort == "fav" ? "fav" : "toplist"; }
         public string CatsLabel { get { var names = new[] { "General", "Anime", "People" }; return string.Join(", ", Enumerable.Range(0, 3).Where(i => Cats[i] == '1').Select(i => names[i])); } }
         public string Summary { get { return Label(Qualities, Quality) + " · " + Label(Ranges, Range) + (Topic.Length > 0 ? " · “" + Topic + "”" : ""); } }
 
@@ -136,7 +155,7 @@ namespace WallhavenShuffle
     }
 
     // Most favourited's own part: a favourites range (FavMax 0 = no upper limit) and its order. The rest of its filters
-    // are the toplist's (quality, shape, categories, topic).
+    // (quality, shape, categories, topic, largest size) are Wallhaven's, whichever the sort.
     class MostFav
     {
         public int Fav = 250, FavMax = 0;
@@ -360,12 +379,13 @@ namespace WallhavenShuffle
         public bool Paused;
         public string Keep = "";
         public MostFav MostFav = new MostFav();
+        public string Sort = "toplist";   // Wallhaven's sort: toplist or fav (Most favourited)
 
         public Dictionary<string, object> ToDict()
         {
             var f = Filters;
             return new Dictionary<string, object> {
-                { "sources", Sources.ToArray() },
+                { "sources", Sources.ToArray() }, { "sort", Sort },
                 { "filters", new Dictionary<string, object> { { "quality", f.Quality }, { "ratio", f.Ratio }, { "range", f.Range }, { "cats", f.Cats }, { "q", f.Topic }, { "fav", f.Fav }, { "maxw", f.MaxWidth } } },
                 { "mostfav", new Dictionary<string, object> { { "fav", MostFav.Fav }, { "favmax", MostFav.FavMax }, { "order", MostFav.Order } } },
                 { "every", Every }, { "paused", Paused }, { "keep", Keep } };
@@ -391,6 +411,9 @@ namespace WallhavenShuffle
                 object o;
                 s.MostFav = new MostFav { Fav = num("fav", 250), FavMax = num("favmax", 0), Order = m.TryGetValue("order", out o) && o != null ? Convert.ToString(o) : "top" }.Clean();
             }
+            if (d.TryGetValue("sort", out v)) s.Sort = Filters.CleanSort(Convert.ToString(v));
+            // Most favourited was a source of its own for a day (2.11 / 1.21): it's Wallhaven sorted by favourites now
+            if (s.Sources.Contains("mostfav")) { s.Sources = s.Sources.Select(k => k == "mostfav" ? "toplist" : k).Distinct().ToList(); s.Sort = "fav"; }
             try { if (d.TryGetValue("every", out v)) s.Every = Math.Max(1, Math.Min(1440, Convert.ToInt32(v))); } catch (Exception) { }
             if (d.TryGetValue("paused", out v) && v is bool) s.Paused = (bool)v;
             if (d.TryGetValue("keep", out v) && v != null) s.Keep = Convert.ToString(v);

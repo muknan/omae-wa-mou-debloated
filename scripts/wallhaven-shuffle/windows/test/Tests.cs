@@ -87,7 +87,7 @@ namespace WallhavenShuffle
                 Ok(Filters.ParseRange("", "0", out lo, out hi) == "At most: 1 or more, or empty", "At most 0: says why");
                 Ok(Filters.ParseRange("abc", "", out lo, out hi).StartsWith("At least:") && Filters.ParseRange("1", "200000", out lo, out hi).StartsWith("At most:"), "bad numbers: says which field");
             }
-            // Most favourited: its own range and order; the rest of its filters are the toplist's.
+            // Wallhaven sorted by favourites (Most favourited): its own range and order; the other filters are shared.
             {
                 var tf = new Filters { Fav = 200 }.Clean();
                 Ok(tf.ListQuery() == "range=1y&atleast=3840x2160&ratios=16x9,16x10&cats=110&purity=100&fav=200&maxw=0", "the toplist's list query: a minimum only: " + tf.ListQuery());
@@ -97,9 +97,19 @@ namespace WallhavenShuffle
                 Ok(new MostFav { Fav = 2000, FavMax = 1000 }.Clean().FavMax == 0 && new MostFav { FavMax = -3 }.Clean().FavMax == 0 && new MostFav { FavMax = 100001 }.Clean().FavMax == 0 && new MostFav { Fav = 500, FavMax = 500 }.Clean().FavMax == 500, "a maximum below the minimum or out of range: no upper limit; equal is fine");
                 Ok(new MostFav { Order = "fav" }.Clean().Order == "top" && new MostFav { Fav = -1 }.Clean().Fav == 250, "an unknown order or a bad minimum: the defaults");
                 Ok(new MostFav { Fav = 500, FavMax = 1000 }.Summary == "500 to 1,000 favourites" && new MostFav { Order = "shuffle" }.Summary == "250+ favourites\u00a0· Shuffled", "the row: the range, and Shuffled only when shuffled");
-                var dsr = new DeviceSettings { Sources = new List<string> { "mostfav" }, MostFav = new MostFav { Fav = 200, FavMax = 1000, Order = "shuffle" } };
+                var dsr = new DeviceSettings { Sources = new List<string> { "toplist" }, Sort = "fav", MostFav = new MostFav { Fav = 200, FavMax = 1000, Order = "shuffle" } };
                 var dsr2 = DeviceSettings.FromDict(Json.Parse(Json.Write(dsr.ToDict())) as Dictionary<string, object>);
-                Ok(dsr2.Sources.SequenceEqual(new[] { "mostfav" }) && dsr2.MostFav.Same(dsr.MostFav) && dsr2.Signature == dsr.Signature, "Most favourited goes to the service and back");
+                Ok(dsr2.Sort == "fav" && dsr2.MostFav.Same(dsr.MostFav) && dsr2.Signature == dsr.Signature, "the sort and Most favourited go to the service and back");
+                Ok(new DeviceSettings().Sort == "toplist" && DeviceSettings.FromDict(Json.Parse("{\"sort\":\"newest\"}") as Dictionary<string, object>).Sort == "toplist", "sorted as the toplist unless it says otherwise");
+                var mid = DeviceSettings.FromDict(Json.Parse("{\"sources\":[\"mostfav\",\"fav\"],\"sort\":\"toplist\"}") as Dictionary<string, object>);
+                Ok(mid.Sources.SequenceEqual(new[] { "toplist", "fav" }) && mid.Sort == "fav", "Most favourited as a source (2.11 / 1.21): Wallhaven sorted by favourites: " + string.Join(",", mid.Sources) + " " + mid.Sort);
+                var both2 = DeviceSettings.FromDict(Json.Parse("{\"sources\":[\"toplist\",\"mostfav\"]}") as Dictionary<string, object>);
+                Ok(both2.Sources.SequenceEqual(new[] { "toplist" }) && both2.Sort == "fav", "both on: Wallhaven once, by favourites");
+                // the Wallhaven row: the same words as the remote's and the TV's
+                Ok(Filters.WallhavenSummary("toplist", new Filters(), new MostFav()) == "Toplist\u00a0· Past year", "sorted as the toplist: " + Filters.WallhavenSummary("toplist", new Filters(), new MostFav()));
+                Ok(Filters.WallhavenSummary("fav", new Filters(), new MostFav()) == "Most favourited\u00a0· 250+", "by favourites: the range in few words");
+                Ok(Filters.WallhavenSummary("fav", new Filters { Topic = "nature" }, new MostFav { Fav = 500, FavMax = 1000, Order = "shuffle" }) == "Most favourited\u00a0· 500 to 1,000\u00a0· Shuffled\u00a0· “nature”", "Shuffled and a topic when there are");
+                Ok(Filters.WallhavenSummary("fav", new Filters(), new MostFav { Fav = 0, FavMax = 1000 }) == "Most favourited\u00a0· Up to 1,000" && Filters.WallhavenSummary("fav", new Filters(), new MostFav { Fav = 0 }) == "Most favourited", "Up to; any range: just the sort");
                 var old = DeviceSettings.FromDict(Json.Parse("{\"filters\":{\"fav\":50,\"favmax\":300},\"order\":\"fav\"}") as Dictionary<string, object>);
                 Ok(old.MostFav.Same(new MostFav()) && !old.ToDict().ContainsKey("order") && !Json.Write(old.ToDict()).Contains("favmax\":300"), "settings from round 1 (a toplist maximum, a whole-mix order): dropped, Most favourited's defaults");
             }
@@ -346,12 +356,23 @@ namespace WallhavenShuffle
                 Ok(back.KeepId == @"C:\x\y.jpg" && back.Filters.Quality == "8k" && back.Filters.Topic == "space" && back.Server == "https://example.invalid" && back.Sources.SequenceEqual(new[] { "fav" }), "settings.ini keeps the new settings");
                 s.KeepId = ""; s.Save();
 
-                // Toplist > Popularity: the presets, a typed-in one in its place, and Type one…
+                // Wallhaven ▸ (sorted as the toplist): Sort by, Period, Popularity, then the shared filters
+                Func<string> topLevel = () =>
+                {
+                    using (var menu = new FluentMenu())
+                    {
+                        app.FillWallhavenMenu(menu, null);
+                        return string.Join("|", menu.Items.Cast<ToolStripItem>().Select(x => x is ToolStripSeparator ? "-" : x.Text));
+                    }
+                };
+                app.SetSort("toplist");
+                Ok(topLevel() == "Sort by|-|Period|Popularity|-|Quality|Shape|Categories|Topic|Largest size|-|Turn Wallhaven on", "Wallhaven (off here), sorted as the toplist: " + topLevel());
+                // Popularity: the presets, a typed-in one in its place, and Type one…
                 {
                     Func<List<ToolStripItem>> popularity = () =>
                     {
                         var menu = new FluentMenu();
-                        app.FillToplistMenu(menu, null);
+                        app.FillWallhavenMenu(menu, null);
                         var pop = menu.Items.OfType<ToolStripMenuItem>().First(x => x.Text == "Popularity");
                         menu.Show(new Point(-3000, -3000));
                         for (int k = 0; k < 10; k++) { Application.DoEvents(); System.Threading.Thread.Sleep(5); }
@@ -373,12 +394,12 @@ namespace WallhavenShuffle
                     app.SetFilters(x => x.Fav = was);
                 }
 
-                // Most favourited ▸ Popularity (presets, a typed range in its place, Type a range…) and Order
+                // Sorted by favourites: Popularity (presets, a typed range in its place, Type a range…) and Order
                 {
                     Func<string, List<ToolStripItem>> mostFavMenu = title =>
                     {
                         var menu = new FluentMenu();
-                        app.FillMostFavMenu(menu, null);
+                        app.FillWallhavenMenu(menu, null);
                         var top = menu.Items.OfType<ToolStripMenuItem>().First(x => x.Text == title);
                         menu.Show(new Point(-3000, -3000));
                         for (int k = 0; k < 10; k++) { Application.DoEvents(); System.Threading.Thread.Sleep(5); }
@@ -389,6 +410,12 @@ namespace WallhavenShuffle
                         return items;
                     };
                     Func<List<ToolStripItem>, string> texts = l => string.Join("|", l.OfType<ToolStripMenuItem>().Select(x => x.Text + (x.Checked ? "*" : "")));
+                    var sortBy = mostFavMenu("Sort by");
+                    Ok(texts(sortBy) == "Toplist*|Most favourited", "Sort by: " + texts(sortBy));
+                    sortBy.OfType<ToolStripMenuItem>().First(x => x.Text == "Most favourited").PerformClick();
+                    for (int k = 0; k < 20 && s.Sort != "fav"; k++) { Application.DoEvents(); System.Threading.Thread.Sleep(10); }
+                    Ok(s.Sort == "fav" && Settings.Load().Sort == "fav", "picking Most favourited sorts by favourites, and settings.ini keeps it");
+                    Ok(topLevel() == "Sort by|-|Popularity|Order|-|Quality|Shape|Categories|Topic|Largest size|-|Turn Wallhaven on", "sorted by favourites, its own rows replace Period and the minimum: " + topLevel());
                     var mp = mostFavMenu("Popularity");
                     Ok(texts(mp) == "100+ favourites|250+ favourites*|500+ favourites|1,000+ favourites|2,000+ favourites|Type a range…" && mp[mp.Count - 2] is ToolStripSeparator, "Most favourited's Popularity: " + texts(mp));
                     app.SetMostFav(x => { x.Fav = 500; x.FavMax = 1000; });
@@ -401,8 +428,11 @@ namespace WallhavenShuffle
                     for (int k = 0; k < 20 && s.MostFav.Order != "shuffle"; k++) { Application.DoEvents(); System.Threading.Thread.Sleep(10); }
                     Ok(s.MostFav.Order == "shuffle" && Settings.Load().MostFav.Order == "shuffle", "Shuffled is saved");
                     var turnOn = new FluentMenu();
-                    app.FillMostFavMenu(turnOn, null);
-                    Ok(turnOn.Items.Cast<ToolStripItem>().Last().Text == "Turn Most favourited on", "while it's off, the menu offers to turn it on");
+                    var wasSources = s.Sources.ToList();
+                    s.Sources = new List<string> { "fav" };
+                    app.FillWallhavenMenu(turnOn, null);
+                    Ok(turnOn.Items.Cast<ToolStripItem>().Last().Text == "Turn Wallhaven on", "while it's off, the menu offers to turn it on");
+                    s.Sources = wasSources;
                     turnOn.Dispose();
 
                     // its list joins the pool: inside the range, no duplicates, hidden left out; Most first from the top
@@ -411,33 +441,41 @@ namespace WallhavenShuffle
                     SetF(app, "favWalls", new List<Wall> { mk("mf0001", 1200), mk("mf0002", 900), mk("mf0003", 700), mk("mf0004", 450), mk("abc123", 600) });
                     SetF(app, "walls", new List<Wall> { mk("abc123", 600), mk("tp0001", 80) });
                     app.SetMostFav(x => x.Order = "top");
-                    s.Sources = new List<string> { "mostfav" };
+                    s.Sources = new List<string> { "toplist" };
                     var mfPool = ((List<Wall>)Call(app, "Pool")).Select(w => w.Id).OrderBy(x => x).ToList();
-                    Ok(string.Join(",", mfPool) == "abc123,mf0002,mf0003", "only the ones in 500 to 1,000: " + string.Join(",", mfPool));
-                    var srcInfo = app.SourceByKey("mostfav");
-                    Ok(srcInfo != null && srcInfo.Name == "Most favourited" && srcInfo.Count == 3 && app.Sources()[1].Key == "mostfav", "Shuffle from lists it second, with its count");
-                    s.Sources = new List<string> { "mostfav", "toplist" };
-                    var both = ((List<Wall>)Call(app, "Pool")).Select(w => w.Id).ToList();
-                    Ok(both.Count == 4 && both.Count(x => x == "abc123") == 1, "with the toplist: each once: " + string.Join(",", both));
+                    Ok(string.Join(",", mfPool) == "abc123,mf0002,mf0003", "by favourites, only Most favourited's list, in 500 to 1,000: " + string.Join(",", mfPool));
+                    var srcInfo = app.SourceByKey("toplist");
+                    Ok(srcInfo != null && srcInfo.Name == "Wallhaven" && srcInfo.Count == 3 && app.Sources()[0].Key == "toplist" && app.Sources()[1].Key == "fav" && app.SourceByKey("mostfav") == null, "Shuffle from: Wallhaven, with its list's count, then Favourites");
+                    Ok(app.SourcesSummary == "Wallhaven", "Shuffle from reads Wallhaven");
                     SetF(app, "current", null);
                     var first = (Wall)Call(app, "PickNext");
                     Ok(first != null && first.Id == "mf0002", "Most first: the most favourited first: " + (first == null ? "none" : first.Id));
                     var mst = (Dictionary<string, object>)Call(app, "StatusForRemote", new object[] { null });
-                    Ok(!mst.ContainsKey("listFav"), "no count for the remote before its list for this range is here");
+                    Ok(!mst.ContainsKey("list") && !((Dictionary<string, object>)mst["counts"]).ContainsKey("toplist"), "no list or count for the remote before Most favourited's list for this range is here");
                     SetF(app, "favFor", s.Filters.MostFavQuery(s.MostFav)); SetF(app, "favOf", 4800);
                     mst = (Dictionary<string, object>)Call(app, "StatusForRemote", new object[] { null });
                     var counts = (Dictionary<string, object>)mst["counts"];
-                    Ok((string)mst["listFav"] == s.Filters.MostFavQuery(s.MostFav) && (int)counts["mostfav"] == 3 && (int)counts["mostfavOf"] == 4800, "the remote gets its query, count and the range's size");
-                    s.Sources = oldSources;
+                    Ok((string)mst["list"] == s.Filters.MostFavQuery(s.MostFav) && (int)counts["toplist"] == 3 && (int)counts["toplistOf"] == 4800 && !mst.ContainsKey("listFav") && !counts.ContainsKey("mostfav"), "the remote gets its query, count and the range's size, as Wallhaven's");
+                    app.SetSort("toplist");
+                    var tpPool = ((List<Wall>)Call(app, "Pool")).Select(w => w.Id).OrderBy(x => x).ToList();
+                    Ok(string.Join(",", tpPool) == "abc123,tp0001", "sorted as the toplist again: only the toplist's list: " + string.Join(",", tpPool));
+                    mst = (Dictionary<string, object>)Call(app, "StatusForRemote", new object[] { null });
+                    counts = (Dictionary<string, object>)mst["counts"];
+                    Ok((string)mst["list"] == (string)GetF(app, "listFor") && (int)counts["toplist"] == 2 && !counts.ContainsKey("toplistOf"), "and reports the toplist's");
+                    // settings.ini from 2.11 with Most favourited on: Wallhaven sorted by favourites
+                    s.Sources = new List<string> { "mostfav", "fav" }; s.Save();
+                    var ini = Settings.Load();
+                    Ok(ini.Sources.SequenceEqual(new[] { "toplist", "fav" }) && ini.Sort == "fav", "settings.ini's mostfav source becomes Wallhaven sorted by favourites: " + string.Join("|", ini.Sources) + " " + ini.Sort);
+                    s.Sources = oldSources; s.Sort = "toplist"; s.Save();
                     app.SetMostFav(x => { x.Fav = 250; x.FavMax = 0; x.Order = "top"; });
 
                     // the window's row: a long value widens its button (never cut while the name leaves room), a short one shrinks it back
                     using (var form = new Form { StartPosition = FormStartPosition.Manual, Location = new Point(-4000, -4000), ShowInTaskbar = false, ClientSize = new Size((int)(424 * Theme.Scale), (int)(60 * Theme.Scale)) })
                     {
                         var btn = new MenuButton();
-                        var row = new Row("Most favourited", btn, false) { Bounds = new Rectangle(0, 0, (int)(422 * Theme.Scale), (int)(56 * Theme.Scale)) };
+                        var row = new Row("Wallhaven", btn, false) { Bounds = new Rectangle(0, 0, (int)(422 * Theme.Scale), (int)(56 * Theme.Scale)) };
                         form.Controls.Add(row);
-                        btn.Text = new MostFav { Fav = 500, FavMax = 1000, Order = "shuffle" }.Summary;   // set before it has a handle, as the window does
+                        btn.Text = Filters.WallhavenSummary("fav", new Filters { Topic = "night city" }, new MostFav { Fav = 500, FavMax = 1000, Order = "shuffle" });   // set before it has a handle, as the window does
                         form.Show();
                         for (int k = 0; k < 10; k++) { Application.DoEvents(); System.Threading.Thread.Sleep(5); }
                         float text, name;
@@ -474,7 +512,7 @@ namespace WallhavenShuffle
                 Ok(menu.IsDisposed, "the menu was disposed as it closed");
                 Ok(ran, "a menu disposed as it closes still runs the item clicked (the window's + menu)");
                 host.Dispose();
-            }            // The same for a choice inside a submenu of such a menu (the window's Toplist > Quality, Change every, ...).
+            }            // The same for a choice inside a submenu of such a menu (the window's Wallhaven > Quality, Change every, ...).
             {
                 var host = new Form { ShowInTaskbar = false, StartPosition = FormStartPosition.Manual, Location = new Point(-3000, -3000) };
                 var hh = host.Handle;
@@ -489,7 +527,7 @@ namespace WallhavenShuffle
                 for (int k = 0; k < 10; k++) { Application.DoEvents(); System.Threading.Thread.Sleep(5); }
                 if (choice != null) choice.PerformClick();
                 for (int k = 0; k < 40; k++) { Application.DoEvents(); System.Threading.Thread.Sleep(5); }
-                Ok(choice != null && ran, "a choice in a submenu of such a menu runs too (the window's Toplist, Change every)");
+                Ok(choice != null && ran, "a choice in a submenu of such a menu runs too (the window's Wallhaven, Change every)");
                 host.Dispose();
             }            Console.WriteLine(fails == 0 ? "ALL PASSED (" + passes + ")" : fails + " FAILED, " + passes + " passed");
             return fails;

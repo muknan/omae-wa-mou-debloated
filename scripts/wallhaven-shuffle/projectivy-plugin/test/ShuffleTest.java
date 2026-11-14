@@ -109,24 +109,36 @@ public class ShuffleTest {
         check("At most 0 says why", TvSettings.parseRange("", "0", err) == null && "At most: 1 or more, or empty".equals(err[0]), err[0]);
         check("bad numbers say which field", TvSettings.parseRange("abc", "", err) == null && err[0].startsWith("At least:")
             && TvSettings.parseRange("1", "200000", err) == null && err[0].startsWith("At most:"), err[0]);
-        // Most favourited: its own range and order; the rest of its filters are the toplist's
+        // Wallhaven sorted by favourites (Most favourited): its own range and order; the other filters are shared
         TvSettings r = TvSettings.defaults();
-        r.fav = 200; r.mfFav = 200; r.mfFavmax = 1000; r.mfOrder = "shuffle"; r.sources.add("mostfav"); r.clean();
+        r.fav = 200; r.mfFav = 200; r.mfFavmax = 1000; r.mfOrder = "shuffle"; r.clean();
         check("the toplist's list query: a minimum only", r.listQuery().equals("range=1y&atleast=3840x2160&ratios=16x9,16x10&cats=110&purity=100&fav=200&maxw=0"), r.listQuery());
         check("Most favourited's query, the service's mostfavQueryFor", r.mostfavQuery().equals("sort=fav&atleast=3840x2160&ratios=16x9,16x10&cats=110&purity=100&fav=200&favmax=1000&maxw=0"), r.mostfavQuery());
         check("no upper limit: no favmax in it", TvSettings.defaults().mostfavQuery().equals("sort=fav&atleast=3840x2160&ratios=16x9,16x10&cats=110&purity=100&fav=250&maxw=0"), TvSettings.defaults().mostfavQuery());
-        check("mostfav is a source", r.sources.contains("mostfav"), r.sources.toString());
+        check("sorted as the toplist by default: its list is the toplist's", r.sort.equals("toplist") && r.activeQuery().equals(r.listQuery()) && !r.mostfavOn(), r.sort);
+        TvSettings mig = TvSettings.defaults(); mig.sources.clear(); mig.sources.add("mostfav"); mig.sources.add("fav"); mig.clean();
+        check("Most favourited as a source (1.21): Wallhaven sorted by favourites", mig.sources.equals(List.of("toplist", "fav")) && mig.sort.equals("fav") && mig.mostfavOn(), mig.sources + " " + mig.sort);
+        TvSettings both = TvSettings.defaults(); both.sources.add("mostfav"); both.clean();
+        check("both on: Wallhaven once, by favourites", both.sources.equals(List.of("toplist")) && both.sort.equals("fav"), both.sources.toString());
+        TvSettings badSort = TvSettings.defaults(); badSort.sort = "newest"; badSort.clean();
+        check("an unknown sort: the toplist", badSort.sort.equals("toplist"), badSort.sort);
+        check("by favourites, its list is Most favourited's", mig.activeQuery().equals(mig.mostfavQuery()), mig.activeQuery());
+        r.sort = "fav";
         TvSettings odd = TvSettings.defaults();
         odd.mfFav = 2000; odd.mfFavmax = 1000; odd.mfOrder = "fav"; odd.clean();
         TvSettings eq = TvSettings.defaults(); eq.mfFav = 500; eq.mfFavmax = 500; eq.clean();
         check("a maximum below the minimum: no upper limit (equal is fine); an unknown order: Most first", odd.mfFavmax == 0 && odd.mfOrder.equals("top") && eq.mfFavmax == 500, odd.mfFavmax + " " + odd.mfOrder);
         TvSettings cp = r.copy();
-        check("copy keeps the range and the order", cp.mfFav == 200 && cp.mfFavmax == 1000 && cp.mfOrder.equals("shuffle"), cp.mfOrder);
-        check("the row: the range, and Shuffled only when shuffled", r.mostfavSummary().equals("200 to 1,000 favourites\u00a0· Shuffled")
-            && TvSettings.defaults().mostfavSummary().equals("250+ favourites"), r.mostfavSummary());
-        check("Most first only while Most favourited is on", !r.mostFirst() && !TvSettings.defaults().mostFirst(), "");
+        check("copy keeps the sort, the range and the order", cp.sort.equals("fav") && cp.mfFav == 200 && cp.mfFavmax == 1000 && cp.mfOrder.equals("shuffle"), cp.mfOrder);
+        check("Wallhaven in a line, the remote's and PC's words", r.wallhavenSummary().equals("Most favourited\u00a0· 200 to 1,000\u00a0· Shuffled")
+            && TvSettings.defaults().wallhavenSummary().equals("Toplist\u00a0· Past year"), r.wallhavenSummary());
+        TvSettings any = r.copy(); any.mfFav = 0; any.mfFavmax = 0; any.mfOrder = "top"; any.q = "nature";
+        check("any range: just the sort, and a topic", any.wallhavenSummary().equals("Most favourited\u00a0· “nature”"), any.wallhavenSummary());
         r.mfOrder = "top";
-        check("on and Most first: the pool plays by favourites", r.mostFirst(), "");
+        check("by favourites, Most first: the pool plays by favourites", r.mostFirst(), "");
+        TvSettings off = r.copy(); off.sources.clear(); off.sources.add("fav");
+        TvSettings top = r.copy(); top.sort = "toplist";
+        check("Most first only while Wallhaven is on and sorted by favourites", !off.mostFirst() && !top.mostFirst() && !TvSettings.defaults().mostFirst(), "");
         Shuffle.Item big = new Shuffle.Item("big", "i", "p", "3840x2160", 3840, 1500), small = new Shuffle.Item("small", "i", "p", "3840x2160", 3840, 300),
             wide = new Shuffle.Item("wide", "i", "p", "5120x2880", 5120, 300), few = new Shuffle.Item("few", "i", "p", "3840x2160", 3840, 150);
         check("the toplist's limit is the width only", r.inLimits(big) && r.inLimits(small) && !r.inLimits(wide), "");

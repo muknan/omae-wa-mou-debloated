@@ -90,7 +90,7 @@ environment variables:
 | `CATEGORIES` | `111` | general / anime / people as 0-1 flags: `110` = no People |
 | `PURITY` | `100` | SFW only |
 | `MIN_FAVORITES` | `0` | skip wallpapers with fewer favourites (the toplist is every upload, ranked) |
-| `MAX_FAVORITES` | `0` | skip wallpapers with more favourites (`0` = no limit; below `MIN_FAVORITES` it means none). The apps' Most favourited uses `/api/list?sort=fav&fav=500&favmax=1000…`: all of Wallhaven by favourites, only the pages that range covers |
+| `MAX_FAVORITES` | `0` | skip wallpapers with more favourites (`0` = no limit; below `MIN_FAVORITES` it means none). The apps' Wallhaven sorted by Most favourited uses `/api/list?sort=fav&fav=500&favmax=1000…`: all of Wallhaven by favourites, only the pages that range covers |
 | `SET_SIZE` | `200` | wallpapers per hourly set (at most 200). Projectivy keeps a set for an hour and shows a **random** one from it every *Update delay* minutes, not in order, so a bigger set means fewer repeats: at a 1-minute delay, ~20 repeats an hour with 70, ~2-8 with 200 |
 | `SYNC_KEY` | (none) | the remote and sync (below): a long password of your own that signs in the first device |
 | `KV_REST_API_URL`, `KV_REST_API_TOKEN` | (none) | added by Vercel's Upstash integration; the remote and sync keep their data there |
@@ -140,10 +140,10 @@ installed as a fallback.
 ### A remote on your phone, and the same playlists everywhere (optional)
 With sync set up on the deployment (Upstash Redis and `SYNC_KEY`: see the
 [service README](../scripts/wallhaven-shuffle/README.md#the-remote-and-sync)), the deployment's address is a web remote
-for the TV and the PC: what each one shows, Next / Previous / Pause / Keep, what it shuffles and its toplist filters,
+for the TV and the PC: what each one shows, Next / Previous / Pause / Keep, what it shuffles and its Wallhaven sort and filters,
 the shared playlists, and a grid of a device's toplist to pick from. The plugin (1.8) and the Windows app (2.2)
 pair with a 6-digit code. Playlists, Favourites and Hidden are the same on every device; what each device shuffles
-stays its own (e.g. the TV on "Toplist + Cozy evenings", the PC on "Space" only).
+stays its own (e.g. the TV on "Wallhaven + Cozy evenings", the PC on "Space" only).
 
 The plugin's filters replace the old list address: quality (Full HD and up … 8K, or exactly 4K), shape, period,
 popularity, categories, an optional topic and the largest size, as pickers on the TV's settings screen. They work

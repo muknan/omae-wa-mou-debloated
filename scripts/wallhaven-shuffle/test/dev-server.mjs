@@ -3,13 +3,13 @@
 // that show wallpapers from that list and follow the remote's commands.
 //   LIST_ORIGIN=https://<your-project>.vercel.app node test/dev-server.mjs --demo     # then open the printed link
 //   DEMO_AWAY=1 … --demo     # the pretend TV is in another app (not on its home screen)
-//   LOCAL_LIST=1 … --demo    # Most favourited lists (and, without LIST_ORIGIN, all lists) from this checkout, straight
+//   LOCAL_LIST=1 … --demo    # Most favourited lists (sort=fav) (and, without LIST_ORIGIN, all lists) from this checkout, straight
 //                            # to Wallhaven, pages kept in memory the way the CDN keeps them: for list changes not deployed yet
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { handle, memoryStore, listQueryFor, mostfavQueryFor } from '../lib/sync.js';
+import { handle, memoryStore, listQueryFor, activeQueryFor } from '../lib/sync.js';
 import listHandler from '../api/list.js';
 import pageHandler from '../api/page.js';
 
@@ -124,11 +124,12 @@ server.listen(port, async () => {
       me.held = held; me.every = set?.every;
       if (me.todo && Date.now() >= me.eta) { me.todo(); me.todo = null; me.eta = 0; me.next = Date.now() + everyMs; }
       else if (!me.todo && set && !set.paused && !set.keep && Date.now() > me.next) { showIt(me.up); me.next = Date.now() + everyMs; }
-      const listFav = set ? mostfavQueryFor(set) : '', fl = set?.sources?.includes('mostfav') ? favList(listFav) : null;
+      // Its Wallhaven list: the toplist (the demo pool) or, sorted by favourites, the real Most favourited list once it's back
+      const q = set ? activeQueryFor(set) : '', byFav = set?.sort === 'fav', fl = byFav ? favList(q) : null;
       const r = await sync('poll', { token, body: { v: me.v, cs: me.cs, st: {
         up: me.up, ack: { seq: me.ack, eta: me.eta }, paused: !!set?.paused, kept: !!set?.keep, every: set?.every, t: Date.now(), app: `${kind} dev`, away: kind === 'tv' && !!process.env.DEMO_AWAY || undefined, cur: me.cur, shown: me.shown, total: pool.length, next: set && !set.paused && !set.keep ? me.next : 0,
-        recent: me.recent, counts: { toplist: pool.length, ...(fl ? { mostfav: fl.count, mostfavOf: fl.of } : {}) }, list: set ? listQueryFor(set.filters) : '',
-        ...(fl ? { listFav } : {}), base: kind === 'tv' ? 60 : undefined,
+        recent: me.recent, counts: { toplist: fl ? fl.count : pool.length, ...(fl?.of ? { toplistOf: fl.of } : {}) }, list: byFav && !fl ? '' : q,
+        base: kind === 'tv' ? 60 : undefined,
         local: kind === 'pc' ? [{ key: 'folder:D:\\Photos\\Holidays', name: 'Holidays', count: 48, on: false }] : undefined,
       } } });
       if (r.doc) { me.doc = r.doc; me.v = r.v; }

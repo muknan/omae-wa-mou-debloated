@@ -23,7 +23,7 @@ using Microsoft.Win32;
 
 [assembly: System.Reflection.AssemblyTitle("Wallhaven Shuffle")]
 [assembly: System.Reflection.AssemblyProduct("Wallhaven Shuffle")]
-[assembly: System.Reflection.AssemblyVersion("2.11.0.0")]
+[assembly: System.Reflection.AssemblyVersion("2.12.0.0")]
 
 namespace WallhavenShuffle
 {
@@ -530,13 +530,14 @@ namespace WallhavenShuffle
         public bool Paused = false;
         public bool StartupDone = false;     // "start with Windows" is switched on once, on the first run
         public string Server = "";          // the wallhaven-shuffle deployment (https://<project>.vercel.app)
-        public Filters Filters = new Filters();   // which toplist (also in the app, under Toplist)
+        public Filters Filters = new Filters();   // Wallhaven's filters (also in the app, under Wallhaven)
         public string OriginalWallpaper = "", OriginalStyle = "", OriginalTile = "";
         public string CacheDir = "";         // where the originals are kept; empty = "cache" next to the exe
         public int CacheLimitGB = 10;        // the whole 1-year list is about 7 GB
         public bool LockScreen = false;      // also put each wallpaper on the lock screen
-        public List<string> Sources = new List<string> { "toplist" };   // what it shuffles, mixed: toplist, fav, playlist ids, folder:<path>
-        public MostFav MostFav = new MostFav();   // Most favourited: its favourites range and order (the rest of its filters are the toplist's)
+        public List<string> Sources = new List<string> { "toplist" };   // what it shuffles, mixed: toplist (Wallhaven), fav, playlist ids, folder:<path>
+        public string Sort = "toplist";      // Wallhaven's sort: toplist (a period and a minimum) or fav (Most favourited)
+        public MostFav MostFav = new MostFav();   // Most favourited: its favourites range and order (the rest of its filters are Wallhaven's)
         public string SyncKey = "";          // the owner's key, to connect this PC once (cleared after)
         public string KeepId = "";           // "Keep this wallpaper": the one kept on screen (no automatic changes); "" = none
         public string PlaylistsDir = "";     // where playlists are made; empty = "Playlists" next to the cache folder (same drive: linked, not copied)
@@ -594,6 +595,7 @@ namespace WallhavenShuffle
                     case "Shape": s.Filters.Ratio = v; sawFilters = true; break;
                     case "Period": s.Filters.Range = v; sawFilters = true; break;
                     case "Popularity": if (int.TryParse(v, out n)) s.Filters.Fav = n; sawFilters = true; break;
+                    case "Sort": s.Sort = Filters.CleanSort(v); break;
                     case "MostFavourited": if (int.TryParse(v, out n)) s.MostFav.Fav = n; break;
                     case "MostFavouritedMax": if (int.TryParse(v, out n)) s.MostFav.FavMax = n; break;
                     case "MostFavouritedOrder": s.MostFav.Order = v; break;
@@ -624,6 +626,8 @@ namespace WallhavenShuffle
             }
             if (!sawSources && oldSource != null)
                 s.Sources = new List<string> { oldSource.Length == 0 ? "toplist" : oldSource == "favourites" ? "fav" : oldSource };
+            // Most favourited was a source of its own in 2.11: it's Wallhaven sorted by favourites now
+            if (s.Sources.Contains("mostfav")) { s.Sources = s.Sources.Select(k => k == "mostfav" ? "toplist" : k).Distinct().ToList(); s.Sort = "fav"; }
             s.Filters.Clean();
             s.MostFav.Clean();
             return s;
@@ -638,18 +642,19 @@ namespace WallhavenShuffle
                     "IntervalSeconds=" + IntervalSeconds, "Position=" + Position,
                     "PauseFullScreen=" + (PauseFullScreen ? "1" : "0"), "PauseOnBattery=" + (PauseOnBattery ? "1" : "0"),
                     "Paused=" + (Paused ? "1" : "0"), "StartupDone=" + (StartupDone ? "1" : "0"),
-                    "# Server: your wallhaven-shuffle deployment. The toplist's filters (also in the app, under Toplist): Quality 1080+ 1440+ 4k+ 4k 5k+ 8k;",
-                    "# Shape 16x9,16x10 16x9 16x10 21x9,32x9 or empty; Period 1d 3d 1w 1M 3M 6M 1y; Popularity = minimum favourites;",
-                    "# Categories general/anime/people as 0/1.",
+                    "# Server: your wallhaven-shuffle deployment. Wallhaven's filters (also in the app, under Wallhaven): Quality 1080+ 1440+ 4k+ 4k 5k+ 8k;",
+                    "# Shape 16x9,16x10 16x9 16x10 21x9,32x9 or empty; Categories general/anime/people as 0/1. Sort: toplist (Period 1d 3d 1w 1M 3M 6M 1y,",
+                    "# Popularity = minimum favourites) or fav (Most favourited, below).",
+                    "Sort=" + Sort,
                     "Server=" + Server, "Quality=" + Filters.Quality, "Shape=" + Filters.Ratio, "Period=" + Filters.Range, "Popularity=" + Filters.Fav,
                     "Categories=" + Filters.Cats, "Topic=" + Filters.Topic, "MaxWidth=" + Filters.MaxWidth,
-                    "# Most favourited (all of Wallhaven by favourites, with the toplist's quality, shape, categories and topic): at least",
+                    "# Most favourited (Sort=fav: all of Wallhaven by favourites, with the filters above): at least",
                     "# MostFavourited and at most MostFavouritedMax favourites (0 = no limit); order top (most first) or shuffle.",
                     "MostFavourited=" + MostFav.Fav, "MostFavouritedMax=" + MostFav.FavMax, "MostFavouritedOrder=" + MostFav.Order,
                     "OriginalWallpaper=" + OriginalWallpaper, "OriginalStyle=" + OriginalStyle, "OriginalTile=" + OriginalTile,
                     "# Downloaded originals are kept here (empty = a cache folder next to the app), up to CacheLimitGB.",
                     "CacheDir=" + CacheDir, "CacheLimitGB=" + CacheLimitGB, "LockScreen=" + (LockScreen ? "1" : "0"),
-                    "# Sources: what it shuffles, separated by | (toplist, mostfav, fav, a playlist's id, folder:<path>). KeepId: the wallpaper kept on screen.",
+                    "# Sources: what it shuffles, separated by | (toplist = Wallhaven, fav, a playlist's id, folder:<path>). KeepId: the wallpaper kept on screen.",
                     "Sources=" + string.Join("|", Sources), "KeepId=" + KeepId,
                     "# Playlists are folders in PlaylistsDir (empty = Playlists next to the cache folder: on the same drive, pictures are linked, not copied).",
                     "PlaylistsDir=" + PlaylistsDir,
@@ -857,7 +862,7 @@ namespace WallhavenShuffle
             LoadLibrary();
             // Sources from 2.1 ("playlist:<name>") become the playlist's id; unknown ones are dropped.
             var srcs = settings.Sources.Select(k => k.StartsWith("playlist:") ? (doc.Own.Where(p => p.Name == k.Substring(9)).Select(p => p.Id).FirstOrDefault() ?? AdoptFolder(k.Substring(9))) : k)
-                .Where(k => k != null && (k == "toplist" || k == "mostfav" || k == "fav" || doc.Find(k) != null || (k.StartsWith("folder:") && folders.Contains(k.Substring(7))))).Distinct().ToList();
+                .Where(k => k != null && (k == "toplist" || k == "fav" || doc.Find(k) != null || (k.StartsWith("folder:") && folders.Contains(k.Substring(7))))).Distinct().ToList();
             if (!srcs.SequenceEqual(settings.Sources)) { settings.Sources = srcs; settings.Save(); }
             rot = new Rotation(ReadList(RoundFile), ReadList("history.txt"), 0);
             string cachedList = "";
@@ -935,13 +940,12 @@ namespace WallhavenShuffle
         {
             if (settings.Sources.Count == 0) return "Pick something in Shuffle from";
             if (!HasSource)
-                return (ToplistOn || MostFavOn) && settings.Server.Length == 0 ? "Set the service address: ⋯ > Remote" : "Can't find the folder of " + SourcesSummary;
+                return WallhavenOn && settings.Server.Length == 0 ? "Set the service address: ⋯ > Remote" : "Can't find the folder of " + SourcesSummary;
             if (IsKept) return busy ? "Changing…" : "Keeping this wallpaper";
             if (Pool().Count == 0)
             {
                 if (ToplistOn && walls.Count == 0) return listBusy || string.IsNullOrEmpty(lastError) ? "Loading the toplist…" : "Can't reach the service right now, retrying";
                 if (MostFavOn && favWalls.Count == 0 && favFor.Length == 0) return favBusy || favError.Length == 0 ? "Loading Most favourited…" : "Can't reach the service right now, retrying";
-                if (ToplistOn && MostFavOn) return "No wallpapers match the toplist's filters or Most favourited's range";
                 if (ToplistOn) return "No wallpapers match the toplist's filters";
                 if (MostFavOn) return "No wallpapers in Most favourited's range";
                 return settings.Sources.SequenceEqual(new[] { "fav" }) ? "No Favourites yet: ♡ saves the one on screen" : SourcesSummary + ": nothing in it yet";
@@ -1058,7 +1062,7 @@ namespace WallhavenShuffle
             for (int i = 0; i < all.Count; i++)
             {
                 var src = all[i];
-                if (i == 3) sub.AddSeparator();   // after the toplist, Most favourited and Favourites
+                if (i == 2) sub.AddSeparator();   // after Wallhaven and Favourites
                 int count = src.Key.StartsWith("folder:") ? FolderPool(src.Folder).Count : src.Count;
                 sub.AddToggle(src.Name, IsOn(src.Key), on => ToggleSource(src.Key, on), count >= 0 ? count.ToString("N0") : null);
             }
@@ -1067,8 +1071,9 @@ namespace WallhavenShuffle
             sub.Add("Add a folder of your pictures…", Glyphs.NewFolder, delegate { AddFolderDialog(owner); });
         }
 
-        // "Toplist ▸": its filters, each a submenu of choices (the same ones as on the TV and in the remote).
-        public void FillToplistMenu(FluentMenu sub, Form owner)
+        // "Wallhaven ▸": Sort by first, then that sort's own choices, then the filters both sorts share (the same ones,
+        // in the same order, as on the TV and in the remote). Each is a submenu of choices.
+        public void FillWallhavenMenu(FluentMenu sub, Form owner)
         {
             var f = settings.Filters;
             Action<string, string[][], string, Action<Filters, string>> choices = (title, table, value, set) =>
@@ -1076,8 +1081,24 @@ namespace WallhavenShuffle
                 {
                     foreach (var row in table) { var r = row; m.Add(r[1], null, delegate { SetFilters(x => set(x, r[0])); }).Checked = r[0] == value; }
                 }, Filters.Label(table, value));
+            sub.AddSubmenu("Sort by", null, m =>
+            {
+                foreach (var row in Filters.Sorts) { var r = row; m.Add(r[1], null, delegate { SetSort(r[0]); }).Checked = r[0] == settings.Sort; }
+            }, Filters.Label(Filters.Sorts, settings.Sort));
+            sub.AddSeparator();
+            if (settings.Sort == "fav") FillMostFavPart(sub, owner);
+            else FillToplistPart(sub, owner, choices);
+            sub.AddSeparator();
             choices("Quality", Filters.Qualities, f.Quality, (x, v) => x.Quality = v);
             choices("Shape", Filters.Ratios, f.Ratio, (x, v) => x.Ratio = v);
+            FillSharedFilters(sub, owner);
+            if (!WallhavenOn) { sub.AddSeparator(); sub.Add("Turn Wallhaven on", Glyphs.Globe, delegate { ToggleSource("toplist", true); }); }
+        }
+
+        // Sorted as the toplist: its period and a minimum (presets, the one in use if typed in, Type one…).
+        void FillToplistPart(FluentMenu sub, Form owner, Action<string, string[][], string, Action<Filters, string>> choices)
+        {
+            var f = settings.Filters;
             choices("Period", Filters.Ranges, f.Range, (x, v) => x.Range = v);
             sub.AddSubmenu("Popularity", null, m =>
             {
@@ -1091,6 +1112,12 @@ namespace WallhavenShuffle
                     if (t != null && Filters.ParseFav(t) != settings.Filters.Fav) { int k = Filters.ParseFav(t); SetFilters(x => x.Fav = k); }
                 });
             }, Filters.FavLabel(f.Fav));
+        }
+
+        // Categories, Topic and Largest size: Wallhaven's, whichever the sort.
+        void FillSharedFilters(FluentMenu sub, Form owner)
+        {
+            var f = settings.Filters;
             sub.AddSubmenu("Categories", null, m =>
             {
                 var names = new[] { "General", "Anime", "People" };
@@ -1113,7 +1140,7 @@ namespace WallhavenShuffle
                 m.AddSeparator();
                 m.Add("Type one…", Glyphs.Edit, delegate
                 {
-                    string q = FluentDialog.Ask(owner, "Topic", "A Wallhaven search, like nature or night city: the toplist of just those.", "Save", f.Topic,
+                    string q = FluentDialog.Ask(owner, "Topic", "A Wallhaven search, like nature or night city: only those.", "Save", f.Topic,
                         v => v.Trim().Length == 0 || Filters.NormTopic(v).Length > 0 ? null : "Letters, digits, spaces and hyphens only");
                     if (q != null) SetFilters(x => x.Topic = q);
                 });
@@ -1122,12 +1149,11 @@ namespace WallhavenShuffle
             {
                 foreach (int w in Filters.Widths) { int k = w; m.Add(Filters.WidthLabel(k), null, delegate { SetFilters(x => x.MaxWidth = k); }).Checked = k == f.MaxWidth; }
             }, Filters.WidthLabel(f.MaxWidth));
-            if (!ToplistOn) { sub.AddSeparator(); sub.Add("Turn the toplist on", Glyphs.Globe, delegate { ToggleSource("toplist", true); }); }
         }
 
-        // "Most favourited ▸": its range (presets, the one in use if typed in, Type a range…) and its order. The rest
-        // of its filters are the toplist's.
-        public void FillMostFavMenu(FluentMenu sub, Form owner)
+        // Sorted by favourites (Most favourited): its range (presets, the one in use if typed in, Type a range…) and
+        // its order.
+        void FillMostFavPart(FluentMenu sub, Form owner)
         {
             var mf = settings.MostFav;
             sub.AddSubmenu("Popularity", null, m =>
@@ -1153,7 +1179,34 @@ namespace WallhavenShuffle
             {
                 foreach (var row in Filters.Orders) { var r = row; m.Add(r[1], null, delegate { SetMostFav(x => x.Order = r[0]); }).Checked = r[0] == mf.Order; }
             }, Filters.Label(Filters.Orders, mf.Order));
-            if (!MostFavOn) { sub.AddSeparator(); sub.Add("Turn Most favourited on", Glyphs.Star, delegate { ToggleSource("mostfav", true); }); }
+        }
+
+        // Sort by changed here: saved and synced (ApplySort does the rest).
+        public void SetSort(string sort)
+        {
+            sort = Filters.CleanSort(sort);
+            if (sort == settings.Sort) return;
+            ApplySort(sort);
+            settings.Save();
+            MarkSettingsDirty();
+            Changed();
+            if (window != null && !window.IsDisposed) window.LoadValues();
+        }
+
+        // Wallhaven's sort changed (here, from another device, or in settings.ini): only that sort's list is fetched
+        // and shuffled; a new round starts (Most first begins at the most favourited one), and if the one on screen
+        // isn't in the new list, the next one comes as soon as the list is here (as turning a source on does).
+        void ApplySort(string sort)
+        {
+            settings.Sort = Filters.CleanSort(sort);
+            Log("wallhaven: sorted by " + Filters.Label(Filters.Sorts, settings.Sort));
+            prepared = null;
+            if (settings.Sort == "fav") nextFavRefresh = DateTime.MinValue; else nextListRefresh = DateTime.MinValue;
+            if (!WallhavenOn) return;
+            rot.LoadRound(new string[0]);
+            WriteList(RoundFile, rot.Round);
+            if (current == null || !Pool().Any(w => w.Id == current.Id)) nextChange = DateTime.Now;
+            else if (!busy && Pool().Count > 0) PrepareNext();
         }
 
         // Most favourited changed here: saved and synced (ApplyMostFav does the rest).
@@ -1289,18 +1342,19 @@ namespace WallhavenShuffle
             }
             catch (Exception) { return; }   // still being saved: next second
             bool sourceChanged = f.ListUrl != settings.ListUrl, positionChanged = f.Position != settings.Position;
-            bool mostFavChanged = !f.MostFav.Same(settings.MostFav);
-            bool synced = f.IntervalSeconds != settings.IntervalSeconds || f.Paused != settings.Paused || sourceChanged || mostFavChanged;
+            bool mostFavChanged = !f.MostFav.Same(settings.MostFav), sortChanged = f.Sort != settings.Sort;
+            bool synced = f.IntervalSeconds != settings.IntervalSeconds || f.Paused != settings.Paused || sourceChanged || mostFavChanged || sortChanged;
             settings.IntervalSeconds = f.IntervalSeconds; settings.Position = f.Position;
             settings.PauseFullScreen = f.PauseFullScreen; settings.PauseOnBattery = f.PauseOnBattery; settings.Paused = f.Paused;
             settings.Server = f.Server; settings.Filters = f.Filters;
             if (mostFavChanged) ApplyMostFav(f.MostFav);
+            if (sortChanged) ApplySort(f.Sort);
             if (f.SyncKey.Length > 0 && !Paired) { settings.SyncKey = f.SyncKey; KickSync(); }
             settings.CacheLimitGB = f.CacheLimitGB; settings.LockScreen = f.LockScreen; // CacheDir: takes effect on restart
             settings.PlaylistsDir = f.PlaylistsDir;
             settings.KeepId = f.KeepId == "" || (current != null && f.KeepId == current.Id) ? f.KeepId : settings.KeepId;   // only the one on screen can be kept
             Log("settings.ini edited");
-            var known = f.Sources.Where(k => k == "toplist" || k == "mostfav" || k == "fav" || doc.Find(k) != null || (k.StartsWith("folder:") && folders.Contains(k.Substring(7)))).ToList();
+            var known = f.Sources.Where(k => k == "toplist" || k == "fav" || doc.Find(k) != null || (k.StartsWith("folder:") && folders.Contains(k.Substring(7)))).ToList();
             if (!known.SequenceEqual(settings.Sources)) SetSources(known, true);
             if (synced) MarkSettingsDirty();
             SettingsChanged(sourceChanged, positionChanged);
@@ -2055,7 +2109,7 @@ namespace WallhavenShuffle
         readonly RoundButton nextBtn = new RoundButton(Glyphs.Next, 44, "Next wallpaper  (Ctrl+Alt+Shift+→)");
         readonly RoundButton addBtn = new RoundButton(Glyphs.Add, 40, "Add to playlist");
         readonly RoundButton moreBtn = new RoundButton(Glyphs.More, 40, "More");
-        readonly MenuButton source = new MenuButton(), toplist = new MenuButton(), mostFav = new MenuButton(), every = new MenuButton();
+        readonly MenuButton source = new MenuButton(), wallhaven = new MenuButton(), every = new MenuButton();
         readonly ToolTip tips = new ToolTip();
         readonly FluentMenu moreMenu = new FluentMenu();
         bool addMenuOpen;
@@ -2091,8 +2145,7 @@ namespace WallhavenShuffle
 
             var card = new Card { Bounds = new Rectangle(Gutter, y, inner, 0) };
             card.AddRow("Shuffle from", source);
-            card.AddRow("Toplist", toplist);
-            card.AddRow("Most favourited", mostFav);
+            card.AddRow("Wallhaven", wallhaven);
             card.AddRow("Change every", every);
             y = card.Bottom + Gutter;
 
@@ -2129,8 +2182,7 @@ namespace WallhavenShuffle
             };
 
             source.Fill += m => app.FillSourceMenu(m, this);
-            toplist.Fill += m => app.FillToplistMenu(m, this);
-            mostFav.Fill += m => app.FillMostFavMenu(m, this);
+            wallhaven.Fill += m => app.FillWallhavenMenu(m, this);
             every.Fill += m =>
             {
                 foreach (int minutes in Filters.Every)
@@ -2224,8 +2276,7 @@ namespace WallhavenShuffle
         public void LoadValues()
         {
             source.Text = app.SourcesSummary;
-            toplist.Text = s.Filters.Summary;
-            mostFav.Text = s.MostFav.Summary;
+            wallhaven.Text = Filters.WallhavenSummary(s.Sort, s.Filters, s.MostFav);
             every.Text = IntervalText(s.IntervalSeconds);
         }
 
@@ -2271,7 +2322,7 @@ namespace WallhavenShuffle
             base.OnDeactivate(e);
             BeginInvoke(new Action(delegate
             {
-                if (IsDisposed || !Visible || ActiveForm == this || moreMenu.Visible || every.MenuOpen || source.MenuOpen || toplist.MenuOpen || mostFav.MenuOpen || addMenuOpen || TrayApp.ModalOpen > 0) return;
+                if (IsDisposed || !Visible || ActiveForm == this || moreMenu.Visible || every.MenuOpen || source.MenuOpen || wallhaven.MenuOpen || addMenuOpen || TrayApp.ModalOpen > 0) return;
                 Hide();
             }));
         }
@@ -2311,8 +2362,7 @@ namespace WallhavenShuffle
             pinBtn.Enabled = w != null;
             tips.SetToolTip(pinBtn, kept ? "Stop keeping this wallpaper  (Ctrl+Alt+Shift+K)" : "Keep this wallpaper: no changes until you take it off  (Ctrl+Alt+Shift+K)");
             source.Text = app.SourcesSummary;
-            toplist.Text = s.Filters.Summary;
-            mostFav.Text = s.MostFav.Summary;
+            wallhaven.Text = Filters.WallhavenSummary(s.Sort, s.Filters, s.MostFav);
             playBtn.Glyph = s.Paused ? Glyphs.Play : Glyphs.Pause;
             prevBtn.Enabled = app.CanGoBack;
             tips.SetToolTip(playBtn, s.Paused ? "Resume  (Ctrl+Alt+Shift+P)" : "Pause  (Ctrl+Alt+Shift+P)");
@@ -2596,7 +2646,7 @@ namespace WallhavenShuffle
     }
 
     // Looks like a dropdown (its value and a chevron) but opens a menu its owner fills: "Shuffle from" (switches, any
-    // mix) and "Toplist" (a submenu per filter).
+    // mix) and "Wallhaven" (Sort by, then a submenu per filter).
     class MenuButton : FluentControl
     {
         public event Action<FluentMenu> Fill;
