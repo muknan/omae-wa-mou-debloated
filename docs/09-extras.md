@@ -57,8 +57,8 @@ channels, many YouTube uploads.
 
 The background helper puts it back without a restart:
 
-- Every 2 seconds it reads one file to see whether the home screen is in front. When the home screen comes back from
-  behind an app, it asks Android's display service once whether the panel is at 50 Hz.
+- Every second it reads one file to see whether the home screen is in front. When the home screen comes back from
+  behind an app, it asks Android's display service straight away whether the panel is at 50 Hz.
 - If it is, it starts the [wallpaper plugin](../scripts/wallhaven-shuffle/projectivy-plugin)'s panel reset: a silent
   black 24 fps clip in a 2-pixel corner for under a second, nothing you can see. 24 fps makes the chip choose 60 Hz,
   and it stays there. The log shows `home screen came back with the panel at 50 Hz ...` and `panel at 60 Hz again`.

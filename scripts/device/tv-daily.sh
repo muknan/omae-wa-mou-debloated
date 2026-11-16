@@ -19,8 +19,8 @@
 #     set from the network (after a cold boot it starts at the firmware's build date).
 #   - PANEL_60HZ_FIX: on MediaTek TVs (the Xiaomi test TV) a 25 fps video leaves the panel running at 50 Hz after
 #     it ends, and the home screen judders (Android still draws for 60) until a restart. Between the minute checks
-#     it looks every 2 seconds whether the home screen is back in front (a file read). When it is, it asks
-#     SurfaceFlinger once, and if the panel is at 50 Hz it starts the wallpaper plugin's PanelResetActivity (a
+#     it looks every second whether the home screen is back in front (a file read). When it is, it asks
+#     SurfaceFlinger at once, and if the panel is at 50 Hz it starts the wallpaper plugin's PanelResetActivity (a
 #     silent 24 fps clip in two pixels, under a second), which puts it back to 60 Hz. At most two tries each time.
 #   - KEEP_OFF: every 5 minutes, any app on the list tv-apply.sh wrote (tv-apply.keepoff) that an update switched
 #     back on is switched off again (one `pm list`, ~0.07 s).
@@ -75,11 +75,13 @@ busy_apps() {
     } | sort -u | tr '\n' ' '
 }
 
-# Panel back to 60 Hz (PANEL_60HZ_FIX). Every 2 s: is the home screen in front (its process priority 0)? Only when it
-# has just come back from behind something else does it ask SurfaceFlinger (~60 ms), 2 s later so the app before it
-# has let go of its video. "VSYNC period" other than 16666666 ns with the display set to 60 Hz = the panel is stuck.
+# Panel back to 60 Hz (PANEL_60HZ_FIX). Every second: is the home screen in front (its process priority 0)? Only when
+# it has just come back from behind something else does it ask SurfaceFlinger (~60 ms), straight away: waiting 2 s for
+# the app before it to let go of its video meant 2-4 s of judder you could see (2026-11-16); a reset that comes too
+# early is caught by the look again 6 s later. "VSYNC period" other than 16666666 ns with the display set to 60 Hz =
+# the panel is stuck.
 RESET=io.github.muknan.wallhavenshuffle/.PanelResetActivity
-hpkg=; hpid=; away=0; due=; tries=0; quiet=0; reset_ok=
+hpkg=; hpid=; away=0; due=; tries=0; quiet=0; reset_ok=; back=0
 # Also stuck: Android drawing the whole screen below 60 fps ("activeMode=20.00 Hz (60.00 Hz)"), which a video's
 # frame-rate request can leave behind; the reset clears that too. $why says which.
 panel_stuck() {
@@ -99,21 +101,22 @@ panel_check() {
         [ "$u" -ge "$quiet" ] && away=1                            # (not our own reset screen in front)
         return
     fi
-    if [ "$away" = 1 ]; then away=0; due=$((u + 2)); tries=0; fi
+    if [ "$away" = 1 ]; then away=0; due=$u; back=$u; tries=0; fi
     [ -n "$due" ] && [ "$u" -ge "$due" ] || return
     due=
     if ! panel_stuck; then
-        [ "$tries" -gt 0 ] && log "panel at 60 Hz again"
+        [ "$tries" -gt 0 ] && log "panel at 60 Hz again (reset started $first s after the home screen came back)"
         tries=0; return
     fi
     if [ "$tries" -ge 2 ]; then log "still $why after 2 resets; leaving it until the home screen comes back again"; return; fi
     [ "$tries" = 0 ] && log "home screen came back with $why (left by a video): resetting it to 60 Hz"
+    [ "$tries" = 0 ] && first=$((u - back))
     am start -n "$RESET" >/dev/null 2>&1
     tries=$((tries + 1)); quiet=$((u + 8)); due=$((u + 6))        # look again once it has closed
 }
 
 PANEL_60HZ_FIX=1
-POLL=2
+POLL=1
 ticks=0
 while true; do
     waited=0
