@@ -330,7 +330,7 @@ function Get-BackgroundGroups {
 
 function New-ConfText($c) {
     $l = @('# Written by the omae-wa-mou-debloated setup wizard. Re-run the wizard to change it.')
-    foreach ($k in 'ANIM_SCALE', 'INCLUDE_USER_APPS', 'PREINSTALLED_APPS', 'STOP_ONLY', 'EXTRA_PROTECT', 'XIAOMI_ANIM_KEY', 'UNWHITELIST_NETFLIX', 'START_KEYMAPPER_EXPERT_MODE', 'QUIET_APPS', 'DAILY_REFRESH', 'DAILY_REFRESH_HOUR', 'WIFI_IPV6_ROUTER_FIX', 'VOLUME_HOLD_REPEAT', 'IDLE_TRIM_MINUTES', 'PANEL_60HZ_FIX', 'KEEP_OFF', 'LIVE_TV_BUTTON_INPUT') {
+    foreach ($k in 'ANIM_SCALE', 'INCLUDE_USER_APPS', 'PREINSTALLED_APPS', 'STOP_ONLY', 'EXTRA_PROTECT', 'XIAOMI_ANIM_KEY', 'UNWHITELIST_NETFLIX', 'START_KEYMAPPER_EXPERT_MODE', 'QUIET_APPS', 'DAILY_REFRESH', 'DAILY_REFRESH_HOUR', 'WIFI_IPV6_ROUTER_FIX', 'VOLUME_HOLD_REPEAT', 'IDLE_TRIM_MINUTES', 'PANEL_60HZ_FIX', 'KEEP_OFF', 'LIVE_TV_BUTTON_INPUT', 'AUTO_SWITCH_INPUT') {
         if ($null -eq $c.$k) { continue }
         $l += ('{0}="{1}"' -f $k, $c.$k)
     }
@@ -355,6 +355,7 @@ function Publish-Agent {
     $c = $script:State.conf
     $c | Add-Member -Force KEEP_OFF ((Get-KeepOff) -join ' ')
     if ($null -eq $c.LIVE_TV_BUTTON_INPUT) { $c | Add-Member -Force LIVE_TV_BUTTON_INPUT "$(Get-Answer 'liveTvButtonInput' $null)" }
+    if ($null -eq $c.AUTO_SWITCH_INPUT) { $c | Add-Member -Force AUTO_SWITCH_INPUT "$(Get-Answer 'autoSwitchInput' $null)" }
     $script:State.conf = $c; Save-State
     $f = Join-Path $script:Dir 'tv-apply.conf'
     Write-Text $f (New-ConfText $c)
@@ -422,6 +423,7 @@ function Step-Background {
         IDLE_TRIM_MINUTES           = '10'
         PANEL_60HZ_FIX              = '1'
         LIVE_TV_BUTTON_INPUT        = "$(Get-Answer 'liveTvButtonInput' $null)"
+        AUTO_SWITCH_INPUT           = "$(Get-Answer 'autoSwitchInput' $null)"
     }
     $script:State.conf = $c; Save-State
     Add-Change @{ type = 'deploy'; anim = "$anim"; stopOnly = $c.STOP_ONLY; protect = $c.EXTRA_PROTECT; preinstalled = $c.PREINSTALLED_APPS }
@@ -935,6 +937,8 @@ function Show-Status {
     Info ("{0,-32} {1}" -f 'Kept off after updates', $(if ([int]$h.keepoff -gt 0) { "$($h.keepoff) apps" } else { 'none' }))
     $live = "$($script:State.conf.LIVE_TV_BUTTON_INPUT)"
     if ($live) { Info ("{0,-32} {1}" -f 'Live TV button', $(if ($h.keys -eq '1') { "opens $live" } else { 'helper not running' })) }
+    $auto = "$($script:State.conf.AUTO_SWITCH_INPUT)"
+    if ($auto) { Info ("{0,-32} {1}" -f 'Auto switch', $(if ($h.keys -eq '1') { "to $auto when it turns on" } else { 'helper not running' })) }
     Info ("{0,-32} {1}" -f 'Private DNS', $h.dns)
     $drops = [int]$h.drops
     Info ("{0,-32} {1}" -f 'Wi-Fi IPv6 router fix', $(if ($h.v6fix -eq '1') { 'on' } else { 'off' }))

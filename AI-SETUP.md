@@ -122,6 +122,8 @@ Copy `answers-template.json` and fill it from the human's replies:
 - `features`: `"off"` switches off that question's packages, `"keep"` leaves them.
 - `dailyRefresh`: refresh once a day from 4:00 (`dailyRefreshHour` to change), never while something plays.
 - `liveTvButtonInput`: the input the remote's Live TV / TV+ button opens, e.g. `"HDMI 1"` (default: the firmware's own).
+- `autoSwitchInput`: the HDMI input to switch to when its device (a console) turns on while the home screen is in
+  front, and back to the home screen when it turns off, e.g. `"HDMI 1"` (default: off). No HDMI-CEC needed.
   `privateDns` (AdGuard, only with the human's explicit yes) and `smartTubeLinks` belong to the `extras` step.
 - `background`: only list overrides; everything else uses the plan's suggestion. *asleep* = no background
   running until opened (default for installed apps), *stopOnly* = stopped at startup but may run after the human

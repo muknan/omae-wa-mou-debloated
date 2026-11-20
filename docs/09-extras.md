@@ -127,6 +127,26 @@ or Live TV on the last input used if it's off. `LIVE_TV_BUTTON_INPUT` makes the 
 - **Who runs it.** The boot helper starts it (and restarts it, so a changed setting takes effect), and
   `tv-daily.sh` restarts it within a minute if it stops. Another button name: `LIVE_TV_KEY` (as `getevent -l` shows it).
 
+## Switching to a console when it turns on (no HDMI-CEC)
+
+HDMI-CEC can switch the TV to a console that turns on, but it also couples power (the TV turning on wakes the
+console, one turning off turns off the other), and on the Xiaomi test TV it caused a sound bug: after a while the
+speakers popped and the volume dropped until a restart. `AUTO_SWITCH_INPUT` does only the input switching, with CEC
+left off:
+
+- **Setting it.** `AUTO_SWITCH_INPUT="HDMI 1"` in `tv-apply.conf` (the input's name as the TV lists it), or an
+  input id. In an answers file: `"autoSwitchInput": "HDMI 1"`. Empty = off.
+- **What it does.** The console turns on while the home screen is in front: the TV switches to its input. It turns
+  off while that input is showing: back to the home screen. Anything else in front (an app, another input), or the
+  TV asleep: the screen is left as it is. It never wakes the TV, sends nothing to the console and turns nothing off.
+- **How.** Even with CEC off, the TV notices the HDMI cable's 5 V line come and go when the device turns on and off,
+  and Android logs it (`Hotplug event:[port:1, connected:true]`, tag `HDMI`). `tv-keys.sh` reads that log
+  (logcat, about 0.01 s of CPU a minute) and opens the input with the same passthrough link as the Live TV button.
+  Xiaomi's own "new source" switch sees the same event but does nothing when another launcher is the home screen.
+- **Limits.** A device that keeps its 5 V on while asleep gives no event to react to. If the TV is asleep when the
+  console turns on, nothing happens: switch by hand.
+- **Who runs it.** The same helper as the Live TV button, started and kept running the same way.
+
 ## Ad and tracker blocking for the whole TV (Private DNS)
 
 Android's Private DNS can point at [AdGuard DNS](https://adguard-dns.io/en/public-dns.html), which answers ad and

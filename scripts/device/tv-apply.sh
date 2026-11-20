@@ -82,6 +82,11 @@ KEEP_OFF=""
 # input id. The firmware catches that button before any app can (Key Mapper never sees it), so tv-keys.sh listens
 # for it (read-only, like tv-volhold.sh) and opens the input right after the firmware's own action. Empty = off.
 LIVE_TV_BUTTON_INPUT=""
+
+# Switch to this HDMI input when the device on it turns on (a console), while the home screen is in front; back to the
+# home screen when it turns off, while that input is showing. E.g. "HDMI 1". Without HDMI-CEC: tv-keys.sh reads the
+# plug event Android logs when the device's 5 V comes and goes. It never wakes the TV or turns anything off. Empty = off.
+AUTO_SWITCH_INPUT=""
 # ====================================================================
 CONF=/data/local/tmp/tv-apply.conf
 # shellcheck source=/dev/null
@@ -211,7 +216,7 @@ fi
 # running yet.
 if { [ "$DAILY_REFRESH" = "1" ] || [ -n "$QUIET_APPS" ] || [ "${IDLE_TRIM_MINUTES:-0}" -gt 0 ] ||
      [ "$WIFI_IPV6_ROUTER_FIX" = "1" ] || [ "$VOLUME_HOLD_REPEAT" = "1" ] || [ "$PANEL_60HZ_FIX" = "1" ] ||
-     [ -n "$KEEP" ] || [ -n "$LIVE_TV_BUTTON_INPUT" ]; } && [ -f /data/local/tmp/tv-daily.sh ]; then
+     [ -n "$KEEP" ] || [ -n "$LIVE_TV_BUTTON_INPUT$AUTO_SWITCH_INPUT" ]; } && [ -f /data/local/tmp/tv-daily.sh ]; then
     dp=$(cat /data/local/tmp/tv-daily.pid 2>/dev/null)
     if [ -z "$dp" ] || ! grep -q tv-daily /proc/"$dp"/cmdline 2>/dev/null; then
         setsid nohup sh /data/local/tmp/tv-daily.sh </dev/null >/dev/null 2>&1 &
@@ -238,21 +243,21 @@ elif [ "$VOLUME_HOLD_REPEAT" != "1" ]; then
     rm -f /data/local/tmp/tv-volhold.pid /data/local/tmp/tv-volhold.held
 fi
 
-# The Live TV button helper (tv-keys.sh): restarted here so a changed LIVE_TV_BUTTON_INPUT takes effect; switched
-# off, stopped. Found by its pid file: matching command lines (pgrep -f) also finds any shell whose command merely
+# The input helper (tv-keys.sh: Live TV button, auto switch): restarted here so a changed LIVE_TV_BUTTON_INPUT or
+# AUTO_SWITCH_INPUT takes effect; both off, stopped. Found by its pid file: matching command lines (pgrep -f) also finds any shell whose command merely
 # mentions the script, such as the adb shell deploying it, and would stop that one (and this script with it).
 kh=$(cat /data/local/tmp/tv-keys.pid 2>/dev/null)
 if [ -n "$kh" ] && grep -q tv-keys /proc/"$kh"/cmdline 2>/dev/null; then
-    kill "$kh" 2>/dev/null; pkill -P "$kh" 2>/dev/null   # it acts on the signal once its getevent ends: end that too
+    kill "$kh" 2>/dev/null; pkill -P "$kh" 2>/dev/null   # it stops its listeners; an older copy needs its children ended
 else
     kh=
 fi
 rm -f /data/local/tmp/tv-keys.pid
-if [ -n "$LIVE_TV_BUTTON_INPUT" ] && [ -f /data/local/tmp/tv-keys.sh ]; then
+if [ -n "$LIVE_TV_BUTTON_INPUT$AUTO_SWITCH_INPUT" ] && [ -f /data/local/tmp/tv-keys.sh ]; then
     setsid nohup sh /data/local/tmp/tv-keys.sh </dev/null >/dev/null 2>&1 &
-    [ -z "$kh" ] && log "started Live TV button helper ($LIVE_TV_BUTTON_INPUT)"
+    [ -z "$kh" ] && log "started input helper (Live TV button: ${LIVE_TV_BUTTON_INPUT:-off}; auto switch: ${AUTO_SWITCH_INPUT:-off})"
 elif [ -n "$kh" ]; then
-    log "stopped Live TV button helper"
+    log "stopped input helper"
 fi
 
 # Hide helper apps' permanent notifications (after Expert Mode starts, since Key Mapper posts when it connects).
