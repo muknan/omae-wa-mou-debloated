@@ -120,9 +120,9 @@ if [ -n "$AUTO_SWITCH_INPUT" ]; then
                                 log "$name turned on; left the screen as it was ($(top) in front)"
                             fi ;;
                         *"Hotplug event:[port:$aport, connected:false]"*)
-                            # A device that drops its 5 V for a moment (some do while waking) isn't off: still off 2 s later?
-                            sleep 2
-                            dumpsys hdmi_control 2>/dev/null | grep "hotplug port=$aport " | tail -n 1 | grep -q 'connected=false' || continue
+                            # At once: the screen already says "no signal". (Waiting 2 s to rule out a 5 V blip added 2 s
+                            # of that, 2026-11-20; a blip comes back as "connected:true" with the home screen in front,
+                            # which switches straight back.)
                             # On it = Live TV in front, showing this input (Xiaomi says which in TvSourcesStatus: "hdmi1|SDR").
                             on=; [ "$(top)" = "$alapp" ] && on=1
                             case "$(settings get global TvSourcesStatus 2>/dev/null)" in hdmi"$aport"\|*|null|'') ;; *) on= ;; esac
